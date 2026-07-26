@@ -1,0 +1,40 @@
+{
+  "name": "@adrouter/agent",
+  "version": "0.1.0-beta.1",
+  "description": "Verified installer and launcher for the AdRouter Agent macOS application.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "adrouter-agent": "bin/adrouter-agent.mjs"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "LICENSE",
+    "README.md",
+    "release-manifest.json"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64",
+    "x64"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adrouter/adrouterAgent.git",
+    "directory": "packages/agent-launcher"
+  },
+  "bugs": {
+    "url": "https://github.com/adrouter/adrouterAgent/issues"
+  },
+  "homepage": "https://github.com/adrouter/adrouterAgent#readme",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

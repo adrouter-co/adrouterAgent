@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">AdRouter Agent</title>
+  <defs>
+    <linearGradient id="g" x1="58" x2="454" y1="55" y2="467" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5b8cff"/>
+      <stop offset="1" stop-color="#14b8a6"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="124" fill="#0f172a"/>
+  <path d="M256 82 421 177v158L256 430 91 335V177L256 82Z" fill="url(#g)"/>
+  <path d="m196 324 60-151 60 151-60-36-60 36Z" fill="#f8fafc"/>
+  <path d="M256 173v115" stroke="#0f172a" stroke-linecap="round" stroke-width="22"/>
+  <circle cx="256" cy="153" r="15" fill="#f8fafc"/>
+</svg>

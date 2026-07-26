@@ -1,0 +1,1613 @@
+import { DiffEditor } from '@monaco-editor/react';
+import type { JSX, ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import type {
+  ApplicationInfo,
+  Approval,
+  DiffFile,
+  JournalEvent,
+  Project,
+  RouterDiagnostics,
+  RouterModelDescriptor,
+  Sponsor,
+  ThinkingLevel,
+  Thread,
+} from '../shared/contracts';
+import { buildTimeline, type SponsorRound, type TimelineItem } from './timeline';
+
+type Detail = Awaited<ReturnType<Window['adrouter']['threads']['get']>>;
+type Drawer = 'history' | 'changes' | 'settings' | null;
+
+const isTerminal = (status: Thread['status']): boolean => status === 'idle' || status === 'failed';
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : 'Something went wrong.';
+
+const asSponsor = (event?: JournalEvent): Sponsor | undefined => {
+  if (event?.type !== 'sponsor.update') {
+    return undefined;
+  }
+  const payload = event.payload;
+  if (
+    (payload.tier === 'A' ||
+      payload.tier === 'B' ||
+      payload.tier === 'C' ||
+      payload.tier === 'NONE') &&
+    typeof payload.subsidyPercent === 'number'
+  ) {
+    return payload as Sponsor;
+  }
+  return undefined;
+};
+
+const latestBottomSponsor = (
+  events: readonly JournalEvent[]
+): { eventId: string; sponsor: Sponsor } | undefined => {
+  let current: { eventId: string; sponsor: Sponsor } | undefined;
+  for (const event of events) {
+    if (event.type === 'message.user') current = undefined;
+    if (event.type === 'sponsor.update') {
+      const sponsor = asSponsor(event);
+      current =
+        sponsor?.tier === 'B' || sponsor?.tier === 'C' ? { eventId: event.id, sponsor } : undefined;
+    }
+  }
+  return current;
+};
+
+const formatCurrency = (amount: number): string =>
+  new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 4,
+  }).format(amount);
+
+const normalizeModels = (value: unknown): RouterModelDescriptor[] =>
+  Array.isArray(value)
+    ? value.flatMap((candidate): RouterModelDescriptor[] => {
+        if (typeof candidate === 'string') {
+          return [
+            {
+              id: candidate,
+              provider: 'router',
+              displayName: candidate,
+              providerLabel: 'AdRouter',
+              thinkingLevels: ['none', 'medium', 'high'],
+              defaultThinkingLevel: 'medium',
+              configured: true,
+            },
+          ];
+        }
+        return candidate && typeof candidate === 'object'
+          ? [candidate as RouterModelDescriptor]
+          : [];
+      })
+    : [];
+
+export function App(): JSX.Element {
+  const [configured, setConfigured] = useState<boolean | undefined>();
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>();
+  const [threads, setThreads] = useState<Thread[]>([]);
+  const [selectedThreadId, setSelectedThreadId] = useState<string>();
+  const [detail, setDetail] = useState<Detail>();
+  const [drawer, setDrawer] = useState<Drawer>(null);
+  const [renderedDrawer, setRenderedDrawer] = useState<Exclude<Drawer, null>>();
+  const [drawerExpanded, setDrawerExpanded] = useState(false);
+  const [diffs, setDiffs] = useState<DiffFile[]>([]);
+  const [selectedDiffPath, setSelectedDiffPath] = useState<string>();
+  const [composer, setComposer] = useState('');
+  const [model, setModel] = useState('auto');
+  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('medium');
+  const [models, setModels] = useState<RouterModelDescriptor[]>([]);
+  const [routerStatus, setRouterStatus] = useState<RouterDiagnostics>();
+  const [serverUrl, setServerUrl] = useState('');
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [deletingThread, setDeletingThread] = useState<Thread>();
+  const [dismissedBottomSponsors, setDismissedBottomSponsors] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [instructionDraft, setInstructionDraft] = useState('');
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const [applicationInfo, setApplicationInfo] = useState<ApplicationInfo>();
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const followTimeline = useRef(true);
+
+  const selectedProject = projects.find((project) => project.id === selectedProjectId);
+  const selectedThread = threads.find((thread) => thread.id === selectedThreadId) ?? detail?.thread;
+  const isRunning = selectedThread ? !isTerminal(selectedThread.status) : false;
+  const runningTurnId = isRunning ? detail?.turns.at(-1)?.id : undefined;
+  const timeline = useMemo(
+    () => buildTimeline(detail?.events ?? [], runningTurnId),
+    [detail?.events, runningTurnId]
+  );
+  const lastTimelineItemId = timeline.at(-1)?.id;
+  const sponsor = useMemo(
+    () =>
+      asSponsor(
+        [...(detail?.events ?? [])].reverse().find((event) => event.type === 'sponsor.update')
+      ),
+    [detail?.events]
+  );
+  const pendingApproval = detail?.approvals.find((approval) => approval.decision === null);
+  const selectedDiff = diffs.find((diff) => diff.path === selectedDiffPath) ?? diffs[0];
+  const bottomSponsor = useMemo(() => latestBottomSponsor(detail?.events ?? []), [detail?.events]);
+  const visibleBottomSponsor =
+    bottomSponsor && !dismissedBottomSponsors.has(bottomSponsor.eventId)
+      ? bottomSponsor
+      : undefined;
+  const selectableModels = useMemo(() => {
+    if (routerStatus?.mode === 'live' && routerStatus.health && routerStatus.authenticated) {
+      return models.filter((candidate) => candidate.configured);
+    }
+    return models;
+  }, [models, routerStatus]);
+  const selectedModel = selectableModels.find((candidate) => candidate.id === model);
+
+  const refreshRouterStatus = useCallback(async (): Promise<void> => {
+    if (typeof window.adrouter.configuration.status !== 'function') return;
+    setStatusBusy(true);
+    try {
+      const status = await window.adrouter.configuration.status();
+      if (!status) return;
+      setRouterStatus(status);
+      if (status.models.length > 0) setModels(normalizeModels(status.models));
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setStatusBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const element = timelineRef.current;
+    if (lastTimelineItemId && element && followTimeline.current) {
+      element.scrollTop = element.scrollHeight;
+    }
+  }, [lastTimelineItemId]);
+
+  useEffect(() => {
+    if (!selectedThreadId) return;
+    followTimeline.current = true;
+    requestAnimationFrame(() => {
+      const element = timelineRef.current;
+      if (element) element.scrollTop = element.scrollHeight;
+    });
+  }, [selectedThreadId]);
+
+  useEffect(() => {
+    setInstructionDraft(selectedProject?.instructions ?? '');
+  }, [selectedProject?.instructions]);
+
+  const refreshProjects = useCallback(async (): Promise<void> => {
+    const next = await window.adrouter.projects.list();
+    setProjects(next);
+    setSelectedProjectId((current) => current ?? next[0]?.id);
+  }, []);
+
+  const refreshThreads = useCallback(async (projectId?: string): Promise<void> => {
+    if (!projectId) {
+      setThreads([]);
+      return;
+    }
+    const next = await window.adrouter.threads.list({ projectId });
+    setThreads(next);
+    setSelectedThreadId((current) => current ?? next[0]?.id);
+  }, []);
+
+  const refreshDetail = useCallback(async (threadId?: string): Promise<void> => {
+    if (!threadId) {
+      setDetail(undefined);
+      return;
+    }
+    const next = await window.adrouter.threads.get({ id: threadId });
+    setDetail(next);
+  }, []);
+
+  const refreshDiffs = useCallback(async (threadId?: string): Promise<void> => {
+    if (!threadId) {
+      setDiffs([]);
+      return;
+    }
+    const next = await window.adrouter.review.getDiff({ threadId });
+    setDiffs(next);
+    setSelectedDiffPath((current) => current ?? next[0]?.path);
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        if (typeof window.adrouter.app.getInfo === 'function') {
+          const info = await window.adrouter.app.getInfo();
+          if (info) setApplicationInfo(info);
+        }
+        const configuration = await window.adrouter.configuration.get();
+        setConfigured(configuration.configured);
+        setServerUrl(configuration.serverUrl);
+        const configuredModels = normalizeModels(configuration.models);
+        setModels(configuredModels);
+        setModel(configuration.selectedModel ?? configuredModels[0]?.id ?? 'auto');
+        setThinkingLevel(configuration.selectedThinkingLevel ?? 'medium');
+        if (configuration.configured) void refreshRouterStatus();
+        await refreshProjects();
+      } catch (caught) {
+        setError(errorMessage(caught));
+        setConfigured(false);
+      }
+    })();
+  }, [refreshProjects, refreshRouterStatus]);
+
+  useEffect(() => {
+    if (drawer !== 'settings' || !configured) return undefined;
+    void refreshRouterStatus();
+    const interval = window.setInterval(() => void refreshRouterStatus(), 15_000);
+    return () => window.clearInterval(interval);
+  }, [configured, drawer, refreshRouterStatus]);
+
+  useEffect(() => {
+    if (!drawer) {
+      setDrawerExpanded(false);
+      return undefined;
+    }
+    setRenderedDrawer(drawer);
+    const frame = requestAnimationFrame(() => setDrawerExpanded(true));
+    return () => cancelAnimationFrame(frame);
+  }, [drawer]);
+
+  useEffect(() => {
+    if (selectableModels.length === 0) return;
+    const current = selectableModels.find((candidate) => candidate.id === model);
+    if (!current) {
+      const fallback = selectableModels[0];
+      if (!fallback) return;
+      setModel(fallback.id);
+      setThinkingLevel(fallback.defaultThinkingLevel);
+      void Promise.resolve(
+        window.adrouter.configuration.updatePreferences({
+          model: fallback.id,
+          thinkingLevel: fallback.defaultThinkingLevel,
+        })
+      ).catch((caught) => setError(errorMessage(caught)));
+      return;
+    }
+    if (!current.thinkingLevels.includes(thinkingLevel)) {
+      setThinkingLevel(current.defaultThinkingLevel);
+      void Promise.resolve(
+        window.adrouter.configuration.updatePreferences({
+          model: current.id,
+          thinkingLevel: current.defaultThinkingLevel,
+        })
+      ).catch((caught) => setError(errorMessage(caught)));
+    }
+  }, [model, selectableModels, thinkingLevel]);
+
+  useEffect(() => {
+    void refreshThreads(selectedProjectId);
+    setSelectedThreadId(undefined);
+    setDetail(undefined);
+  }, [selectedProjectId, refreshThreads]);
+
+  useEffect(() => {
+    void refreshDetail(selectedThreadId);
+    void refreshDiffs(selectedThreadId);
+    if (!selectedThreadId) {
+      return undefined;
+    }
+    let subscriptionId: string | undefined;
+    let live = true;
+    void window.adrouter.events
+      .subscribe({ threadId: selectedThreadId }, (event) => {
+        if (!live) {
+          return;
+        }
+        setDetail((current) => {
+          if (!current || current.thread.id !== selectedThreadId) {
+            return current;
+          }
+          const events = [...current.events, event].sort(
+            (left, right) => left.sequence - right.sequence
+          );
+          return { ...current, events };
+        });
+        if (
+          event.type === 'file.change' ||
+          event.type === 'diff.change' ||
+          event.type === 'turn.lifecycle'
+        ) {
+          void refreshDiffs(selectedThreadId);
+          void refreshThreads(selectedProjectId);
+        }
+        if (event.type === 'approval.request' || event.type === 'approval.resolved') {
+          void refreshDetail(selectedThreadId);
+        }
+      })
+      .then((id) => {
+        if (!live) {
+          void window.adrouter.events.unsubscribe({ subscriptionId: id });
+        } else {
+          subscriptionId = id;
+        }
+      })
+      .catch((caught) => setError(errorMessage(caught)));
+    return () => {
+      live = false;
+      if (subscriptionId) {
+        void window.adrouter.events.unsubscribe({ subscriptionId });
+      }
+    };
+  }, [selectedThreadId, selectedProjectId, refreshDetail, refreshDiffs, refreshThreads]);
+
+  if (configured === undefined) {
+    return <main className="loading-shell">Loading AdRouter Agent…</main>;
+  }
+  if (!configured) {
+    return (
+      <Onboarding
+        onConfigured={async () => {
+          setConfigured(true);
+          const configuration = await window.adrouter.configuration.get();
+          setServerUrl(configuration.serverUrl);
+          const configuredModels = normalizeModels(configuration.models);
+          setModels(configuredModels);
+          setModel(configuration.selectedModel ?? configuredModels[0]?.id ?? 'auto');
+          setThinkingLevel(configuration.selectedThinkingLevel ?? 'medium');
+          void refreshRouterStatus();
+          await refreshProjects();
+        }}
+        onModels={(nextModels) => {
+          setModels(nextModels);
+          const first = nextModels[0];
+          if (first) {
+            setModel(first.id);
+            setThinkingLevel(first.defaultThinkingLevel);
+          }
+        }}
+      />
+    );
+  }
+
+  const openProject = async (): Promise<void> => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      const project = await window.adrouter.projects.open({});
+      await refreshProjects();
+      setSelectedProjectId(project.id);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveInstructions = async (): Promise<void> => {
+    if (!selectedProject) {
+      return;
+    }
+    try {
+      const updated = await window.adrouter.projects.update({
+        id: selectedProject.id,
+        instructions: instructionDraft,
+      });
+      setProjects((current) =>
+        current.map((project) => (project.id === updated.id ? updated : project))
+      );
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  };
+
+  const send = async (): Promise<void> => {
+    if (!composer.trim() || !selectedProject || !selectedModel) {
+      return;
+    }
+    const text = composer.trim();
+    if (bottomSponsor) {
+      setDismissedBottomSponsors((current) => new Set(current).add(bottomSponsor.eventId));
+    }
+    setBusy(true);
+    setError(undefined);
+    try {
+      let threadId = selectedThreadId;
+      if (!threadId) {
+        const thread = await window.adrouter.threads.create({
+          projectId: selectedProject.id,
+          title: text.slice(0, 80),
+          model,
+          thinkingLevel,
+        });
+        threadId = thread.id;
+        await refreshThreads(selectedProject.id);
+        setSelectedThreadId(threadId);
+      }
+      await window.adrouter.turns.start({
+        threadId,
+        input: text,
+        model,
+        thinkingLevel,
+        runtimeMode: 'auto',
+      });
+      await refreshDetail(threadId);
+      setComposer('');
+      await refreshThreads(selectedProject.id);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const updateModelPreferences = async (
+    nextModel: string,
+    nextThinkingLevel: ThinkingLevel
+  ): Promise<void> => {
+    setModel(nextModel);
+    setThinkingLevel(nextThinkingLevel);
+    try {
+      await window.adrouter.configuration.updatePreferences({
+        model: nextModel,
+        thinkingLevel: nextThinkingLevel,
+      });
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  };
+
+  const deleteThread = async (): Promise<void> => {
+    if (!deletingThread) return;
+    try {
+      await window.adrouter.threads.delete({ id: deletingThread.id });
+      if (selectedThreadId === deletingThread.id) {
+        setSelectedThreadId(undefined);
+        setDetail(undefined);
+        setDiffs([]);
+      }
+      setDeletingThread(undefined);
+      if (selectedProjectId) {
+        const next = await window.adrouter.threads.list({ projectId: selectedProjectId });
+        setThreads(next);
+      }
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  };
+
+  const resolveApproval = async (
+    approval: Approval,
+    decision: 'allow-once' | 'deny'
+  ): Promise<void> => {
+    try {
+      await window.adrouter.approvals.resolve({ approvalId: approval.id, decision });
+      await refreshDetail(selectedThreadId);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  };
+
+  return (
+    <main className="app-shell">
+      <header className="top-bar">
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true">
+            ◆
+          </span>
+          <span>AdRouter Agent</span>
+        </div>
+        <nav aria-label="Workspace controls">
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => void openProject()}
+            disabled={busy}
+          >
+            Choose folder
+          </button>
+          <select
+            aria-label="Current project"
+            value={selectedProjectId ?? ''}
+            onChange={(event) => setSelectedProjectId(event.target.value || undefined)}
+          >
+            <option value="">No project</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.displayName}
+              </option>
+            ))}
+          </select>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={!selectedProject}
+            onClick={() => {
+              setSelectedThreadId(undefined);
+              setDrawer(null);
+            }}
+          >
+            New Chat
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={!selectedProject}
+            onClick={() => setDrawer(drawer === 'history' ? null : 'history')}
+          >
+            History
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={!selectedThreadId}
+            onClick={() => setDrawer(drawer === 'changes' ? null : 'changes')}
+          >
+            Changes{diffs.length ? ` (${diffs.length})` : ''}
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => setDrawer(drawer === 'settings' ? null : 'settings')}
+          >
+            Settings
+          </button>
+        </nav>
+      </header>
+
+      <section className="chat-pane" aria-label="Agent timeline">
+        <header className="workspace-header">
+          <div>
+            <p className="eyebrow">{selectedProject?.displayName ?? 'Choose a project folder'}</p>
+            <h1>{selectedThread?.title ?? 'What should we build?'}</h1>
+          </div>
+          {selectedThread && (
+            <span className={`run-status ${selectedThread.status}`}>
+              {selectedThread.status.replace('_', ' ')}
+            </span>
+          )}
+        </header>
+        <div className="conversation-stage">
+          <div
+            ref={timelineRef}
+            className="timeline"
+            role="log"
+            aria-label="Agent activity timeline"
+            onScroll={(event) => {
+              const element = event.currentTarget;
+              followTimeline.current =
+                element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+            }}
+          >
+            {error && (
+              <div className="error-banner" role="alert">
+                {error}
+              </div>
+            )}
+            {!selectedThread && (
+              <EmptyTimeline
+                hasProject={Boolean(selectedProject)}
+                onSuggestion={(suggestion) => {
+                  setComposer(suggestion);
+                  requestAnimationFrame(() => document.getElementById('task-composer')?.focus());
+                }}
+              />
+            )}
+            {timeline.map((item) => (
+              <TimelineEntry item={item} key={item.id} />
+            ))}
+          </div>
+          <div className="composer-dock">
+            <div className="composer-stack">
+              <ComposerPanel shown={Boolean(visibleBottomSponsor)} kind="sponsor">
+                {visibleBottomSponsor && (
+                  <SponsorSurface
+                    sponsor={visibleBottomSponsor.sponsor}
+                    location="banner-bottom"
+                    onHide={() =>
+                      setDismissedBottomSponsors((current) =>
+                        new Set(current).add(visibleBottomSponsor.eventId)
+                      )
+                    }
+                  />
+                )}
+              </ComposerPanel>
+              <ComposerPanel shown={Boolean(pendingApproval)} kind="approval">
+                {pendingApproval && (
+                  <ApprovalCard approval={pendingApproval} onResolve={resolveApproval} />
+                )}
+              </ComposerPanel>
+              <Composer
+                value={composer}
+                disabled={!selectedProject || !selectedModel || busy || isRunning}
+                isRunning={isRunning}
+                models={selectableModels}
+                model={model}
+                thinkingLevel={thinkingLevel}
+                onChange={setComposer}
+                onModelChange={(nextModel) => {
+                  const descriptor = selectableModels.find(
+                    (candidate) => candidate.id === nextModel
+                  );
+                  if (descriptor) {
+                    void updateModelPreferences(descriptor.id, descriptor.defaultThinkingLevel);
+                  }
+                }}
+                onThinkingLevelChange={(level) => void updateModelPreferences(model, level)}
+                onSend={() => void send()}
+                onStop={async () => {
+                  if (selectedThreadId) {
+                    await window.adrouter.turns.stop({ threadId: selectedThreadId });
+                  }
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {renderedDrawer && (
+        <aside
+          className="drawer"
+          aria-label={`${renderedDrawer} drawer`}
+          aria-hidden={!drawerExpanded}
+          data-state={drawerExpanded ? 'open' : 'closed'}
+          onTransitionEnd={(event) => {
+            if (
+              event.target === event.currentTarget &&
+              event.propertyName === 'transform' &&
+              !drawer &&
+              !drawerExpanded
+            ) {
+              setRenderedDrawer(undefined);
+            }
+          }}
+        >
+          <div className="drawer-header">
+            <h2>
+              {renderedDrawer[0]?.toUpperCase()}
+              {renderedDrawer.slice(1)}
+            </h2>
+            <button className="text-button" type="button" onClick={() => setDrawer(null)}>
+              Close
+            </button>
+          </div>
+          {renderedDrawer === 'history' && (
+            <div className="thread-list">
+              {threads.map((thread) => (
+                <div
+                  className={`thread-row ${thread.id === selectedThreadId ? 'selected' : ''}`}
+                  key={thread.id}
+                >
+                  <button
+                    className="thread-select"
+                    type="button"
+                    onClick={() => {
+                      setSelectedThreadId(thread.id);
+                      setDrawer(null);
+                    }}
+                  >
+                    <span className={`status-dot ${thread.status}`} aria-hidden="true" />
+                    <span>{thread.title}</span>
+                  </button>
+                  <button
+                    className="thread-delete"
+                    type="button"
+                    aria-label={`Delete ${thread.title}`}
+                    disabled={thread.status === 'running' || thread.status === 'awaiting_approval'}
+                    onClick={() => setDeletingThread(thread)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {renderedDrawer === 'changes' && (
+            <ChangesPanel diffs={diffs} selected={selectedDiff} onSelect={setSelectedDiffPath} />
+          )}
+          {renderedDrawer === 'settings' && (
+            <>
+              <AgentStatusPanel
+                status={routerStatus}
+                busy={statusBusy}
+                serverUrl={serverUrl}
+                agentStatus={selectedThread?.status ?? 'ready'}
+                onRefresh={() => void refreshRouterStatus()}
+              />
+              <section className="project-controls" aria-label="Project instructions">
+                <label htmlFor="project-instructions">Project instructions</label>
+                <textarea
+                  id="project-instructions"
+                  value={instructionDraft}
+                  onChange={(event) => setInstructionDraft(event.target.value)}
+                  disabled={!selectedProject}
+                />
+                <button
+                  className="primary-button"
+                  type="button"
+                  disabled={!selectedProject || instructionDraft === selectedProject.instructions}
+                  onClick={() => void saveInstructions()}
+                >
+                  Save instructions
+                </button>
+                {selectedProject?.repositoryInstructionFiles.length ? (
+                  <small>
+                    Repository files loaded: {selectedProject.repositoryInstructionFiles.join(', ')}
+                  </small>
+                ) : (
+                  <small>No repository instruction files loaded.</small>
+                )}
+              </section>
+              <EconomicsPanel events={detail?.events ?? []} sponsor={sponsor} />
+              <AboutPanel info={applicationInfo} />
+            </>
+          )}
+        </aside>
+      )}
+      {deletingThread && (
+        <div className="modal-backdrop">
+          <section
+            className="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-chat-title"
+          >
+            <h2 id="delete-chat-title">Delete “{deletingThread.title}”?</h2>
+            <p>
+              This permanently removes its messages, approvals, settlements, and saved change
+              history. Project files are not affected.
+            </p>
+            <div className="approval-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setDeletingThread(undefined)}
+              >
+                Cancel
+              </button>
+              <button className="deny-button" type="button" onClick={() => void deleteThread()}>
+                Delete permanently
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+    </main>
+  );
+}
+
+function AboutPanel({ info }: { info?: ApplicationInfo }): JSX.Element {
+  return (
+    <section className="detail-panel about-panel" aria-label="About AdRouter Agent">
+      <div className="detail-heading">
+        <div>
+          <p className="eyebrow">Public beta</p>
+          <h2>About AdRouter Agent</h2>
+        </div>
+      </div>
+      <dl className="status-grid">
+        <div>
+          <dt>Version</dt>
+          <dd>{info?.version ?? 'Loading…'}</dd>
+        </div>
+        <div>
+          <dt>Platform</dt>
+          <dd>{info ? `${info.platform} · ${info.architecture}` : 'Loading…'}</dd>
+        </div>
+      </dl>
+      <p className="empty-copy">
+        Local project data stays on this Mac. Agent requests are sent only to your configured
+        AdRouter server. Updates are installed manually.
+      </p>
+    </section>
+  );
+}
+
+function Onboarding({
+  onConfigured,
+  onModels,
+}: {
+  onConfigured: () => Promise<void>;
+  onModels: (models: RouterModelDescriptor[]) => void;
+}): JSX.Element {
+  const [serverUrl, setServerUrl] = useState('http://localhost:8787');
+  const [token, setToken] = useState('');
+  const [sponsoredCompute, setSponsoredCompute] = useState(true);
+  const [diagnostics, setDiagnostics] = useState<RouterDiagnostics>();
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+
+  const test = async (): Promise<void> => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      const result = await window.adrouter.configuration.testRouter({ serverUrl, token });
+      setDiagnostics(result);
+      onModels(result.models);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const save = async (): Promise<void> => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      let verified = diagnostics;
+      if (!verified?.health || !verified.authenticated) {
+        verified = await window.adrouter.configuration.testRouter({ serverUrl, token });
+        setDiagnostics(verified);
+        onModels(verified.models);
+      }
+      if (!verified.health || !verified.authenticated) {
+        return;
+      }
+      await window.adrouter.configuration.save({ serverUrl, token, sponsoredCompute });
+      await onConfigured();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <main className="onboarding-shell">
+      <section className="onboarding-card" aria-labelledby="onboarding-title">
+        <span className="brand-mark large" aria-hidden="true">
+          ◆
+        </span>
+        <p className="eyebrow">Local-first desktop coding agent</p>
+        <h1 id="onboarding-title">Connect AdRouter</h1>
+        <p>Your token is encrypted with macOS Keychain and is never available to the renderer.</p>
+        <label htmlFor="router-url">AdRouter server URL</label>
+        <input
+          id="router-url"
+          value={serverUrl}
+          onChange={(event) => setServerUrl(event.target.value)}
+          autoComplete="url"
+        />
+        <label htmlFor="router-token">Access token</label>
+        <input
+          id="router-token"
+          value={token}
+          onChange={(event) => setToken(event.target.value)}
+          type="password"
+          autoComplete="off"
+        />
+        <label className="toggle-row" htmlFor="sponsored-compute">
+          <input
+            id="sponsored-compute"
+            checked={sponsoredCompute}
+            onChange={(event) => setSponsoredCompute(event.target.checked)}
+            type="checkbox"
+          />
+          <span>Enable sponsored compute</span>
+        </label>
+        {error && (
+          <div className="error-banner" role="alert">
+            {error}
+          </div>
+        )}
+        {diagnostics && (
+          <div
+            className={`diagnostics ${diagnostics.health && diagnostics.authenticated ? 'success' : 'failed'}`}
+          >
+            <strong>
+              {diagnostics.health && diagnostics.authenticated
+                ? 'Connection verified'
+                : 'Connection failed'}
+            </strong>
+            <span>{diagnostics.error ?? `${diagnostics.models.length} model(s) discovered`}</span>
+          </div>
+        )}
+        <div className="onboarding-actions">
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => void test()}
+            disabled={busy || !serverUrl || !token}
+          >
+            Test connection
+          </button>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => void save()}
+            disabled={busy || !serverUrl || !token}
+          >
+            Save securely
+          </button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function TimelineEntry({ item }: { item: TimelineItem }): JSX.Element {
+  const [sponsorHidden, setSponsorHidden] = useState(false);
+  if (item.kind === 'sponsor') {
+    return <SponsorSurface sponsor={item.sponsor} location="banner-top" />;
+  }
+  if (item.kind === 'assistant') {
+    const finalRound = item.rounds?.at(-1);
+    const sponsor = finalRound?.sponsor;
+    return (
+      <article className="timeline-item assistant-message">
+        <div className="message-label">AdRouter</div>
+        <div className="assistant-bubble">
+          <ReactMarkdown>{item.text || '…'}</ReactMarkdown>
+          {sponsor?.tier === 'A' &&
+            (sponsorHidden ? (
+              <button
+                className="show-sponsored"
+                type="button"
+                onClick={() => setSponsorHidden(false)}
+              >
+                Show sponsored suggestion
+              </button>
+            ) : (
+              <SponsorSurface
+                sponsor={sponsor}
+                location="inline"
+                onHide={() => setSponsorHidden(true)}
+              />
+            ))}
+          {sponsor?.tier === 'NONE' && (
+            <div className="privacy-notice">
+              <strong>Privacy guardrail</strong>
+              <span>{sponsor.reason || sponsor.headline || 'No sponsored content was shown.'}</span>
+            </div>
+          )}
+          {item.rounds && item.rounds.length > 0 && <SponsorshipSummary rounds={item.rounds} />}
+        </div>
+        {sponsor?.tier === 'B' &&
+          (sponsorHidden ? (
+            <button
+              className="show-sponsored"
+              type="button"
+              onClick={() => setSponsorHidden(false)}
+            >
+              Show sponsored suggestion
+            </button>
+          ) : (
+            <SponsorSurface
+              sponsor={sponsor}
+              location="card"
+              onHide={() => setSponsorHidden(true)}
+            />
+          ))}
+      </article>
+    );
+  }
+  if (item.kind === 'user') {
+    return (
+      <article className="timeline-item user-message">
+        <div className="message-label">You</div>
+        <p>{item.text}</p>
+      </article>
+    );
+  }
+  if (item.kind === 'thinking') {
+    if (item.active) {
+      return (
+        <section className="timeline-item thinking-message" aria-label="Thinking">
+          <div className="thinking-label">Thinking</div>
+          <ReactMarkdown>{item.text || '…'}</ReactMarkdown>
+        </section>
+      );
+    }
+    return (
+      <details className="timeline-item thinking-message">
+        <summary>Thinking</summary>
+        <div className="thinking-content">
+          <ReactMarkdown>{item.text}</ReactMarkdown>
+        </div>
+      </details>
+    );
+  }
+  if (item.kind === 'read') {
+    const failed = item.reads.filter((read) => read.status === 'failed').length;
+    return (
+      <details className="timeline-item tool-message read-group">
+        <summary>
+          Read × {item.reads.length}
+          {failed > 0 ? ` · ${failed} failed` : ''}
+        </summary>
+        <ul>
+          {item.reads.map((read) => (
+            <li key={read.id}>
+              <span>{read.path}</span>
+              <small>{read.status}</small>
+            </li>
+          ))}
+        </ul>
+      </details>
+    );
+  }
+  if (item.kind === 'tool') {
+    return (
+      <details className="timeline-item tool-message">
+        <summary>
+          {item.title} <small>{item.status}</small>
+        </summary>
+        <pre>{item.text}</pre>
+      </details>
+    );
+  }
+  return (
+    <article className={`timeline-item ${item.kind}-message`}>
+      <strong>{item.title}</strong>
+      <p>{item.text}</p>
+    </article>
+  );
+}
+
+function SponsorshipSummary({ rounds }: { rounds: SponsorRound[] }): JSX.Element {
+  const totals = rounds.reduce(
+    (current, round) => ({
+      cost: current.cost + round.cost,
+      subsidy: current.subsidy + round.subsidy,
+      paid: current.paid + round.paid,
+    }),
+    { cost: 0, subsidy: 0, paid: 0 }
+  );
+  return (
+    <details className="sponsorship-summary">
+      <summary>
+        Sponsored compute · {rounds.length} {rounds.length === 1 ? 'round' : 'rounds'} · saved{' '}
+        {formatCurrency(totals.subsidy)}
+      </summary>
+      <div className="sponsorship-totals">
+        <span>Cost {formatCurrency(totals.cost)}</span>
+        <span>Paid {formatCurrency(totals.paid)}</span>
+      </div>
+      <ul>
+        {rounds.map((round) => (
+          <li key={round.routerTurnId}>
+            <span>
+              Tier {round.sponsor.tier} · {round.sponsor.sponsorName ?? 'No sponsor'}
+            </span>
+            <strong>{formatCurrency(round.subsidy)}</strong>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+const starterSuggestions = [
+  'Explain this codebase and its architecture',
+  'Fix a bug and run the relevant tests',
+  'Review the current changes',
+];
+
+function EmptyTimeline({
+  hasProject,
+  onSuggestion,
+}: {
+  hasProject: boolean;
+  onSuggestion: (suggestion: string) => void;
+}): JSX.Element {
+  return (
+    <div className="empty-timeline">
+      <div className="welcome-orb" aria-hidden="true">
+        ◆
+      </div>
+      <p className="eyebrow">Local-first coding agent</p>
+      <h2>
+        {hasProject ? (
+          <>
+            What should we <span>build?</span>
+          </>
+        ) : (
+          'Open a project to begin'
+        )}
+      </h2>
+      <p className="welcome-copy">
+        {hasProject
+          ? 'Ask AdRouter Agent to inspect, explain, change, or test this project. It reads safely and asks before running commands or editing files.'
+          : 'Choose a local project folder from the toolbar. Your files remain on this Mac, and every command or edit requires your approval.'}
+      </p>
+      {hasProject ? (
+        <div className="suggestion-grid">
+          {starterSuggestions.map((suggestion) => (
+            <button type="button" key={suggestion} onClick={() => onSuggestion(suggestion)}>
+              <span>{suggestion}</span>
+              <span aria-hidden="true">→</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="welcome-steps">
+          <span>1. Choose a folder</span>
+          <span>2. Describe the task</span>
+          <span>3. Review each action</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ComposerPanel({
+  shown,
+  kind,
+  children,
+}: {
+  shown: boolean;
+  kind: 'sponsor' | 'approval';
+  children: ReactNode;
+}): JSX.Element | null {
+  const content = useRef<ReactNode>(children);
+  const [mounted, setMounted] = useState(shown);
+  const [expanded, setExpanded] = useState(false);
+
+  if (shown) content.current = children;
+
+  useEffect(() => {
+    if (!shown) {
+      setExpanded(false);
+      return undefined;
+    }
+    setMounted(true);
+    const frame = requestAnimationFrame(() => setExpanded(true));
+    return () => cancelAnimationFrame(frame);
+  }, [shown]);
+
+  if (!mounted) return null;
+  return (
+    <div
+      className={`composer-panel composer-panel-${kind}`}
+      data-state={expanded ? 'open' : 'closed'}
+      onTransitionEnd={(event) => {
+        if (
+          event.target === event.currentTarget &&
+          event.propertyName === 'grid-template-rows' &&
+          !shown &&
+          !expanded
+        ) {
+          setMounted(false);
+        }
+      }}
+    >
+      <div className="composer-panel-clip">{content.current}</div>
+    </div>
+  );
+}
+
+function Composer({
+  value,
+  disabled,
+  isRunning,
+  models,
+  model,
+  thinkingLevel,
+  onChange,
+  onModelChange,
+  onThinkingLevelChange,
+  onSend,
+  onStop,
+}: {
+  value: string;
+  disabled: boolean;
+  isRunning: boolean;
+  models: RouterModelDescriptor[];
+  model: string;
+  thinkingLevel: ThinkingLevel;
+  onChange: (value: string) => void;
+  onModelChange: (model: string) => void;
+  onThinkingLevelChange: (level: ThinkingLevel) => void;
+  onSend: () => void;
+  onStop: () => Promise<void>;
+}): JSX.Element {
+  return (
+    <form
+      className="composer"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSend();
+      }}
+    >
+      <label className="sr-only" htmlFor="task-composer">
+        Task message
+      </label>
+      <textarea
+        id="task-composer"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            if (!disabled && value.trim()) onSend();
+          }
+        }}
+        disabled={disabled}
+        placeholder="Ask the agent to inspect, change, test, or explain this repository…"
+      />
+      <div className="composer-actions">
+        <label className="composer-select">
+          <span className="sr-only">Router model</span>
+          <select
+            aria-label="Router model"
+            value={model}
+            disabled={disabled || isRunning || models.length === 0}
+            onChange={(event) => onModelChange(event.target.value)}
+          >
+            {models.map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>
+                {candidate.displayName} · {candidate.providerLabel}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="composer-select">
+          <span className="sr-only">Thinking level</span>
+          <select
+            aria-label="Thinking level"
+            value={thinkingLevel}
+            disabled={disabled || isRunning || !models.length}
+            onChange={(event) => onThinkingLevelChange(event.target.value as ThinkingLevel)}
+          >
+            {(models.find((candidate) => candidate.id === model)?.thinkingLevels ?? []).map(
+              (level) => (
+                <option key={level} value={level}>
+                  {level === 'none'
+                    ? 'No thinking'
+                    : `${level[0]?.toUpperCase()}${level.slice(1)} thinking`}
+                </option>
+              )
+            )}
+          </select>
+        </label>
+        {isRunning ? (
+          <button className="stop-button" type="button" onClick={() => void onStop()}>
+            Stop
+          </button>
+        ) : (
+          <button className="primary-button" type="submit" disabled={disabled || !value.trim()}>
+            Send
+          </button>
+        )}
+      </div>
+    </form>
+  );
+}
+
+function ApprovalCard({
+  approval,
+  onResolve,
+}: {
+  approval: Approval;
+  onResolve: (approval: Approval, decision: 'allow-once' | 'deny') => Promise<void>;
+}): JSX.Element {
+  const target = approval.argv?.join(' ') ?? approval.path ?? 'Requested operation';
+  return (
+    <section className="approval-card" aria-labelledby={`approval-${approval.id}`}>
+      <p className="eyebrow">Approval required · {approval.risk} risk</p>
+      <h2 id={`approval-${approval.id}`}>
+        {approval.kind === 'command'
+          ? 'Run command'
+          : approval.kind === 'file-delete'
+            ? 'Delete file'
+            : 'Edit file'}
+      </h2>
+      <code>{target}</code>
+      <p>{approval.reason}</p>
+      <small>Working directory: {approval.cwd}</small>
+      <div className="approval-actions">
+        <button
+          className="primary-button"
+          type="button"
+          onClick={() => void onResolve(approval, 'allow-once')}
+        >
+          Allow once
+        </button>
+        <button
+          className="deny-button"
+          type="button"
+          onClick={() => void onResolve(approval, 'deny')}
+        >
+          Deny
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function SponsorSurface({
+  sponsor,
+  location,
+  onHide,
+}: {
+  sponsor: Sponsor;
+  location: 'banner-top' | 'banner-bottom' | 'inline' | 'card';
+  onHide?: () => void;
+}): JSX.Element {
+  const className = `sponsor-surface tier-${sponsor.tier.toLowerCase()} ${location}`;
+  return (
+    <section className={className} aria-label={`Sponsored compute tier ${sponsor.tier}`}>
+      <div>
+        <p className="eyebrow">Sponsored compute · Tier {sponsor.tier}</p>
+        <strong>{sponsor.sponsorName ?? 'Privacy guardrail'}</strong>
+      </div>
+      <p>{sponsor.headline}</p>
+      {sponsor.body && <small>{sponsor.body}</small>}
+      {sponsor.url && (
+        <a href={sponsor.url} target="_blank" rel="noreferrer">
+          Learn about {sponsor.sponsorName ?? 'sponsored compute'}
+        </a>
+      )}
+      <span className="subsidy">
+        {sponsor.provisionalSavings > 0
+          ? `${formatCurrency(sponsor.provisionalSavings)} estimated savings`
+          : `${sponsor.subsidyPercent}% subsidy`}
+      </span>
+      {onHide && (
+        <button
+          className={location === 'banner-bottom' ? 'close-sponsored' : 'hide-sponsored'}
+          type="button"
+          aria-label={location === 'banner-bottom' ? 'Dismiss sponsored banner' : undefined}
+          onClick={onHide}
+        >
+          {location === 'banner-bottom' ? <span aria-hidden="true">×</span> : 'Hide sponsored'}
+        </button>
+      )}
+    </section>
+  );
+}
+
+function AgentStatusPanel({
+  status,
+  busy,
+  serverUrl,
+  agentStatus,
+  onRefresh,
+}: {
+  status?: RouterDiagnostics;
+  busy: boolean;
+  serverUrl: string;
+  agentStatus: Thread['status'] | 'ready';
+  onRefresh: () => void;
+}): JSX.Element {
+  const connection = !status
+    ? 'Checking…'
+    : status.health && status.authenticated
+      ? 'Connected'
+      : status.health
+        ? 'Authentication failed'
+        : 'Unreachable';
+  return (
+    <section className="detail-panel agent-status-panel" aria-label="Agent status">
+      <div className="detail-heading">
+        <div>
+          <p className="eyebrow">Agent status</p>
+          <h2>{connection}</h2>
+        </div>
+        <button className="secondary-button" type="button" disabled={busy} onClick={onRefresh}>
+          {busy ? 'Checking…' : 'Refresh'}
+        </button>
+      </div>
+      <dl className="status-grid">
+        <div>
+          <dt>Agent</dt>
+          <dd>{agentStatus.replace('_', ' ')}</dd>
+        </div>
+        <div>
+          <dt>Router mode</dt>
+          <dd>{status?.mode ?? 'unknown'}</dd>
+        </div>
+        <div>
+          <dt>Server</dt>
+          <dd>{serverUrl || 'Not configured'}</dd>
+        </div>
+        <div>
+          <dt>Last checked</dt>
+          <dd>{status ? new Date(status.checkedAt).toLocaleTimeString() : '—'}</dd>
+        </div>
+      </dl>
+      {status?.error && <p className="status-error">{status.error}</p>}
+      <h3>Available models</h3>
+      {status?.models.length ? (
+        <ul className="model-status-list">
+          {status.models.map((candidate) => (
+            <li key={candidate.id}>
+              <span>
+                <strong>{candidate.displayName}</strong>
+                <small>
+                  {candidate.providerLabel} · {candidate.thinkingLevels.join(', ')} thinking
+                </small>
+              </span>
+              <span className={candidate.configured ? 'model-ready' : 'model-mock'}>
+                {candidate.configured ? 'configured' : 'mock'}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="empty-copy">No router models are currently available.</p>
+      )}
+      {status?.modelsStale && <small>Showing the last known model catalog.</small>}
+    </section>
+  );
+}
+
+function ChangesPanel({
+  diffs,
+  selected,
+  onSelect,
+}: {
+  diffs: DiffFile[];
+  selected?: DiffFile;
+  onSelect: (path: string) => void;
+}): JSX.Element {
+  return (
+    <section className="detail-panel changes-panel">
+      <div className="detail-heading">
+        <div>
+          <p className="eyebrow">Agent-only baselines</p>
+          <h2>Changes</h2>
+        </div>
+      </div>
+      {diffs.length === 0 ? (
+        <p className="empty-copy">
+          Agent-authored changes will appear here. Existing Git changes are intentionally excluded.
+        </p>
+      ) : (
+        <>
+          <div className="diff-files">
+            {diffs.map((diff) => (
+              <button
+                className={diff.path === selected?.path ? 'selected' : ''}
+                type="button"
+                key={diff.path}
+                onClick={() => onSelect(diff.path)}
+              >
+                <span>{diff.path}</span>
+                <small>{diff.status}</small>
+              </button>
+            ))}
+          </div>
+          {selected && (
+            <div className="diff-view">
+              <DiffEditor
+                height="280px"
+                language="typescript"
+                original={selected.original}
+                modified={selected.current}
+                options={{
+                  readOnly: true,
+                  renderSideBySide: false,
+                  minimap: { enabled: false },
+                  scrollBeyondLastLine: false,
+                }}
+              />
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function EconomicsPanel({
+  events,
+  sponsor,
+}: {
+  events: JournalEvent[];
+  sponsor?: Sponsor;
+}): JSX.Element {
+  const settlements = events
+    .filter((event) => event.type === 'settlement')
+    .map((event) => ({ payload: event.payload, timestamp: event.timestamp }));
+  const totals = settlements.reduce<{
+    cost: number;
+    subsidy: number;
+    paid: number;
+    cacheRead: number;
+    cacheWrite: number;
+    tokens: number;
+  }>(
+    (total, settlement) => ({
+      cost:
+        total.cost + (typeof settlement.payload.cost === 'number' ? settlement.payload.cost : 0),
+      subsidy:
+        total.subsidy +
+        (typeof settlement.payload.subsidy === 'number' ? settlement.payload.subsidy : 0),
+      paid:
+        total.paid + (typeof settlement.payload.paid === 'number' ? settlement.payload.paid : 0),
+      cacheRead:
+        total.cacheRead +
+        (typeof settlement.payload.cacheRead === 'number' ? settlement.payload.cacheRead : 0),
+      cacheWrite:
+        total.cacheWrite +
+        (typeof settlement.payload.cacheWrite === 'number' ? settlement.payload.cacheWrite : 0),
+      tokens:
+        total.tokens +
+        (typeof settlement.payload.totalTokens === 'number' ? settlement.payload.totalTokens : 0),
+    }),
+    { cost: 0, subsidy: 0, paid: 0, cacheRead: 0, cacheWrite: 0, tokens: 0 }
+  );
+  const dailyTotals = settlements.reduce((totalsByDay, settlement) => {
+    const day = settlement.timestamp.slice(0, 10);
+    const current = totalsByDay.get(day) ?? { cost: 0, subsidy: 0, paid: 0, tokens: 0 };
+    totalsByDay.set(day, {
+      cost:
+        current.cost + (typeof settlement.payload.cost === 'number' ? settlement.payload.cost : 0),
+      subsidy:
+        current.subsidy +
+        (typeof settlement.payload.subsidy === 'number' ? settlement.payload.subsidy : 0),
+      paid:
+        current.paid + (typeof settlement.payload.paid === 'number' ? settlement.payload.paid : 0),
+      tokens:
+        current.tokens +
+        (typeof settlement.payload.totalTokens === 'number' ? settlement.payload.totalTokens : 0),
+    });
+    return totalsByDay;
+  }, new Map<string, { cost: number; subsidy: number; paid: number; tokens: number }>());
+  return (
+    <section className="detail-panel economics-panel">
+      <div className="detail-heading">
+        <div>
+          <p className="eyebrow">Compute wallet</p>
+          <h2>Economics</h2>
+        </div>
+        <span className="wallet-badge">{sponsor?.tier ?? '—'}</span>
+      </div>
+      <dl className="totals">
+        <div>
+          <dt>Compute cost</dt>
+          <dd>{formatCurrency(totals.cost)}</dd>
+        </div>
+        <div>
+          <dt>Subsidized</dt>
+          <dd>{formatCurrency(totals.subsidy)}</dd>
+        </div>
+        <div>
+          <dt>You paid</dt>
+          <dd>{formatCurrency(totals.paid)}</dd>
+        </div>
+        <div>
+          <dt>Tokens</dt>
+          <dd>{totals.tokens.toLocaleString()}</dd>
+        </div>
+        <div>
+          <dt>Cache read / write</dt>
+          <dd>
+            {totals.cacheRead.toLocaleString()} / {totals.cacheWrite.toLocaleString()}
+          </dd>
+        </div>
+      </dl>
+      <details className="ledger">
+        <summary>Inference ledger ({settlements.length})</summary>
+        {settlements.length === 0 ? (
+          <p className="empty-copy">No router settlements yet.</p>
+        ) : (
+          <ul>
+            {settlements.map((settlement, index) => (
+              <li key={String(settlement.payload.routerTurnId ?? index)}>
+                <span>{String(settlement.payload.inferencePurpose ?? 'agent')}</span>
+                <strong>
+                  {formatCurrency(
+                    typeof settlement.payload.paid === 'number' ? settlement.payload.paid : 0
+                  )}
+                </strong>
+              </li>
+            ))}
+          </ul>
+        )}
+      </details>
+      <details className="ledger">
+        <summary>Daily totals ({dailyTotals.size})</summary>
+        <ul>
+          {[...dailyTotals.entries()].map(([day, total]) => (
+            <li key={day}>
+              <span>
+                {day} · {total.tokens.toLocaleString()} tokens
+              </span>
+              <strong>{formatCurrency(total.paid)}</strong>
+            </li>
+          ))}
+        </ul>
+      </details>
+    </section>
+  );
+}
