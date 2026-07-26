@@ -48,4 +48,24 @@ for (const name of [
   assert.equal(packageJson.dependencies[name], '0.80.6', `${name} must remain pinned`);
 }
 
-console.log('Dependency override policy and physical install passed.');
+const crossZipPackage = JSON.parse(
+  readFileSync(resolve('node_modules', 'cross-zip', 'package.json'), 'utf8')
+);
+assert.equal(crossZipPackage.version, '4.0.1', 'cross-zip must remain at the reviewed version');
+const crossZipSource = readFileSync(resolve('node_modules', 'cross-zip', 'index.js'), 'utf8');
+for (const expected of [
+  'fs.rm(outPath, { recursive: true, force: true, maxRetries: 3 }, doZip2)',
+  'fs.rmSync(outPath, { recursive: true, force: true, maxRetries: 3 })',
+]) {
+  assert.ok(crossZipSource.includes(expected), 'cross-zip Node 25 compatibility patch is missing');
+}
+assert.ok(
+  !crossZipSource.includes('fs.rmdir(outPath, { recursive: true'),
+  'cross-zip still uses removed recursive fs.rmdir'
+);
+assert.ok(
+  !crossZipSource.includes('fs.rmdirSync(outPath, { recursive: true'),
+  'cross-zip still uses removed recursive fs.rmdirSync'
+);
+
+console.log('Dependency override policy, compatibility patch, and physical install passed.');
