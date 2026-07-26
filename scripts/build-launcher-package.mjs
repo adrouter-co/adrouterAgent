@@ -30,6 +30,13 @@ function run(command, args, options = {}) {
   return result.stdout;
 }
 
+function runNpm(args, options = {}) {
+  const npmExecPath = process.env.npm_execpath;
+  return npmExecPath
+    ? run(process.execPath, [npmExecPath, ...args], options)
+    : run(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, options);
+}
+
 const targetMetadata = [
   {
     key: 'darwin-universal',
@@ -118,8 +125,7 @@ export function buildLauncherPackage({ artifacts, outputDirectory, stagingRoot }
       join(packageDirectory, 'release-manifest.json'),
       `${JSON.stringify(releaseManifest, null, 2)}\n`
     );
-    const packedJson = run(
-      process.platform === 'win32' ? 'npm.cmd' : 'npm',
+    const packedJson = runNpm(
       ['pack', '--ignore-scripts', '--json', '--pack-destination', output],
       { cwd: packageDirectory }
     );
