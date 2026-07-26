@@ -2,6 +2,16 @@
 
 All notable changes to AdRouter Agent are documented here.
 
+## [0.1.0-beta.3] - 2026-07-26
+
+### Fixed
+
+- The npm installer now accepts the standard relative framework symlinks inside
+  an Electron macOS bundle while rejecting absolute, ambiguous, or escaping
+  symlink targets before and after extraction.
+- Anonymous registry propagation waits are long enough for a newly published
+  candidate to become visible before macOS install smoke tests begin.
+
 ## [0.1.0-beta.2] - 2026-07-26
 
 ### Added
@@ -35,4 +45,5 @@ All notable changes to AdRouter Agent are documented here.
 - Updates are downloaded and installed manually.
 - A reachable AdRouter server and valid bearer token are required.
 
+[0.1.0-beta.3]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.2

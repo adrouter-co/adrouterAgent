@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -8,6 +16,7 @@ import {
   assertAllowedDownloadUrl,
   assertNonRoot,
   assertSafeArchiveEntries,
+  assertSafeArchiveSymlink,
   assertSupportedMacOsVersion,
   assertSupportedPlatform,
   inspectInstallation,
@@ -19,20 +28,20 @@ import { validateManifest } from '../lib/manifest.mjs';
 const manifest = {
   schema: 2,
   distributionMode: 'credential-free-adhoc',
-  releaseVersion: '0.1.0-beta.2',
-  releaseTag: 'v0.1.0-beta.2',
-  assetName: 'AdRouter-Agent-0.1.0-beta.2-universal.zip',
+  releaseVersion: '0.1.0-beta.3',
+  releaseTag: 'v0.1.0-beta.3',
+  assetName: 'AdRouter-Agent-0.1.0-beta.3-universal.zip',
   assetUrl:
-    'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.2/AdRouter-Agent-0.1.0-beta.2-universal.zip',
+    'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.3/AdRouter-Agent-0.1.0-beta.3-universal.zip',
   sha256: 'a'.repeat(64),
   repository: 'adrouter/adrouterAgent',
   bundleIdentifier: 'com.adrouter.agent',
   bundleShortVersion: '0.1.0',
-  bundleVersion: '10002',
+  bundleVersion: '10003',
 };
 
 test('validates the exact credential-free release manifest', () => {
-  assert.equal(validateManifest(manifest).releaseVersion, '0.1.0-beta.2');
+  assert.equal(validateManifest(manifest).releaseVersion, '0.1.0-beta.3');
   assert.throws(() => validateManifest({ ...manifest, schema: 1 }));
   assert.throws(() => validateManifest({ ...manifest, distributionMode: 'notarized' }));
   assert.throws(() => validateManifest({ ...manifest, repository: 'attacker/repository' }));
@@ -89,6 +98,29 @@ test('rejects path traversal and unexpected archive layouts', () => {
   assert.throws(() => assertSafeArchiveEntries(['Other.app/file']), /Unexpected ZIP layout/);
 });
 
+test('allows only relative archive symlinks that remain inside the app bundle', () => {
+  const framework = 'AdRouter Agent.app/Contents/Frameworks/Electron Framework.framework';
+  assert.doesNotThrow(() =>
+    assertSafeArchiveSymlink(
+      `${framework}/Electron Framework`,
+      'Versions/Current/Electron Framework'
+    )
+  );
+  assert.doesNotThrow(() => assertSafeArchiveSymlink(`${framework}/Versions/Current`, 'A'));
+  assert.throws(
+    () => assertSafeArchiveSymlink(`${framework}/escape`, '../../../../../../tmp/payload'),
+    /escapes AdRouter Agent\.app/
+  );
+  assert.throws(
+    () => assertSafeArchiveSymlink(`${framework}/absolute`, '/tmp/payload'),
+    /Unsafe ZIP symbolic link target/
+  );
+  assert.throws(
+    () => assertSafeArchiveSymlink(`${framework}/ambiguous`, '..\\payload'),
+    /Unsafe ZIP symbolic link target/
+  );
+});
+
 test('uses the real per-user Applications bundle and separate support receipt', () => {
   const paths = releasePaths(manifest, '/tmp/adrouter-agent-home');
   assert.equal(paths.appPath, '/tmp/adrouter-agent-home/Applications/AdRouter Agent.app');
@@ -98,17 +130,27 @@ test('uses the real per-user Applications bundle and separate support receipt', 
   );
 });
 
-function fixtureExecute({ gatekeeper = 'rejected', running = false } = {}) {
+function fixtureExecute({ gatekeeper = 'rejected', running = false, safeSymlink = false } = {}) {
   return async (file, args) => {
     if (file === '/usr/bin/sw_vers') return { stdout: '15.7.7\n', stderr: '' };
     if (file === '/usr/bin/unzip') {
+      if (args[0] === '-p') {
+        return { stdout: 'Versions/Current/Electron Framework', stderr: '' };
+      }
       return {
-        stdout: 'AdRouter Agent.app/\nAdRouter Agent.app/Contents/Info.plist\n',
+        stdout: safeSymlink
+          ? 'AdRouter Agent.app/\nAdRouter Agent.app/Contents/Info.plist\nAdRouter Agent.app/Contents/Frameworks/Electron Framework.framework/Electron Framework\n'
+          : 'AdRouter Agent.app/\nAdRouter Agent.app/Contents/Info.plist\n',
         stderr: '',
       };
     }
     if (file === '/usr/bin/zipinfo') {
-      return { stdout: '-rw-r--r--  3.0 unx fixture\n', stderr: '' };
+      return {
+        stdout: safeSymlink
+          ? 'lrwxr-xr-x  3.0 unx       35 bx       35 stor 26-Jul-26 08:53 AdRouter Agent.app/Contents/Frameworks/Electron Framework.framework/Electron Framework\n'
+          : '-rw-r--r--  3.0 unx fixture\n',
+        stderr: '',
+      };
     }
     if (file === '/usr/bin/ditto') {
       const extracted = args.at(-1);
@@ -116,6 +158,13 @@ function fixtureExecute({ gatekeeper = 'rejected', running = false } = {}) {
       mkdirSync(join(contents, 'MacOS'), { recursive: true });
       writeFileSync(join(contents, 'Info.plist'), 'fixture');
       writeFileSync(join(contents, 'MacOS', 'AdRouter Agent'), 'fixture');
+      if (safeSymlink) {
+        const framework = join(contents, 'Frameworks', 'Electron Framework.framework');
+        mkdirSync(join(framework, 'Versions', 'A'), { recursive: true });
+        writeFileSync(join(framework, 'Versions', 'A', 'Electron Framework'), 'fixture');
+        symlinkSync('A', join(framework, 'Versions', 'Current'));
+        symlinkSync('Versions/Current/Electron Framework', join(framework, 'Electron Framework'));
+      }
       return { stdout: '', stderr: '' };
     }
     if (file === '/usr/libexec/PlistBuddy') {
@@ -123,7 +172,7 @@ function fixtureExecute({ gatekeeper = 'rejected', running = false } = {}) {
         return { stdout: 'com.adrouter.agent\n', stderr: '' };
       }
       return {
-        stdout: args[1].includes('Short') ? '0.1.0\n' : '10002\n',
+        stdout: args[1].includes('Short') ? '0.1.0\n' : '10003\n',
         stderr: '',
       };
     }
@@ -196,6 +245,27 @@ test('installs into Applications and reports credential-free integrity', async (
     );
     assert.equal(receipt.owner, '@adrouter/agent');
     assert.equal(receipt.applicationPath, appPath);
+  } finally {
+    rmSync(homeDirectory, { recursive: true, force: true });
+  }
+});
+
+test('installs a signed app containing safe internal framework symlinks', async () => {
+  const homeDirectory = mkdtempSync(join(tmpdir(), 'adrouter-launcher-symlink-test-'));
+  const body = Buffer.from('fixture zip body with safe framework symlinks');
+  const fixtureManifest = {
+    ...manifest,
+    sha256: createHash('sha256').update(body).digest('hex'),
+  };
+  try {
+    await assert.doesNotReject(
+      install(fixtureManifest, {
+        homeDirectory,
+        uid: 501,
+        fetchImpl: fixtureResponse(body),
+        executeImpl: fixtureExecute({ safeSymlink: true }),
+      })
+    );
   } finally {
     rmSync(homeDirectory, { recursive: true, force: true });
   }

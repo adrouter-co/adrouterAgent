@@ -7,7 +7,8 @@ should manually install the latest release before reporting a problem.
 
 | Version | Supported |
 | --- | --- |
-| 0.1.0-beta.2 | Yes |
+| 0.1.0-beta.3 | Yes |
+| 0.1.0-beta.2 | No |
 | Older builds | No |
 
 ## Reporting a vulnerability
@@ -29,5 +30,5 @@ workspace sandbox.
 
 The npm launcher accepts release metadata only from its embedded manifest. It
 downloads from an allowlist of GitHub HTTPS hosts, enforces a size bound,
-checks the exact ZIP digest, rejects unsafe archive layouts and symlinks, then
-requires both Apple code-signature and Gatekeeper verification.
+checks the exact ZIP digest, rejects unsafe archive layouts and escaping
+symlinks, then requires both Apple code-signature and Gatekeeper verification.

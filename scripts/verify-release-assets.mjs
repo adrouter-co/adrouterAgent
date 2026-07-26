@@ -9,10 +9,10 @@ const manifest = JSON.parse(readFileSync(join(directory, 'artifact-manifest.json
 assert.equal(manifest.schema, 2);
 assert.equal(manifest.distributionMode, 'credential-free-adhoc');
 assert.equal(manifest.repository, 'adrouter/adrouterAgent');
-assert.equal(manifest.releaseVersion, '0.1.0-beta.2');
-assert.equal(manifest.releaseTag, 'v0.1.0-beta.2');
+assert.equal(manifest.releaseVersion, '0.1.0-beta.3');
+assert.equal(manifest.releaseTag, 'v0.1.0-beta.3');
 assert.equal(manifest.bundleShortVersion, '0.1.0');
-assert.equal(manifest.bundleVersion, '10002');
+assert.equal(manifest.bundleVersion, '10003');
 
 const expectedNames = [
   `AdRouter-Agent-${manifest.releaseVersion}-universal.zip`,

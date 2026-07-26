@@ -13,7 +13,7 @@ import type { RepositoryService } from './repository-service';
 import type { ReviewService } from './review-service';
 import type { RuntimeSupervisor } from './runtime-supervisor';
 
-const PUBLIC_RELEASE_VERSION = '0.1.0-beta.2';
+const PUBLIC_RELEASE_VERSION = '0.1.0-beta.3';
 
 interface Subscription {
   id: string;

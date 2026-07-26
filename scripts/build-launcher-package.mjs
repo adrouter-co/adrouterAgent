@@ -70,7 +70,7 @@ export function buildLauncherPackage({ zipPath, outputDirectory, stagingRoot } =
       repository: 'adrouter/adrouterAgent',
       bundleIdentifier: 'com.adrouter.agent',
       bundleShortVersion: '0.1.0',
-      bundleVersion: '10002',
+      bundleVersion: '10003',
     };
     writeFileSync(
       join(packageDirectory, 'release-manifest.json'),

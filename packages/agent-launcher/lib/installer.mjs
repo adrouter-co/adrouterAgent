@@ -8,12 +8,13 @@ import {
   open,
   readdir,
   readFile,
+  readlink,
   realpath,
   rename,
   rm,
 } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, join, sep } from 'node:path';
+import { basename, join, posix, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -80,6 +81,25 @@ export function assertSafeArchiveEntries(entries) {
     if (entry !== APP_NAME && !entry.startsWith(`${APP_NAME}/`)) {
       throw new Error(`Unexpected ZIP layout entry: ${entry}`);
     }
+  }
+}
+
+export function assertSafeArchiveSymlink(entry, target) {
+  assertSafeArchiveEntries([entry]);
+  if (
+    typeof target !== 'string' ||
+    target.length === 0 ||
+    target.includes('\0') ||
+    target.startsWith('/') ||
+    target.startsWith('\\') ||
+    target.includes('\\')
+  ) {
+    throw new Error(`Unsafe ZIP symbolic link target: ${JSON.stringify(target)}`);
+  }
+  const resolved = posix.resolve('/', posix.dirname(entry), target);
+  const appRoot = `/${APP_NAME}`;
+  if (resolved !== appRoot && !resolved.startsWith(`${appRoot}/`)) {
+    throw new Error(`ZIP symbolic link escapes ${APP_NAME}: ${entry} -> ${target}`);
   }
 }
 
@@ -167,12 +187,15 @@ async function verifyExtractedTree(root, appPath) {
   const canonicalRoot = `${await realpath(root)}${sep}`;
   async function visit(path) {
     const stat = await lstat(path);
-    if (stat.isSymbolicLink()) throw new Error(`Release archive contains a symbolic link: ${path}`);
+    if (stat.isSymbolicLink()) {
+      const entry = relative(root, path).split(sep).join('/');
+      assertSafeArchiveSymlink(entry, await readlink(path));
+    }
     const canonical = await realpath(path);
     if (canonical !== canonicalRoot.slice(0, -1) && !canonical.startsWith(canonicalRoot)) {
       throw new Error('Release archive escaped its extraction directory.');
     }
-    if (!stat.isDirectory()) return;
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return;
     for (const entry of await readdir(path)) await visit(join(path, entry));
   }
   const topLevel = await readdir(root);
@@ -241,8 +264,12 @@ async function archiveEntries(zipPath, executeImpl = execute) {
   const entries = stdout.split('\n').filter(Boolean);
   assertSafeArchiveEntries(entries);
   const { stdout: listing } = await executeImpl('/usr/bin/zipinfo', ['-l', zipPath]);
-  if (listing.split('\n').some((line) => /^l[rwx-]{9}\s/.test(line))) {
-    throw new Error('Release ZIP contains symbolic links.');
+  for (const line of listing.split('\n').filter((value) => /^l[rwx-]{9}\s/.test(value))) {
+    const match = line.match(/^l[rwx-]{9}\s+\S+\s+\S+\s+\d+\s+\S+\s+\d+\s+\S+\s+\S+\s+\S+\s+(.+)$/);
+    if (!match) throw new Error('Unable to validate a ZIP symbolic link entry.');
+    const entry = match[1];
+    const { stdout: target } = await executeImpl('/usr/bin/unzip', ['-p', zipPath, entry]);
+    assertSafeArchiveSymlink(entry, target);
   }
   return entries;
 }
