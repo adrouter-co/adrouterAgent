@@ -45,8 +45,9 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           test "${{ inputs.tag }}" = "v$version"
-          test "$GITHUB_REF_NAME" = "v$version"
-          test "$(git rev-list -n 1 "${{ inputs.tag }}")" = "$GITHUB_SHA"
+          test "$GITHUB_REF" = "refs/tags/v$version" || \
+            test "$GITHUB_REF" = "refs/heads/${{ github.event.repository.default_branch }}"
+          test "$(git rev-list -n 1 "${{ inputs.tag }}")" = "$(git rev-parse HEAD)"
           test "$(gh release view "${{ inputs.tag }}" --json isPrerelease --jq .isPrerelease)" = "true"
           was_draft="$(gh release view "${{ inputs.tag }}" --json isDraft --jq .isDraft)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -146,7 +147,11 @@ jobs:
             --prefix "$RUNNER_TEMP/npm-prefix" \
             --userconfig "$RUNNER_TEMP/empty.npmrc" \
             --ignore-scripts
-          export PATH="$RUNNER_TEMP/npm-prefix/bin:$PATH"
+          if test "$RUNNER_OS" = "Windows"; then
+            export PATH="$RUNNER_TEMP/npm-prefix:$PATH"
+          else
+            export PATH="$RUNNER_TEMP/npm-prefix/bin:$PATH"
+          fi
           test "$(adrouter-agent --version)" = "${{ needs.publish-candidate.outputs.version }}"
           adrouter-agent install
           adrouter-agent doctor --json | tee "$RUNNER_TEMP/doctor.json"
