@@ -1,8 +1,15 @@
 import type { Dirent } from 'node:fs';
 import { mkdir, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { SandboxManager, type SandboxRuntimeConfig } from '@anthropic-ai/sandbox-runtime';
+import {
+  runtimeReadPaths,
+  sandboxBinShell,
+  sandboxPathEntries,
+  sandboxReadiness,
+  serializeSandboxCommand,
+} from './platform';
 import { isProtectedPath } from './workspace';
 
 export class SandboxUnavailableError extends Error {
@@ -15,39 +22,36 @@ export class SandboxUnavailableError extends Error {
 const SECRET_ENVIRONMENT =
   /(?:token|secret|password|credential|api[_-]?key|auth|aws|github|npm_config)/i;
 
-export const shellQuote = (argv: readonly string[]): string =>
-  argv.map((part) => `'${part.replaceAll("'", "'\\''")}'`).join(' ');
+export const shellQuote = serializeSandboxCommand;
 
 export const sanitizedEnvironment = (
   temporaryHome: string,
-  workspaceRoot?: string
+  workspaceRoot?: string,
+  platform: NodeJS.Platform = process.platform,
+  sourceEnvironment: NodeJS.ProcessEnv = process.env
 ): NodeJS.ProcessEnv =>
   ({
     ...Object.fromEntries(
-      Object.entries(process.env).filter(
+      Object.entries(sourceEnvironment).filter(
         ([key, value]) => !SECRET_ENVIRONMENT.test(key) && value !== undefined
       )
     ),
     HOME: temporaryHome,
     TMPDIR: temporaryHome,
-    PATH: [
-      workspaceRoot ? join(workspaceRoot, 'node_modules', '.bin') : undefined,
-      '/opt/homebrew/bin',
-      '/usr/local/bin',
-      '/usr/bin',
-      '/bin',
-      '/usr/sbin',
-      '/sbin',
-    ]
-      .filter(Boolean)
-      .join(':'),
+    ...(platform === 'win32'
+      ? { USERPROFILE: temporaryHome, TEMP: temporaryHome, TMP: temporaryHome }
+      : {}),
+    PATH: sandboxPathEntries(temporaryHome, workspaceRoot, platform, sourceEnvironment).join(
+      platform === 'win32' ? ';' : ':'
+    ),
   }) as NodeJS.ProcessEnv;
 
 export const buildSandboxConfig = (
   workspaceRoot: string,
   temporaryHome: string,
   workspaceWriteAllowed = true,
-  protectedReadPaths: readonly string[] = defaultProtectedPaths(workspaceRoot)
+  protectedReadPaths: readonly string[] = defaultProtectedPaths(workspaceRoot),
+  platform: NodeJS.Platform = process.platform
 ): SandboxRuntimeConfig => ({
   network: {
     allowedDomains: [],
@@ -60,17 +64,8 @@ export const buildSandboxConfig = (
     // workspace and the explicitly listed runtime paths the only readable
     // regions; literal protected paths are re-denied after the workspace
     // allow rule by the macOS Seatbelt profile generator.
-    allowRead: [
-      workspaceRoot,
-      temporaryHome,
-      '/System',
-      '/usr',
-      '/bin',
-      '/sbin',
-      '/Library',
-      dirname(dirname(process.execPath)),
-    ],
-    denyRead: ['/', ...protectedReadPaths],
+    allowRead: runtimeReadPaths(workspaceRoot, temporaryHome, platform),
+    denyRead: platform === 'win32' ? [...protectedReadPaths] : ['/', ...protectedReadPaths],
     allowWrite: workspaceWriteAllowed ? [workspaceRoot, temporaryHome] : [temporaryHome],
     denyWrite: [...protectedReadPaths],
     allowGitConfig: false,
@@ -139,9 +134,10 @@ export class CommandSandbox {
     signal?: AbortSignal,
     workspaceWriteAllowed = false
   ): Promise<WrappedSandboxCommand> {
-    if (!SandboxManager.isSupportedPlatform()) {
+    const readiness = sandboxReadiness();
+    if (readiness.status !== 'ready') {
       throw new SandboxUnavailableError(
-        'The installed sandbox runtime does not support this operating system.'
+        `${readiness.detail}${readiness.setupCommands.length > 0 ? ` Setup: ${readiness.setupCommands.join(' ; ')}` : ''}`
       );
     }
 
@@ -178,7 +174,7 @@ export class CommandSandbox {
     try {
       const wrapped = await SandboxManager.wrapWithSandboxArgv(
         shellQuote(argv),
-        undefined,
+        sandboxBinShell(),
         undefined,
         signal,
         workspaceRoot

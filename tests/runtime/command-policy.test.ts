@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { approvalAllowsCommand, classifyCommand } from '@/runtime/command-policy';
+import { sandboxReadiness } from '@/runtime/platform';
 import { buildSandboxConfig, sanitizedEnvironment, shellQuote } from '@/runtime/sandbox';
 
 describe('command policy', () => {
@@ -29,6 +30,16 @@ describe('command policy', () => {
     ).toBe(false);
   });
 
+  it('normalizes Windows executables and rejects absolute drive and UNC paths', () => {
+    expect(classifyCommand(['git.exe', 'status', '--short']).disposition).toBe('allow');
+    expect(classifyCommand(['npm.cmd', 'test']).disposition).toBe('allow');
+    expect(classifyCommand(['cat.exe', 'C:\\Users\\fixture\\secret.txt']).disposition).toBe('deny');
+    expect(classifyCommand(['cat.exe', '\\\\server\\share\\secret.txt']).disposition).toBe('deny');
+    expect(classifyCommand(['powershell.exe', '-Command', 'Get-ChildItem']).disposition).toBe(
+      'approval'
+    );
+  });
+
   it('builds a network-denied sandbox configuration and strips credentials', () => {
     const config = buildSandboxConfig('/tmp/workspace', '/tmp/adrouter-home');
     const environment = sanitizedEnvironment('/tmp/adrouter-home');
@@ -42,5 +53,20 @@ describe('command policy', () => {
     ).toEqual(['/tmp/adrouter-home']);
     expect(environment.HOME).toBe('/tmp/adrouter-home');
     expect(shellQuote(['npm', 'test', "it's-safe"])).toContain("'it'\\''s-safe'");
+    expect(shellQuote(['npm.cmd', 'test', "it's-safe"], 'win32')).toBe(
+      "& 'npm.cmd' 'test' 'it''s-safe'"
+    );
+    expect(
+      sanitizedEnvironment('C:\\Temp\\agent', undefined, 'win32', {
+        SystemRoot: 'C:\\Windows',
+        PATH: 'C:\\Tools',
+        ADROUTER_API_KEY: 'remove-me',
+      })
+    ).toMatchObject({
+      USERPROFILE: 'C:\\Temp\\agent',
+      TEMP: 'C:\\Temp\\agent',
+      PATH: 'C:\\Windows\\System32;C:\\Tools',
+    });
+    expect(sandboxReadiness('aix').status).toBe('unsupported');
   });
 });

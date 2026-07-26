@@ -4,12 +4,14 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { safeStorage } from 'electron';
 import { AdRouterClient } from '../runtime/router-client';
+import { DEFAULT_ADROUTER_SERVER_URL } from '../shared/constants';
 import type {
   RouterConfiguration,
   RouterDiagnostics,
   RouterModelDescriptor,
   ThinkingLevel,
 } from '../shared/contracts';
+import { assertSecureCredentialStorage } from './credential-storage';
 
 interface PersistedConfiguration {
   version: 2;
@@ -51,7 +53,7 @@ export class ConfigurationStore {
   public async get(): Promise<RouterConfiguration> {
     const configuration = await this.read();
     return {
-      serverUrl: configuration?.serverUrl ?? '',
+      serverUrl: configuration?.serverUrl ?? DEFAULT_ADROUTER_SERVER_URL,
       sponsoredCompute: configuration?.sponsoredCompute ?? true,
       tokenStored: Boolean(configuration?.encryptedToken),
       configured: Boolean(configuration?.serverUrl && configuration.encryptedToken),
@@ -83,11 +85,7 @@ export class ConfigurationStore {
       });
       return this.get();
     }
-    if (!(await safeStorage.isAsyncEncryptionAvailable())) {
-      throw new Error(
-        'macOS Keychain encryption is unavailable; AdRouter credentials cannot be stored safely.'
-      );
-    }
+    await assertSecureCredentialStorage();
     const serverUrl = allowRouterUrl(input.serverUrl);
     const diagnostics = await new AdRouterClient({ serverUrl, token: input.token }).diagnostics();
     this.assertConnected(diagnostics);
@@ -214,11 +212,7 @@ export class ConfigurationStore {
         sponsoredCompute: configuration.sponsoredCompute,
       };
     }
-    if (!(await safeStorage.isAsyncEncryptionAvailable())) {
-      throw new Error(
-        'macOS Keychain encryption is unavailable; stored credentials cannot be read safely.'
-      );
-    }
+    await assertSecureCredentialStorage();
     const decrypted = await safeStorage.decryptStringAsync(
       Buffer.from(configuration.encryptedToken, 'base64')
     );

@@ -29,6 +29,7 @@ export interface DesktopToolOptions {
   turnId: string;
   commandRunner: SandboxedCommandRunner;
   allowedCommands?: readonly string[][];
+  commandsEnabled?: boolean;
   requestApproval: (request: ToolApproval, signal?: AbortSignal) => Promise<ApprovalDecision>;
   emit: (
     type: 'tool.activity' | 'tool.result' | 'command.output' | 'file.change' | 'diff.change',
@@ -293,13 +294,13 @@ export const createDesktopTools = (options: DesktopToolOptions): AgentTool[] => 
     },
   };
 
-  return [
-    listFiles,
-    readFile,
-    searchText,
-    applyPatch,
-    commandTool(withAllowed, 'run_command'),
-    commandTool(withAllowed, 'git_status'),
-    commandTool(withAllowed, 'git_diff'),
-  ];
+  const fileTools = [listFiles, readFile, searchText, applyPatch];
+  return options.commandsEnabled === false
+    ? fileTools
+    : [
+        ...fileTools,
+        commandTool(withAllowed, 'run_command'),
+        commandTool(withAllowed, 'git_status'),
+        commandTool(withAllowed, 'git_diff'),
+      ];
 };

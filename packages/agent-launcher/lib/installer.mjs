@@ -2,6 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   access,
+  constants as fsConstants,
   lstat,
   mkdir,
   mkdtemp,
@@ -16,15 +17,17 @@ import {
 import { homedir } from 'node:os';
 import { basename, join, posix, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
+import { selectArtifact } from './manifest.mjs';
 
 const execFileAsync = promisify(execFile);
-const APP_NAME = 'AdRouter Agent.app';
-const EXECUTABLE_NAME = 'AdRouter Agent';
 const RECEIPT_OWNER = '@adrouter/agent';
 const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024;
 const MAX_REDIRECTS = 5;
-const GATEKEEPER_WARNING =
+const WINDOWS_SANDBOX_SETUP = 'npx @anthropic-ai/sandbox-runtime@0.0.65 windows-install';
+const MAC_WARNING =
   'This credential-free beta is not Developer ID signed or notarized. If macOS blocks it, open System Settings > Privacy & Security and choose Open Anyway.';
+const PORTABLE_WARNING =
+  'This portable beta is unsigned. Install only from the canonical release and retain checksum verification.';
 const ALLOWED_HOSTS = new Set([
   'github.com',
   'objects.githubusercontent.com',
@@ -32,12 +35,13 @@ const ALLOWED_HOSTS = new Set([
 ]);
 
 export function assertSupportedPlatform(platform = process.platform, arch = process.arch) {
-  if (platform !== 'darwin') {
-    throw new Error(`Unsupported platform ${platform}; AdRouter Agent requires macOS 12 or newer.`);
-  }
-  if (arch !== 'arm64' && arch !== 'x64') {
-    throw new Error(`Unsupported macOS architecture ${arch}; expected arm64 or x64.`);
-  }
+  selectArtifact(
+    {
+      artifacts: [{ key: 'darwin-universal' }, { key: 'linux-x64' }, { key: 'win32-x64' }],
+    },
+    platform,
+    arch
+  );
 }
 
 export function assertSupportedMacOsVersion(version) {
@@ -49,7 +53,9 @@ export function assertSupportedMacOsVersion(version) {
 
 export function assertNonRoot(uid = process.getuid?.()) {
   if (uid === 0) {
-    throw new Error('Do not run adrouter-agent with sudo; install it as the logged-in macOS user.');
+    throw new Error(
+      'Do not run adrouter-agent with sudo or as root; install it as the logged-in user.'
+    );
   }
 }
 
@@ -64,7 +70,7 @@ export function assertAllowedDownloadUrl(input) {
   return url;
 }
 
-export function assertSafeArchiveEntries(entries) {
+export function assertSafeArchiveEntries(entries, archiveRoot = 'AdRouter Agent.app') {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new Error('The release ZIP is empty.');
   }
@@ -78,14 +84,15 @@ export function assertSafeArchiveEntries(entries) {
     ) {
       throw new Error(`Unsafe ZIP entry: ${JSON.stringify(entry)}`);
     }
-    if (entry !== APP_NAME && !entry.startsWith(`${APP_NAME}/`)) {
+    const normalized = entry.replaceAll('\\', '/').replace(/\/$/, '');
+    if (normalized !== archiveRoot && !normalized.startsWith(`${archiveRoot}/`)) {
       throw new Error(`Unexpected ZIP layout entry: ${entry}`);
     }
   }
 }
 
-export function assertSafeArchiveSymlink(entry, target) {
-  assertSafeArchiveEntries([entry]);
+export function assertSafeArchiveSymlink(entry, target, archiveRoot = 'AdRouter Agent.app') {
+  assertSafeArchiveEntries([entry], archiveRoot);
   if (
     typeof target !== 'string' ||
     target.length === 0 ||
@@ -97,24 +104,53 @@ export function assertSafeArchiveSymlink(entry, target) {
     throw new Error(`Unsafe ZIP symbolic link target: ${JSON.stringify(target)}`);
   }
   const resolved = posix.resolve('/', posix.dirname(entry), target);
-  const appRoot = `/${APP_NAME}`;
-  if (resolved !== appRoot && !resolved.startsWith(`${appRoot}/`)) {
-    throw new Error(`ZIP symbolic link escapes ${APP_NAME}: ${entry} -> ${target}`);
+  const root = `/${archiveRoot}`;
+  if (resolved !== root && !resolved.startsWith(`${root}/`)) {
+    throw new Error(`ZIP symbolic link escapes ${archiveRoot}: ${entry} -> ${target}`);
   }
 }
 
-export function releasePaths(_manifest, homeDirectory = homedir()) {
-  const applicationsDirectory = join(homeDirectory, 'Applications');
-  const supportDirectory = join(
-    homeDirectory,
-    'Library',
-    'Application Support',
-    'adrouter-agent-launcher'
-  );
+export function releasePaths(
+  _manifest,
+  homeDirectory = homedir(),
+  platform = process.platform,
+  options = {}
+) {
+  if (platform === 'darwin') {
+    const applicationsDirectory = join(homeDirectory, 'Applications');
+    const supportDirectory = join(
+      homeDirectory,
+      'Library',
+      'Application Support',
+      'adrouter-agent-launcher'
+    );
+    return {
+      applicationsDirectory,
+      supportDirectory,
+      appPath: join(applicationsDirectory, 'AdRouter Agent.app'),
+      receiptPath: join(supportDirectory, 'receipt.json'),
+    };
+  }
+  if (platform === 'linux') {
+    const dataDirectory =
+      options.xdgDataHome ?? process.env.XDG_DATA_HOME ?? join(homeDirectory, '.local', 'share');
+    const applicationsDirectory = join(dataDirectory, 'adrouter-agent');
+    const supportDirectory = join(dataDirectory, 'adrouter-agent-launcher');
+    return {
+      applicationsDirectory,
+      supportDirectory,
+      appPath: join(applicationsDirectory, 'app'),
+      receiptPath: join(supportDirectory, 'receipt.json'),
+    };
+  }
+  const localAppData =
+    options.localAppData ?? process.env.LOCALAPPDATA ?? join(homeDirectory, 'AppData', 'Local');
+  const applicationsDirectory = join(localAppData, 'Programs');
+  const supportDirectory = join(localAppData, 'adrouter-agent-launcher');
   return {
     applicationsDirectory,
     supportDirectory,
-    appPath: join(applicationsDirectory, APP_NAME),
+    appPath: join(applicationsDirectory, 'AdRouter Agent'),
     receiptPath: join(supportDirectory, 'receipt.json'),
   };
 }
@@ -142,7 +178,7 @@ async function plistValue(appPath, key, executeImpl) {
   return stdout.trim();
 }
 
-async function verifyApp(appPath, manifest, executeImpl = execute) {
+async function verifyMacApp(appPath, manifest, executeImpl) {
   await executeImpl('/usr/bin/codesign', ['--verify', '--deep', '--strict', appPath]);
   const signatureResult = await executeImpl('/usr/bin/codesign', ['-dv', '--verbose=4', appPath]);
   const signatureDetails = `${signatureResult.stdout ?? ''}${signatureResult.stderr ?? ''}`;
@@ -152,24 +188,41 @@ async function verifyApp(appPath, manifest, executeImpl = execute) {
   ) {
     throw new Error('The application is not the expected credential-free ad-hoc build.');
   }
-
-  const bundleIdentifier = await plistValue(appPath, 'CFBundleIdentifier', executeImpl);
-  const shortVersion = await plistValue(appPath, 'CFBundleShortVersionString', executeImpl);
-  const buildVersion = await plistValue(appPath, 'CFBundleVersion', executeImpl);
-  if (bundleIdentifier !== manifest.bundleIdentifier) {
+  if (
+    (await plistValue(appPath, 'CFBundleIdentifier', executeImpl)) !== manifest.bundleIdentifier
+  ) {
     throw new Error('The installed app bundle identifier does not match the release manifest.');
   }
-  if (shortVersion !== manifest.bundleShortVersion) {
+  if (
+    (await plistValue(appPath, 'CFBundleShortVersionString', executeImpl)) !==
+    manifest.bundleShortVersion
+  ) {
     throw new Error('The installed app short bundle version does not match the release manifest.');
   }
-  if (buildVersion !== manifest.bundleVersion) {
+  if ((await plistValue(appPath, 'CFBundleVersion', executeImpl)) !== manifest.bundleVersion) {
     throw new Error('The installed app build version does not match the release manifest.');
   }
-
-  const executable = join(appPath, 'Contents', 'MacOS', EXECUTABLE_NAME);
+  const executable = join(appPath, 'Contents', 'MacOS', 'AdRouter Agent');
   const { stdout: architectures } = await executeImpl('/usr/bin/lipo', ['-archs', executable]);
   if (!architectures.includes('arm64') || !architectures.includes('x86_64')) {
     throw new Error('The installed app is not a universal arm64+x86_64 build.');
+  }
+}
+
+async function verifyPortableApp(appPath, artifact) {
+  const executable = join(appPath, ...artifact.executablePath.split('/'));
+  const stat = await lstat(executable);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error('The portable application executable is missing or unsafe.');
+  }
+  if (artifact.platform === 'linux') await access(executable, fsConstants.X_OK);
+}
+
+async function verifyApp(appPath, manifest, artifact, executeImpl = execute) {
+  if (artifact.verificationMode === 'macos-adhoc') {
+    await verifyMacApp(appPath, manifest, executeImpl);
+  } else {
+    await verifyPortableApp(appPath, artifact);
   }
 }
 
@@ -183,13 +236,13 @@ async function assessGatekeeper(appPath, executeImpl = execute) {
   }
 }
 
-async function verifyExtractedTree(root, appPath) {
+async function verifyExtractedTree(root, appPath, archiveRoot) {
   const canonicalRoot = `${await realpath(root)}${sep}`;
   async function visit(path) {
     const stat = await lstat(path);
     if (stat.isSymbolicLink()) {
       const entry = relative(root, path).split(sep).join('/');
-      assertSafeArchiveSymlink(entry, await readlink(path));
+      assertSafeArchiveSymlink(entry, await readlink(path), archiveRoot);
     }
     const canonical = await realpath(path);
     if (canonical !== canonicalRoot.slice(0, -1) && !canonical.startsWith(canonicalRoot)) {
@@ -199,14 +252,14 @@ async function verifyExtractedTree(root, appPath) {
     for (const entry of await readdir(path)) await visit(join(path, entry));
   }
   const topLevel = await readdir(root);
-  if (topLevel.length !== 1 || topLevel[0] !== APP_NAME) {
-    throw new Error('Release archive must contain exactly AdRouter Agent.app.');
+  if (topLevel.length !== 1 || topLevel[0] !== archiveRoot) {
+    throw new Error(`Release archive must contain exactly ${archiveRoot}.`);
   }
   await visit(appPath);
 }
 
-async function download(manifest, destination, fetchImpl = fetch) {
-  let current = assertAllowedDownloadUrl(manifest.assetUrl);
+async function download(manifest, artifact, destination, fetchImpl = fetch) {
+  let current = assertAllowedDownloadUrl(artifact.assetUrl);
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
     const response = await fetchImpl(current, {
       redirect: 'manual',
@@ -253,50 +306,87 @@ async function download(manifest, destination, fetchImpl = fetch) {
       throw new Error('Release download ended before the declared content length.');
     }
     const actual = digest.digest('hex');
-    if (actual !== manifest.sha256) throw new Error('Release ZIP checksum verification failed.');
+    if (actual !== artifact.sha256) throw new Error('Release ZIP checksum verification failed.');
     return { bytes: received, sha256: actual, finalUrl: current.href };
   }
   throw new Error('Release download exceeded the redirect limit.');
 }
 
-async function archiveEntries(zipPath, executeImpl = execute) {
+async function archiveEntries(zipPath, artifact, executeImpl = execute) {
+  if (artifact.platform === 'win32') {
+    const script =
+      'Add-Type -AssemblyName System.IO.Compression.FileSystem; ' +
+      '$z=[IO.Compression.ZipFile]::OpenRead($args[0]); try {$z.Entries.FullName} finally {$z.Dispose()}';
+    const { stdout } = await executeImpl('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      script,
+      zipPath,
+    ]);
+    const entries = stdout.split(/\r?\n/).filter(Boolean);
+    assertSafeArchiveEntries(entries, artifact.archiveRoot);
+    return entries;
+  }
   const { stdout } = await executeImpl('/usr/bin/unzip', ['-Z1', zipPath]);
   const entries = stdout.split('\n').filter(Boolean);
-  assertSafeArchiveEntries(entries);
+  assertSafeArchiveEntries(entries, artifact.archiveRoot);
   const { stdout: listing } = await executeImpl('/usr/bin/zipinfo', ['-l', zipPath]);
   for (const line of listing.split('\n').filter((value) => /^l[rwx-]{9}\s/.test(value))) {
     const match = line.match(/^l[rwx-]{9}\s+\S+\s+\S+\s+\d+\s+\S+\s+\d+\s+\S+\s+\S+\s+\S+\s+(.+)$/);
     if (!match) throw new Error('Unable to validate a ZIP symbolic link entry.');
     const entry = match[1];
     const { stdout: target } = await executeImpl('/usr/bin/unzip', ['-p', zipPath, entry]);
-    assertSafeArchiveSymlink(entry, target);
+    assertSafeArchiveSymlink(entry, target, artifact.archiveRoot);
   }
   return entries;
 }
 
-async function readReceipt(receiptPath, appPath) {
-  try {
-    const receipt = JSON.parse(await readFile(receiptPath, 'utf8'));
-    const owned =
-      receipt.schema === 2 &&
-      receipt.owner === RECEIPT_OWNER &&
-      receipt.applicationPath === appPath;
-    return { receipt, owned };
-  } catch {
-    return { receipt: null, owned: false };
+async function extractArchive(archive, extracted, artifact, executeImpl) {
+  if (artifact.platform === 'darwin') {
+    await executeImpl('/usr/bin/ditto', ['-x', '-k', archive, extracted]);
+  } else if (artifact.platform === 'linux') {
+    await executeImpl('/usr/bin/unzip', ['-q', archive, '-d', extracted]);
+  } else {
+    const script = 'Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force';
+    await executeImpl('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      script,
+      archive,
+      extracted,
+    ]);
   }
 }
 
-function receiptMatchesManifest(receipt, manifest) {
+async function readReceipt(receiptPath, appPath, platform) {
+  try {
+    const receipt = JSON.parse(await readFile(receiptPath, 'utf8'));
+    const current = receipt.schema === 3;
+    const legacyMac = platform === 'darwin' && receipt.schema === 2;
+    const owned =
+      (current || legacyMac) &&
+      receipt.owner === RECEIPT_OWNER &&
+      receipt.applicationPath === appPath;
+    return { receipt, owned, legacyMac };
+  } catch {
+    return { receipt: null, owned: false, legacyMac: false };
+  }
+}
+
+function receiptMatchesManifest(receipt, manifest, artifact) {
   return (
     receipt?.releaseVersion === manifest.releaseVersion &&
-    receipt?.sha256 === manifest.sha256 &&
-    receipt?.releaseTag === manifest.releaseTag
+    receipt?.sha256 === artifact.sha256 &&
+    receipt?.releaseTag === manifest.releaseTag &&
+    (receipt.schema === 2 || receipt.artifactKey === artifact.key)
   );
 }
 
-async function appIsRunning(appPath, executeImpl = execute) {
-  const executable = join(appPath, 'Contents', 'MacOS', EXECUTABLE_NAME);
+async function appIsRunning(appPath, artifact, executeImpl = execute) {
+  const executable = join(appPath, ...artifact.executablePath.split('/'));
+  if (artifact.platform === 'win32') return false;
   const { stdout } = await executeImpl('/bin/ps', ['-axo', 'command=']);
   return stdout
     .split('\n')
@@ -304,14 +394,42 @@ async function appIsRunning(appPath, executeImpl = execute) {
     .some((line) => line === executable || line.startsWith(`${executable} `));
 }
 
+function sandboxReport(platform, override) {
+  if (override) return override;
+  if (platform === 'win32') {
+    return {
+      status: 'setup-required',
+      detail: 'Run the one-time elevated Windows sandbox setup before command tools are enabled.',
+      setupCommands: [WINDOWS_SANDBOX_SETUP],
+    };
+  }
+  if (platform === 'linux') {
+    return {
+      status: 'setup-required',
+      detail: 'Verify Bubblewrap, socat, ripgrep, and the Ubuntu AppArmor userns profile.',
+      setupCommands: ['sudo apt-get install bubblewrap socat ripgrep'],
+    };
+  }
+  return {
+    status: 'ready',
+    detail: 'Seatbelt command sandboxing is built into macOS.',
+    setupCommands: [],
+  };
+}
+
 export async function inspectInstallation(manifest, options = {}) {
-  const paths = releasePaths(manifest, options.homeDirectory);
+  const platform = options.platform ?? process.platform;
+  const architecture = options.arch ?? process.arch;
+  const artifact = selectArtifact(manifest, platform, architecture);
+  const paths = releasePaths(manifest, options.homeDirectory, platform, options);
   const report = {
-    schema: 2,
+    schema: 3,
     distributionMode: manifest.distributionMode,
-    platform: options.platform ?? process.platform,
-    architecture: options.arch ?? process.arch,
-    macOsVersion: null,
+    platform,
+    architecture,
+    artifactKey: artifact.key,
+    verificationMode: artifact.verificationMode,
+    operatingSystemVersion: null,
     supported: false,
     releaseVersion: manifest.releaseVersion,
     releaseTag: manifest.releaseTag,
@@ -320,89 +438,96 @@ export async function inspectInstallation(manifest, options = {}) {
     receiptMatches: false,
     bundleIntegrity: false,
     signatureType: 'missing',
-    gatekeeperAssessment: 'unavailable',
-    warning: GATEKEEPER_WARNING,
+    gatekeeperAssessment: platform === 'darwin' ? 'unavailable' : 'not-applicable',
+    sandbox: sandboxReport(platform, options.sandbox),
+    warning: platform === 'darwin' ? MAC_WARNING : PORTABLE_WARNING,
   };
   try {
-    assertSupportedPlatform(report.platform, report.architecture);
-    const versionResult =
-      options.macOsVersion === undefined
-        ? await (options.executeImpl ?? execute)('/usr/bin/sw_vers', ['-productVersion'])
-        : { stdout: options.macOsVersion };
-    report.macOsVersion = versionResult.stdout.trim();
-    assertSupportedMacOsVersion(report.macOsVersion);
+    assertSupportedPlatform(platform, architecture);
+    if (platform === 'darwin') {
+      const versionResult =
+        options.macOsVersion === undefined
+          ? await (options.executeImpl ?? execute)('/usr/bin/sw_vers', ['-productVersion'])
+          : { stdout: options.macOsVersion };
+      report.operatingSystemVersion = versionResult.stdout.trim();
+      assertSupportedMacOsVersion(report.operatingSystemVersion);
+    }
     report.supported = true;
   } catch (error) {
     report.error = error instanceof Error ? error.message : String(error);
     return report;
   }
-
   report.installed = await exists(paths.appPath);
   if (!report.installed) return report;
-  const receiptStatus = await readReceipt(paths.receiptPath, paths.appPath);
+  const receiptStatus = await readReceipt(paths.receiptPath, paths.appPath, platform);
   report.receiptMatches =
-    receiptStatus.owned && receiptMatchesManifest(receiptStatus.receipt, manifest);
+    receiptStatus.owned && receiptMatchesManifest(receiptStatus.receipt, manifest, artifact);
   try {
-    await verifyApp(paths.appPath, manifest, options.executeImpl);
+    await verifyApp(paths.appPath, manifest, artifact, options.executeImpl);
     report.bundleIntegrity = true;
-    report.signatureType = 'adhoc';
+    report.signatureType = platform === 'darwin' ? 'adhoc' : 'unsigned-portable';
   } catch (error) {
     report.signatureType = 'invalid';
     report.error = error instanceof Error ? error.message : String(error);
   }
-  report.gatekeeperAssessment = await assessGatekeeper(paths.appPath, options.executeImpl);
-  if (report.gatekeeperAssessment === 'accepted') report.warning = null;
+  if (platform === 'darwin') {
+    report.gatekeeperAssessment = await assessGatekeeper(paths.appPath, options.executeImpl);
+    if (report.gatekeeperAssessment === 'accepted') report.warning = null;
+  }
   return report;
 }
 
 export async function install(manifest, options = {}) {
-  assertSupportedPlatform(options.platform ?? process.platform, options.arch ?? process.arch);
+  const platform = options.platform ?? process.platform;
+  const architecture = options.arch ?? process.arch;
+  const artifact = selectArtifact(manifest, platform, architecture);
   assertNonRoot(options.uid ?? process.getuid?.());
-  const paths = releasePaths(manifest, options.homeDirectory);
+  const paths = releasePaths(manifest, options.homeDirectory, platform, options);
   const executeImpl = options.executeImpl ?? execute;
   const existing = await inspectInstallation(manifest, options);
-  if (!existing.supported) {
-    throw new Error(existing.error ?? 'This Mac is not supported.');
-  }
-  if (
-    existing.installed &&
-    existing.receiptMatches &&
-    existing.bundleIntegrity &&
-    existing.signatureType === 'adhoc'
-  ) {
+  if (!existing.supported)
+    throw new Error(existing.error ?? 'This operating system is not supported.');
+  const receiptStatus = await readReceipt(paths.receiptPath, paths.appPath, platform);
+  if (existing.installed && existing.receiptMatches && existing.bundleIntegrity) {
+    if (receiptStatus.legacyMac) {
+      await (options.writeReceiptImpl ?? writeReceipt)(paths.receiptPath, {
+        ...receiptStatus.receipt,
+        schema: 3,
+        distributionMode: manifest.distributionMode,
+        artifactKey: artifact.key,
+        migratedAt: new Date().toISOString(),
+      });
+    }
     return paths.appPath;
   }
-
-  const receiptStatus = await readReceipt(paths.receiptPath, paths.appPath);
   if (existing.installed && !receiptStatus.owned) {
     throw new Error(
       `${paths.appPath} already exists and is not managed by @adrouter/agent; move or remove it before installing.`
     );
   }
-  if (existing.installed && (await appIsRunning(paths.appPath, executeImpl))) {
+  if (existing.installed && (await appIsRunning(paths.appPath, artifact, executeImpl))) {
     throw new Error('Quit AdRouter Agent before installing or updating it.');
   }
 
   await mkdir(paths.applicationsDirectory, { recursive: true, mode: 0o755 });
   await mkdir(paths.supportDirectory, { recursive: true, mode: 0o700 });
   const staging = await mkdtemp(join(paths.applicationsDirectory, '.adrouter-agent-staging-'));
-  const archive = join(staging, basename(manifest.assetName));
+  const archive = join(staging, basename(artifact.assetName));
   const extracted = join(staging, 'extracted');
-  const stagedApp = join(extracted, APP_NAME);
+  const stagedApp = join(extracted, artifact.archiveRoot);
   const backupPath = join(
     paths.applicationsDirectory,
-    `.AdRouter Agent.app.backup-${process.pid}-${Date.now()}`
+    `.adrouter-agent-backup-${process.pid}-${Date.now()}`
   );
   let backedUp = false;
   let activated = false;
   try {
-    const receipt = await download(manifest, archive, options.fetchImpl);
-    await archiveEntries(archive, executeImpl);
+    const receipt = await download(manifest, artifact, archive, options.fetchImpl);
+    await archiveEntries(archive, artifact, executeImpl);
     await mkdir(extracted, { mode: 0o700 });
-    await executeImpl('/usr/bin/ditto', ['-x', '-k', archive, extracted]);
-    await verifyExtractedTree(extracted, stagedApp);
-    await verifyApp(stagedApp, manifest, executeImpl);
-
+    await extractArchive(archive, extracted, artifact, executeImpl);
+    await verifyExtractedTree(extracted, stagedApp, artifact.archiveRoot);
+    await verifyApp(stagedApp, manifest, artifact, executeImpl);
     if (existing.installed) {
       await rename(paths.appPath, backupPath);
       backedUp = true;
@@ -410,9 +535,10 @@ export async function install(manifest, options = {}) {
     await rename(stagedApp, paths.appPath);
     activated = true;
     await (options.writeReceiptImpl ?? writeReceipt)(paths.receiptPath, {
-      schema: 2,
+      schema: 3,
       owner: RECEIPT_OWNER,
       distributionMode: manifest.distributionMode,
+      artifactKey: artifact.key,
       releaseVersion: manifest.releaseVersion,
       releaseTag: manifest.releaseTag,
       sha256: receipt.sha256,
@@ -448,17 +574,24 @@ async function writeReceipt(path, receipt) {
   }
 }
 
-export async function launch(appPath, spawnImpl = spawn) {
+export async function launch(appPath, options = {}) {
+  const platform = options.platform ?? process.platform;
+  const artifact = options.artifact ?? {
+    executablePath:
+      platform === 'darwin'
+        ? 'Contents/MacOS/AdRouter Agent'
+        : platform === 'win32'
+          ? 'AdRouter Agent.exe'
+          : 'AdRouter Agent',
+  };
+  const spawnImpl = options.spawnImpl ?? spawn;
+  const executable =
+    platform === 'darwin' ? '/usr/bin/open' : join(appPath, ...artifact.executablePath.split('/'));
+  const args = platform === 'darwin' ? [appPath] : [];
   await new Promise((resolvePromise, reject) => {
-    const child = spawnImpl('/usr/bin/open', [appPath], {
-      detached: true,
-      stdio: 'ignore',
-    });
+    const child = spawnImpl(executable, args, { detached: true, stdio: 'ignore' });
     child.once('error', reject);
-    child.once('exit', (code) => {
-      if (code === 0) resolvePromise();
-      else reject(new Error(`macOS open failed with exit code ${code}.`));
-    });
+    child.once('spawn', resolvePromise);
     child.unref();
   });
 }

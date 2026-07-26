@@ -30,15 +30,28 @@ const makeDirectory = resolve('out', 'make');
 const releaseDirectory = resolve('out', 'release');
 const files = walk(makeDirectory);
 const zips = files.filter((file) => file.endsWith('.zip'));
-if (zips.length !== 1) {
-  throw new Error(`Expected exactly one universal ZIP; found ${zips.length}.`);
-}
+const targets = [
+  { key: 'darwin-universal', pattern: /darwin.*universal|universal.*darwin/i },
+  { key: 'linux-x64', pattern: /linux.*x64|x64.*linux/i },
+  { key: 'win32-x64', pattern: /win32.*x64|x64.*win32/i },
+];
+const selected = targets.map((target) => {
+  const matches = zips.filter((file) => target.pattern.test(file));
+  if (matches.length !== 1) {
+    throw new Error(`Expected exactly one ${target.key} ZIP; found ${matches.length}.`);
+  }
+  return { ...target, source: matches[0] };
+});
 
 rmSync(releaseDirectory, { recursive: true, force: true });
 mkdirSync(releaseDirectory, { recursive: true });
 
-const artifacts = [[zips[0], join(releaseDirectory, `AdRouter-Agent-${version}-universal.zip`)]];
-for (const [source, destination] of artifacts) copyFileSync(source, destination);
+const artifacts = selected.map((target) => ({
+  key: target.key,
+  source: target.source,
+  destination: join(releaseDirectory, `AdRouter-Agent-${version}-${target.key}.zip`),
+}));
+for (const { source, destination } of artifacts) copyFileSync(source, destination);
 
 const sbom = execFileSync(
   'npm',
@@ -52,12 +65,16 @@ const sbom = execFileSync(
   { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 }
 );
 JSON.parse(sbom);
-const appSbom = join(releaseDirectory, `AdRouter-Agent-${version}.cdx.json`);
-writeFileSync(appSbom, sbom);
+const appSboms = artifacts.map((artifact) => {
+  const destination = join(releaseDirectory, `AdRouter-Agent-${version}-${artifact.key}.cdx.json`);
+  writeFileSync(destination, sbom);
+  return destination;
+});
 
-const zip = artifacts.find(([, file]) => file.endsWith('.zip'))?.[1];
-if (!zip) throw new Error('Unable to identify the canonical release ZIP.');
-const launcher = buildLauncherPackage({ zipPath: zip, outputDirectory: releaseDirectory });
+const launcher = buildLauncherPackage({
+  artifacts: artifacts.map((artifact) => ({ key: artifact.key, zipPath: artifact.destination })),
+  outputDirectory: releaseDirectory,
+});
 const npmSbom = execFileSync(
   'npm',
   ['sbom', '--workspace', '@adrouter/agent', '--sbom-format=cyclonedx', '--sbom-type=application'],
@@ -68,8 +85,8 @@ const launcherSbom = join(releaseDirectory, `AdRouter-Agent-${version}-npm.cdx.j
 writeFileSync(launcherSbom, npmSbom);
 
 const releaseFiles = [
-  ...artifacts.map(([, file]) => file),
-  appSbom,
+  ...artifacts.map((artifact) => artifact.destination),
+  ...appSboms,
   launcher.tarball,
   launcherSbom,
 ];
@@ -89,14 +106,14 @@ writeFileSync(
   join(releaseDirectory, 'artifact-manifest.json'),
   `${JSON.stringify(
     {
-      schema: 2,
-      distributionMode: 'credential-free-adhoc',
+      schema: 3,
+      distributionMode: 'credential-free-portable',
       repository: 'adrouter/adrouterAgent',
       sourceCommit: process.env.GITHUB_SHA ?? null,
       releaseVersion: version,
       releaseTag: `v${version}`,
       bundleShortVersion: '0.1.0',
-      bundleVersion: '10003',
+      bundleVersion: '10004',
       launcherManifest: launcher.manifest,
       files: records,
     },

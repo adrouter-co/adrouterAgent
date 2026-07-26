@@ -7,7 +7,8 @@ should manually install the latest release before reporting a problem.
 
 | Version | Supported |
 | --- | --- |
-| 0.1.0-beta.3 | Yes |
+| 0.1.0-beta.4 | Yes |
+| 0.1.0-beta.3 | No |
 | 0.1.0-beta.2 | No |
 | Older builds | No |
 
@@ -17,8 +18,8 @@ Do not open a public issue for a suspected vulnerability or include router
 tokens, provider keys, private project data, or exploit details in logs.
 
 Use the repository's **Security → Report a vulnerability** flow to create a
-private GitHub security advisory. Include the affected app version, macOS
-version and architecture, reproduction steps, and the smallest safe diagnostic
+private GitHub security advisory. Include the affected app version, operating
+system version and architecture, reproduction steps, and the smallest safe diagnostic
 sample. Maintainers will acknowledge the report through the advisory.
 
 ## Security boundaries
@@ -30,5 +31,7 @@ workspace sandbox.
 
 The npm launcher accepts release metadata only from its embedded manifest. It
 downloads from an allowlist of GitHub HTTPS hosts, enforces a size bound,
-checks the exact ZIP digest, rejects unsafe archive layouts and escaping
-symlinks, then requires both Apple code-signature and Gatekeeper verification.
+checks the exact target ZIP digest, rejects unsafe archive layouts and escaping
+symlinks, and applies target-specific executable/signature checks. Linux and
+Windows portable beta artifacts are unsigned; checksums prove artifact
+integrity, not publisher identity.

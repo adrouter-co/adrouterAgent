@@ -100,7 +100,7 @@ const config: ForgeConfig = {
     beforeCopyExtraResources: [hardenMacInfoPlistHook],
     appBundleId: 'com.adrouter.agent',
     appVersion: '0.1.0',
-    buildVersion: '10003',
+    buildVersion: '10004',
     appCategoryType: 'public.app-category.developer-tools',
     appCopyright: 'Copyright 2026 AdRouter Agent contributors',
     extraResource: ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'PRIVACY.md'],
@@ -120,7 +120,7 @@ const config: ForgeConfig = {
     },
   },
   rebuildConfig: {},
-  makers: [new MakerZIP({}, ['darwin'])],
+  makers: [new MakerZIP({}, ['darwin', 'linux', 'win32'])],
   plugins: [
     new AutoUnpackNativesPlugin({}),
     new VitePlugin({

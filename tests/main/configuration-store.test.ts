@@ -13,6 +13,17 @@ afterEach(async () => {
 });
 
 describe('ConfigurationStore', () => {
+  it('uses staging only as the fresh unconfigured default', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'adrouter-config-'));
+    directories.push(directory);
+    const store = new ConfigurationStore(join(directory, 'configuration.json'));
+    await expect(store.get()).resolves.toMatchObject({
+      serverUrl: 'https://api-staging.adrouter.co',
+      configured: false,
+      tokenStored: false,
+    });
+  });
+
   it('migrates cached model IDs without changing the encrypted token', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'adrouter-config-'));
     directories.push(directory);

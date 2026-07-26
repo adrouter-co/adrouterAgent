@@ -19,10 +19,14 @@ for (const required of [
   'macos-release',
   'attestations: write',
   'id-token: write',
-  'credential-free ad-hoc universal release',
+  'credential-free portable release',
+  'linux-x64',
+  'win32-x64',
+  'https://api-staging.adrouter.co',
 ]) {
   assert.ok(release.includes(required), `release workflow is missing ${required}`);
 }
+assert.ok(!release.includes('ADROUTER_STAGING_URL'), 'staging URL must not be a secret');
 for (const forbidden of [
   'APPLE_DEVELOPER_ID',
   'APPLE_API_KEY',
@@ -38,6 +42,8 @@ for (const required of [
   'NPM_DIST_TAG_TOKEN',
   '--tag candidate',
   'dist-tag add',
+  'linux-x64',
+  'win32-x64',
 ]) {
   assert.ok(promotion.includes(required), `promotion workflow is missing ${required}`);
 }

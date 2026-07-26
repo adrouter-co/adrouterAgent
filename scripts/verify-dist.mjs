@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 
 const require = createRequire(import.meta.url);
 const asar = require('@electron/asar');
+const packageJson = require('../package.json');
 const out = resolve('out');
 
 if (!existsSync(out)) {
@@ -12,17 +13,21 @@ if (!existsSync(out)) {
 }
 
 const makeDirectory = join(out, 'make');
-const entries = existsSync(makeDirectory)
-  ? readdirSync(makeDirectory, { recursive: true }).map(String)
+const macZipDirectory = join(makeDirectory, 'zip', 'darwin', 'universal');
+const entries = existsSync(macZipDirectory)
+  ? readdirSync(macZipDirectory, { recursive: true }).map(String)
   : [];
 const apps = readdirSync(out, { withFileTypes: true })
   .filter((entry) => entry.isDirectory() && entry.name.endsWith('-darwin-universal'))
   .map((entry) => join(entry.name, 'AdRouter Agent.app'))
   .filter((entry) => existsSync(join(out, entry)));
-const zips = entries.filter((entry) => entry.endsWith('.zip'));
+const expectedZipName = `AdRouter Agent-darwin-universal-${packageJson.version}.zip`;
+const zips = entries.filter((entry) => entry.endsWith(expectedZipName));
 
 if (apps.length !== 1 || zips.length !== 1) {
-  throw new Error('Expected one universal macOS .app and exactly one ZIP in the Forge output.');
+  throw new Error(
+    `Expected one universal macOS .app and exactly one ${expectedZipName} in the Forge output.`
+  );
 }
 
 for (const app of apps) {
@@ -54,7 +59,7 @@ for (const app of apps) {
   if (
     info.CFBundleIdentifier !== 'com.adrouter.agent' ||
     info.CFBundleShortVersionString !== '0.1.0' ||
-    info.CFBundleVersion !== '10003' ||
+    info.CFBundleVersion !== '10004' ||
     info.NSAppTransportSecurity?.NSAllowsArbitraryLoads !== false ||
     info.NSAppTransportSecurity?.NSAllowsLocalNetworking !== true
   ) {
@@ -99,7 +104,7 @@ for (const app of apps) {
       throw new Error(`The packaged application contains forbidden content: ${forbidden}`);
     }
   }
-  if (!packagedText.includes('0.1.0-beta.3')) {
+  if (!packagedText.includes('0.1.0-beta.4')) {
     throw new Error('The packaged About metadata does not include the public release version.');
   }
 

@@ -2,6 +2,34 @@
 
 All notable changes to AdRouter Agent are documented here.
 
+## [0.1.0-beta.4] - 2026-07-26
+
+### Added
+
+- Portable Ubuntu 24.04 x64 and Windows 11 x64 desktop distributions alongside
+  the existing universal macOS application.
+- Platform-specific sandbox readiness diagnostics, secure credential-store
+  checks, launcher installation paths, and native CI acceptance jobs.
+- The live `https://api-staging.adrouter.co` origin as the default for fresh
+  desktop installations and the protected release canary.
+
+### Security
+
+- Linux refuses weak `basic_text` credential storage, Windows uses DPAPI, and
+  command tools remain unavailable until the platform sandbox is ready.
+- Release manifests now select an exact OS/CPU artifact and verify its checksum,
+  archive layout, executable, and target-specific integrity policy.
+
+### Fixed
+
+- The macOS distribution verifier now selects only the macOS universal ZIP when
+  Linux and Windows artifacts are present in the same Forge output tree.
+
+### Known limitations
+
+- Linux and Windows portable beta artifacts are unsigned.
+- Updates remain manual and only one agent run can be active at a time.
+
 ## [0.1.0-beta.3] - 2026-07-26
 
 ### Fixed
@@ -45,5 +73,6 @@ All notable changes to AdRouter Agent are documented here.
 - Updates are downloaded and installed manually.
 - A reachable AdRouter server and valid bearer token are required.
 
+[0.1.0-beta.4]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.4
 [0.1.0-beta.3]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.2

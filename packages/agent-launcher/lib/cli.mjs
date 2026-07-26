@@ -1,5 +1,5 @@
 import { inspectInstallation, install, launch } from './installer.mjs';
-import { readManifest } from './manifest.mjs';
+import { readManifest, selectArtifact } from './manifest.mjs';
 
 const USAGE = `Usage: adrouter-agent [launch|install|doctor [--json]|--version]
 
@@ -46,5 +46,5 @@ export async function runCli(args, io = process) {
   const appPath = await install(manifest);
   const report = await inspectInstallation(manifest);
   if (report.warning) io.stderr.write(`Warning: ${report.warning}\n`);
-  await launch(appPath);
+  await launch(appPath, { artifact: selectArtifact(manifest) });
 }

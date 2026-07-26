@@ -28,11 +28,11 @@ jobs:
           cache: npm
       - name: Verify exact release identity
         run: |
+          version="$(node -p "require('./package.json').version")"
           test "$GITHUB_REF_TYPE" = "tag"
-          test "$GITHUB_REF_NAME" = "v0.1.0-beta.3"
-          test "$(node -p "require('./package.json').version")" = "0.1.0-beta.3"
+          test "$GITHUB_REF_NAME" = "v$version"
           test "$(git rev-list -n 1 "$GITHUB_REF_NAME")" = "$GITHUB_SHA"
-          grep -F "## [0.1.0-beta.3]" CHANGELOG.md
+          grep -F "## [$version]" CHANGELOG.md
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=moderate
       - run: npm run check
@@ -54,17 +54,57 @@ jobs:
           node-version: 25.9.0
           cache: npm
       - run: npm ci
-      - name: Verify live model discovery and terminal agent stream
+      - name: Verify authentication, model discovery, and terminal stream
         env:
-          ADROUTER_API_URL: ${{ secrets.ADROUTER_STAGING_URL }}
+          ADROUTER_API_URL: https://api-staging.adrouter.co
           ADROUTER_API_KEY: ${{ secrets.ADROUTER_STAGING_API_KEY }}
-        run: npm run smoke:live
+        run: npm run test:staging-canary
 
-  build:
-    name: credential-free ad-hoc universal release
+  package:
+    name: build ${{ matrix.key }} portable artifact
     needs: [validate, canary]
-    runs-on: macos-14
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - key: darwin-universal
+            runner: macos-14
+            make: make:mac
+            verify: verify:dist
+          - key: linux-x64
+            runner: ubuntu-24.04
+            make: make:linux
+            verify: verify:dist:linux
+          - key: win32-x64
+            runner: windows-2025
+            make: make:windows
+            verify: verify:dist:windows
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 25.9.0
+          cache: npm
+      - run: npm ci
+      - run: npm run ${{ matrix.make }}
+      - run: npm run ${{ matrix.verify }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: package-${{ matrix.key }}
+          path: out/make/**/*.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: aggregate credential-free portable release
+    needs: package
+    runs-on: macos-14
+    timeout-minutes: 30
     environment: macos-release
     permissions:
       contents: write
@@ -79,21 +119,23 @@ jobs:
         with:
           node-version: 25.9.0
           cache: npm
-      - name: Verify protected release identity
-        run: |
-          test "$GITHUB_REF_NAME" = "v0.1.0-beta.3"
-          test "$(git rev-list -n 1 "$GITHUB_REF_NAME")" = "$GITHUB_SHA"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: package-*
+          path: out/make
+          merge-multiple: true
       - run: npm ci
-      - run: npm run make:mac
-      - run: npm run verify:dist
-      - run: node scripts/prepare-release-assets.mjs 0.1.0-beta.3
-      - run: node scripts/verify-release-assets.mjs out/release
+      - name: Prepare and verify exact release inventory
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          node scripts/prepare-release-assets.mjs "$version"
+          node scripts/verify-release-assets.mjs out/release
       - uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-path: out/release/*
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: AdRouter-Agent-0.1.0-beta.3-release
+          name: AdRouter-Agent-portable-release
           path: out/release/*
           if-no-files-found: error
           retention-days: 14

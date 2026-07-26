@@ -81,6 +81,8 @@ const referencesOutsideWorkspace = (argv: readonly string[]): boolean =>
     return (
       value.startsWith('/') ||
       value.startsWith('~') ||
+      /^[a-z]:[\\/]/i.test(value) ||
+      /^\\\\/.test(value) ||
       value.startsWith('file:') ||
       value === '..' ||
       value.startsWith('../') ||
@@ -130,6 +132,11 @@ const isTestCommand = (command: string, args: readonly string[]): boolean => {
 const containsShellSyntax = (argv: readonly string[]): boolean =>
   argv.some((arg) => /[|;&`$<>]/.test(arg) || arg.includes('\n') || arg.includes('\r'));
 
+const commandName = (executable: string): string =>
+  (executable.replaceAll('\\', '/').split('/').at(-1) ?? '')
+    .toLowerCase()
+    .replace(/\.(?:exe|cmd|bat)$/i, '');
+
 export const classifyCommand = (argv: readonly string[]): CommandAssessment => {
   const executable = argv[0];
   if (!executable?.trim()) {
@@ -146,8 +153,8 @@ export const classifyCommand = (argv: readonly string[]): CommandAssessment => {
       reason: 'Command arguments must be non-empty and bounded.',
     };
   }
-  const command = executable.split('/').at(-1)?.toLowerCase() ?? '';
-  const isShell = command === 'sh' || command === 'bash' || command === 'zsh';
+  const command = commandName(executable);
+  const isShell = ['sh', 'bash', 'zsh', 'pwsh', 'powershell', 'cmd'].includes(command);
   if (!isShell && containsShellSyntax(argv)) {
     return {
       disposition: 'deny',

@@ -6,17 +6,19 @@ import { basename, join, resolve } from 'node:path';
 
 const directory = resolve(process.argv[2] ?? 'out/release');
 const manifest = JSON.parse(readFileSync(join(directory, 'artifact-manifest.json'), 'utf8'));
-assert.equal(manifest.schema, 2);
-assert.equal(manifest.distributionMode, 'credential-free-adhoc');
+assert.equal(manifest.schema, 3);
+assert.equal(manifest.distributionMode, 'credential-free-portable');
 assert.equal(manifest.repository, 'adrouter/adrouterAgent');
-assert.equal(manifest.releaseVersion, '0.1.0-beta.3');
-assert.equal(manifest.releaseTag, 'v0.1.0-beta.3');
+assert.match(manifest.releaseVersion, /^\d+\.\d+\.\d+-beta\.\d+$/);
+assert.equal(manifest.releaseTag, `v${manifest.releaseVersion}`);
 assert.equal(manifest.bundleShortVersion, '0.1.0');
-assert.equal(manifest.bundleVersion, '10003');
+assert.equal(manifest.bundleVersion, '10004');
 
 const expectedNames = [
-  `AdRouter-Agent-${manifest.releaseVersion}-universal.zip`,
-  `AdRouter-Agent-${manifest.releaseVersion}.cdx.json`,
+  ...['darwin-universal', 'linux-x64', 'win32-x64'].flatMap((target) => [
+    `AdRouter-Agent-${manifest.releaseVersion}-${target}.zip`,
+    `AdRouter-Agent-${manifest.releaseVersion}-${target}.cdx.json`,
+  ]),
   `AdRouter-Agent-${manifest.releaseVersion}-npm.cdx.json`,
   `adrouter-agent-${manifest.releaseVersion}.tgz`,
 ].sort();
@@ -60,8 +62,13 @@ assert.equal(embeddedPackage.name, '@adrouter/agent');
 assert.equal(embeddedPackage.version, manifest.releaseVersion);
 assert.equal(embeddedPackage.dependencies, undefined);
 assert.equal(embeddedPackage.scripts, undefined);
-assert.equal(embeddedManifest.schema, 2);
-assert.equal(embeddedManifest.distributionMode, 'credential-free-adhoc');
+assert.equal(embeddedManifest.schema, 3);
+assert.equal(embeddedManifest.distributionMode, 'credential-free-portable');
+assert.deepEqual(embeddedManifest.artifacts.map((artifact) => artifact.key).sort(), [
+  'darwin-universal',
+  'linux-x64',
+  'win32-x64',
+]);
 assert.equal(embeddedManifest.bundleIdentifier, 'com.adrouter.agent');
 
 for (const sbomName of expectedNames.filter((name) => name.endsWith('.cdx.json'))) {

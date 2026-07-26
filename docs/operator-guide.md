@@ -2,7 +2,7 @@
 
 This guide describes the current AdRouter Agent desktop application in this
 repository. It is written for someone running, evaluating, or integrating the
-macOS desktop app with the sibling AdRouter backend.
+cross-platform desktop app with an AdRouter backend.
 
 The desktop app is a local-first coding workbench. It opens a local project
 folder, sends model inference to an independently running AdRouter backend,
@@ -112,7 +112,7 @@ the same backend, but their capabilities are different.
 
 | Area | AdRouterCLI | AdRouter Agent |
 | --- | --- | --- |
-| Interface | Terminal TUI, JSON mode, RPC mode, and scripting | macOS Electron GUI |
+| Interface | Terminal TUI, JSON mode, RPC mode, and scripting | Electron desktop GUI |
 | Agent surface | Full Pi coding-agent distribution | Desktop-specific Pi agent loop |
 | Built-in tools | `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls` | `read_file`, `run_command`, `apply_patch`, `search_text`, `list_files`, `git_status`, and `git_diff` |
 | Extensibility | Extensions, skills, prompt templates, themes, and custom tool selection | Fixed tool list; current runtime disables those Pi discovery features |
@@ -139,7 +139,7 @@ React renderer
   │ sandboxed window; no Node integration; validated preload bridge
   ▼
 Electron main process
-  ├─ configuration and Keychain-backed token access
+  ├─ configuration and OS-encrypted token access
   ├─ SQLite projects, threads, turns, events, approvals, and baselines
   ├─ repository metadata and native folder dialogs
   ├─ review and diff service
@@ -288,7 +288,7 @@ On first launch, enter:
 
 Testing the connection performs health, authenticated profile, and model
 discovery checks. Saving encrypts the token with Electron `safeStorage`, backed
-by the macOS Keychain. Subsequent turns retrieve the token in the main process;
+by Keychain, Windows DPAPI, or a supported Linux secret store. Subsequent turns retrieve the token in the main process;
 the renderer and event journal do not receive the plaintext credential.
 
 For a remote backend, use HTTPS. Plain HTTP is accepted only for
@@ -298,7 +298,7 @@ fragments are rejected.
 The app stores the server URL, model catalog, selected model, thinking level,
 and sponsored-compute preference locally. It stores only encrypted token
 ciphertext in its configuration file. Re-entering a token is required if the
-configuration is removed or the macOS Keychain entry is unavailable.
+configuration is removed or the operating-system credential store is unavailable.
 
 ### Live versus mock mode
 
@@ -425,7 +425,7 @@ prompts, unavailable inventory, routing failure, or sponsor opt-out.
 
 ## 9. Persistence, review, and recovery
 
-The desktop stores application state under the macOS Electron user-data
+The desktop stores application state under the platform's Electron user-data
 directory, normally:
 
 ```text
@@ -510,7 +510,8 @@ Run the operation manually outside the agent if it is intentionally required.
 ### Commands are all disabled
 
 The host OS sandbox may have failed to initialize. Review the timeline
-diagnostic and confirm the app is running on a supported macOS version. The
+diagnostic and confirm the app is running on a supported OS and its prerequisites from
+`docs/platform-setup.md` are installed. The
 desktop intentionally fails closed when the sandbox cannot be established.
 
 ### Node or packaging errors appear

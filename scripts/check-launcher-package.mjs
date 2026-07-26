@@ -13,7 +13,7 @@ assert.equal(launcher.name, '@adrouter/agent');
 assert.equal(launcher.version, rootPackage.version);
 assert.equal(launcher.license, 'Apache-2.0');
 assert.equal(launcher.engines.node, '>=22.19.0');
-assert.deepEqual(launcher.os, ['darwin']);
+assert.deepEqual(launcher.os, ['darwin', 'linux', 'win32']);
 assert.deepEqual(launcher.cpu, ['arm64', 'x64']);
 assert.equal(launcher.private, undefined);
 assert.equal(launcher.dependencies, undefined);
@@ -24,11 +24,13 @@ assert.equal(launcher.publishConfig.provenance, true);
 
 const temporary = mkdtempSync(join(tmpdir(), 'adrouter-launcher-check-'));
 try {
-  const zipName = `AdRouter-Agent-${launcher.version}-universal.zip`;
-  const zip = join(temporary, zipName);
-  writeFileSync(zip, 'launcher-package-fixture\n');
+  const artifacts = ['darwin-universal', 'linux-x64', 'win32-x64'].map((key) => {
+    const zipPath = join(temporary, `AdRouter-Agent-${launcher.version}-${key}.zip`);
+    writeFileSync(zipPath, `launcher-package-fixture-${key}\n`);
+    return { key, zipPath };
+  });
   const packed = buildLauncherPackage({
-    zipPath: zip,
+    artifacts,
     outputDirectory: temporary,
     stagingRoot: join(temporary, 'staging'),
   });

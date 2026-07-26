@@ -6,7 +6,7 @@ on:
       tag:
         description: Immutable release tag
         required: true
-        default: v0.1.0-beta.3
+        default: v0.1.0-beta.4
         type: string
 
 permissions:
@@ -43,10 +43,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          test "${{ inputs.tag }}" = "v0.1.0-beta.3"
-          test "$GITHUB_REF_NAME" = "v0.1.0-beta.3"
           version="$(node -p "require('./package.json').version")"
-          test "$version" = "0.1.0-beta.3"
+          test "${{ inputs.tag }}" = "v$version"
+          test "$GITHUB_REF_NAME" = "v$version"
           test "$(git rev-list -n 1 "${{ inputs.tag }}")" = "$GITHUB_SHA"
           test "$(gh release view "${{ inputs.tag }}" --json isPrerelease --jq .isPrerelease)" = "true"
           was_draft="$(gh release view "${{ inputs.tag }}" --json isDraft --jq .isDraft)"
@@ -66,27 +65,32 @@ jobs:
         run: gh release edit "${{ inputs.tag }}" --draft=false --prerelease
       - name: Verify public ZIP is anonymously downloadable
         run: |
-          curl --fail --silent --show-error --location --retry 6 --retry-all-errors \
-            --output "$RUNNER_TEMP/public.zip" \
-            "https://github.com/adrouter/adrouterAgent/releases/download/${{ inputs.tag }}/AdRouter-Agent-0.1.0-beta.3-universal.zip"
-          expected="$(awk '$2 == "AdRouter-Agent-0.1.0-beta.3-universal.zip" { print $1 }' "$RUNNER_TEMP/release/SHA256SUMS")"
-          test "$(shasum -a 256 "$RUNNER_TEMP/public.zip" | awk '{ print $1 }')" = "$expected"
+          version="${{ steps.identity.outputs.version }}"
+          for target in darwin-universal linux-x64 win32-x64; do
+            name="AdRouter-Agent-$version-$target.zip"
+            curl --fail --silent --show-error --location --retry 6 --retry-all-errors \
+              --output "$RUNNER_TEMP/$name" \
+              "https://github.com/adrouter/adrouterAgent/releases/download/${{ inputs.tag }}/$name"
+            expected="$(awk -v name="$name" '$2 == name { print $1 }' "$RUNNER_TEMP/release/SHA256SUMS")"
+            test "$(shasum -a 256 "$RUNNER_TEMP/$name" | awk '{ print $1 }')" = "$expected"
+          done
       - name: Bootstrap new npm package under candidate
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+          VERSION: ${{ steps.identity.outputs.version }}
         run: |
-          if published="$(npm view @adrouter/agent@0.1.0-beta.3 version 2>/dev/null)"; then
-            test "$published" = "0.1.0-beta.3"
-            test "$(npm view @adrouter/agent dist-tags.candidate)" = "0.1.0-beta.3"
+          if published="$(npm view "@adrouter/agent@$VERSION" version 2>/dev/null)"; then
+            test "$published" = "$VERSION"
+            test "$(npm view @adrouter/agent dist-tags.candidate)" = "$VERSION"
           elif npm view @adrouter/agent name >/dev/null 2>&1; then
-            env -u NODE_AUTH_TOKEN npm publish "$RUNNER_TEMP/release/adrouter-agent-0.1.0-beta.3.tgz" \
+            env -u NODE_AUTH_TOKEN npm publish "$RUNNER_TEMP/release/adrouter-agent-$VERSION.tgz" \
               --access public \
               --tag candidate \
               --provenance \
               --ignore-scripts
           else
             test -n "$NODE_AUTH_TOKEN"
-            npm publish "$RUNNER_TEMP/release/adrouter-agent-0.1.0-beta.3.tgz" \
+            npm publish "$RUNNER_TEMP/release/adrouter-agent-$VERSION.tgz" \
               --access public \
               --tag candidate \
               --provenance \
@@ -102,11 +106,22 @@ jobs:
         include:
           - architecture: arm64
             runner: macos-15
+            asset: darwin-universal
           - architecture: x64
             runner: macos-15-intel
+            asset: darwin-universal
+          - architecture: x64
+            runner: ubuntu-24.04
+            asset: linux-x64
+          - architecture: x64
+            runner: windows-2025
+            asset: win32-x64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     environment: adrouter-staging
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -132,16 +147,15 @@ jobs:
             --userconfig "$RUNNER_TEMP/empty.npmrc" \
             --ignore-scripts
           export PATH="$RUNNER_TEMP/npm-prefix/bin:$PATH"
-          test "$(adrouter-agent --version)" = "0.1.0-beta.3"
+          test "$(adrouter-agent --version)" = "${{ needs.publish-candidate.outputs.version }}"
           adrouter-agent install
           adrouter-agent doctor --json | tee "$RUNNER_TEMP/doctor.json"
-          node -e "const r=require(process.env.RUNNER_TEMP + '/doctor.json'); if (!r.installed || !r.receiptMatches || !r.bundleIntegrity || r.signatureType !== 'adhoc') process.exit(1)"
-          test -d "$HOME/Applications/AdRouter Agent.app"
+          node -e "const r=require(process.env.RUNNER_TEMP + '/doctor.json'); const signature=r.platform==='darwin'?'adhoc':'unsigned-portable'; if (r.schema!==3 || !r.installed || !r.receiptMatches || !r.bundleIntegrity || r.signatureType!==signature) process.exit(1)"
           adrouter-agent launch
       - run: npm ci
       - name: Run staging-router terminal stream smoke
         env:
-          ADROUTER_API_URL: ${{ secrets.ADROUTER_STAGING_URL }}
+          ADROUTER_API_URL: https://api-staging.adrouter.co
           ADROUTER_API_KEY: ${{ secrets.ADROUTER_STAGING_API_KEY }}
         run: npm run smoke:live
 
@@ -162,7 +176,6 @@ jobs:
           VERSION: ${{ needs.publish-candidate.outputs.version }}
         run: |
           test -n "$NODE_AUTH_TOKEN"
-          test "$VERSION" = "0.1.0-beta.3"
           test "$(npm view "@adrouter/agent@$VERSION" version)" = "$VERSION"
           npm dist-tag add "@adrouter/agent@$VERSION" beta
           npm dist-tag add "@adrouter/agent@$VERSION" latest

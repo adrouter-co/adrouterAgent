@@ -30,7 +30,34 @@ function run(command, args, options = {}) {
   return result.stdout;
 }
 
-export function buildLauncherPackage({ zipPath, outputDirectory, stagingRoot } = {}) {
+const targetMetadata = [
+  {
+    key: 'darwin-universal',
+    platform: 'darwin',
+    architectures: ['arm64', 'x64'],
+    archiveRoot: 'AdRouter Agent.app',
+    executablePath: 'Contents/MacOS/AdRouter Agent',
+    verificationMode: 'macos-adhoc',
+  },
+  {
+    key: 'linux-x64',
+    platform: 'linux',
+    architectures: ['x64'],
+    archiveRoot: 'AdRouter Agent-linux-x64',
+    executablePath: 'AdRouter Agent',
+    verificationMode: 'portable-checksum',
+  },
+  {
+    key: 'win32-x64',
+    platform: 'win32',
+    architectures: ['x64'],
+    archiveRoot: 'AdRouter Agent-win32-x64',
+    executablePath: 'AdRouter Agent.exe',
+    verificationMode: 'portable-checksum',
+  },
+];
+
+export function buildLauncherPackage({ artifacts, outputDirectory, stagingRoot } = {}) {
   const rootPackage = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   const launcherPackage = JSON.parse(readFileSync(join(launcherDirectory, 'package.json'), 'utf8'));
   const version = rootPackage.version;
@@ -38,8 +65,17 @@ export function buildLauncherPackage({ zipPath, outputDirectory, stagingRoot } =
     throw new Error('Root and launcher versions must match the beta release version.');
   }
 
-  const archive = resolve(zipPath ?? '');
-  if (!zipPath || !statSync(archive).isFile()) throw new Error('A release ZIP file is required.');
+  if (!Array.isArray(artifacts) || artifacts.length !== targetMetadata.length) {
+    throw new Error('All three platform release ZIP files are required.');
+  }
+  const archives = targetMetadata.map((target) => {
+    const input = artifacts.find((artifact) => artifact.key === target.key);
+    const archive = resolve(input?.zipPath ?? '');
+    if (!input?.zipPath || !statSync(archive).isFile()) {
+      throw new Error(`A release ZIP file is required for ${target.key}.`);
+    }
+    return { ...target, archive };
+  });
   const output = resolve(outputDirectory ?? join(root, 'out', 'release'));
   mkdirSync(output, { recursive: true });
   const ownedStaging = !stagingRoot;
@@ -55,22 +91,28 @@ export function buildLauncherPackage({ zipPath, outputDirectory, stagingRoot } =
       cpSync(join(launcherDirectory, entry), join(packageDirectory, entry), { recursive: true });
     }
     cpSync(join(root, 'LICENSE'), join(packageDirectory, 'LICENSE'));
-    const assetName = `AdRouter-Agent-${version}-universal.zip`;
-    if (basename(archive) !== assetName) {
-      throw new Error(`Release ZIP must be named ${assetName}.`);
-    }
+    const releaseArtifacts = archives.map(({ archive, ...target }) => {
+      const assetName = `AdRouter-Agent-${version}-${target.key}.zip`;
+      if (basename(archive) !== assetName) {
+        throw new Error(`Release ZIP for ${target.key} must be named ${assetName}.`);
+      }
+      return {
+        ...target,
+        assetName,
+        assetUrl: `https://github.com/adrouter/adrouterAgent/releases/download/v${version}/${assetName}`,
+        sha256: sha256(archive),
+      };
+    });
     const releaseManifest = {
-      schema: 2,
-      distributionMode: 'credential-free-adhoc',
+      schema: 3,
+      distributionMode: 'credential-free-portable',
       releaseVersion: version,
       releaseTag: `v${version}`,
-      assetName,
-      assetUrl: `https://github.com/adrouter/adrouterAgent/releases/download/v${version}/${assetName}`,
-      sha256: sha256(archive),
       repository: 'adrouter/adrouterAgent',
       bundleIdentifier: 'com.adrouter.agent',
       bundleShortVersion: '0.1.0',
-      bundleVersion: '10003',
+      bundleVersion: '10004',
+      artifacts: releaseArtifacts,
     };
     writeFileSync(
       join(packageDirectory, 'release-manifest.json'),
@@ -97,10 +139,16 @@ export function buildLauncherPackage({ zipPath, outputDirectory, stagingRoot } =
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const zipIndex = process.argv.indexOf('--zip');
   const outputIndex = process.argv.indexOf('--output');
+  const artifacts = targetMetadata.map((target) => {
+    const argumentIndex = process.argv.indexOf(`--${target.key}`);
+    return {
+      key: target.key,
+      zipPath: argumentIndex >= 0 ? process.argv[argumentIndex + 1] : undefined,
+    };
+  });
   const result = buildLauncherPackage({
-    zipPath: zipIndex >= 0 ? process.argv[zipIndex + 1] : undefined,
+    artifacts,
     outputDirectory: outputIndex >= 0 ? process.argv[outputIndex + 1] : undefined,
   });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

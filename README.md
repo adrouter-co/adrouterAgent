@@ -1,6 +1,6 @@
 # AdRouter Agent
 
-AdRouter Agent is a local-first macOS desktop coding agent. It opens a folder
+AdRouter Agent is a local-first cross-platform desktop coding agent. It opens a folder
 you approve, keeps durable task threads, inspects and edits project files, runs
 approved development commands in an OS sandbox, and presents its work for
 review.
@@ -10,15 +10,14 @@ selection and settlement use a separate display channel; sponsor data is never
 added to model prompts, tool arguments, commands, patches, or compacted agent
 context.
 
-> **Public beta:** AdRouter Agent 0.1.0-beta.3 supports macOS 12 or newer on Apple
-> Silicon and Intel. One agent task can run at a time, and updates are installed
-> manually.
+> **Public beta:** AdRouter Agent 0.1.0-beta.4 supports macOS 12+ on Apple Silicon
+> and Intel, Ubuntu Desktop 24.04 LTS x64, and Windows 11 x64. One agent task can
+> run at a time, and updates are installed manually.
 
 ## Install from npm
 
-The npm package is a small verified launcher for the exact credential-free,
-ad-hoc-signed universal ZIP on GitHub Releases. Installation requires Node.js
-22.19.0 or newer:
+The npm package is a small verified launcher for the exact platform ZIP on
+GitHub Releases. Installation requires Node.js 22.19.0 or newer:
 
 ```bash
 npm install --global @adrouter/agent@beta
@@ -28,22 +27,24 @@ adrouter-agent
 
 `adrouter-agent install` downloads and verifies without launching.
 `adrouter-agent --version` prints the release version without downloading.
-The launcher supports Apple Silicon and Intel, accepts no alternate URL or
-checksum, verifies the archive and ad-hoc bundle integrity, and installs the
-real application at `~/Applications/AdRouter Agent.app` on first use.
+The launcher accepts no alternate URL or checksum, verifies the archive and
+platform integrity, and installs the real application in the standard per-user
+location. See [platform setup and staging authentication](docs/platform-setup.md)
+for Ubuntu prerequisites, Windows one-time sandbox provisioning, install paths,
+and authentication steps.
 
 This beta is not Developer ID signed or notarized. If macOS blocks the first
 launch, open **System Settings → Privacy & Security** and choose **Open Anyway**.
 The launcher never removes quarantine metadata or changes Gatekeeper settings.
-After launch, enter your AdRouter server URL and bearer token, select **Test
-connection**, and save.
+After launch, the app is prefilled with `https://api-staging.adrouter.co`.
+Enter a staging AdRouter bearer token, select **Test connection**, and save.
 
 Remote routers must use HTTPS. Plain HTTP is accepted only for `localhost`,
 `127.0.0.1`, and `::1` development servers. The token is encrypted with the
-macOS Keychain and is never exposed to the renderer.
+operating-system credential store and is never exposed to the renderer.
 
 The installed app includes its runtime dependencies. After installation it can
-be opened directly from `~/Applications` without the CLI. AdRouterCLI, the
+be opened directly without the CLI. AdRouterCLI, the
 AdRouter WebUI, and a source checkout are not required. Git is optional; when
 available, the app adds branch and change metadata, while non-Git folders
 remain fully usable.
@@ -126,14 +127,16 @@ and UI testing.
 
 After `npm run dev` opens the desktop app:
 
-1. Enter `http://localhost:8787` as the AdRouter server URL.
+1. Keep `https://api-staging.adrouter.co`, or enter `http://localhost:8787` for
+   a local backend.
 2. Enter the exact local `ADROUTER_API_KEY` from the backend `.env.local`.
 3. Choose whether to enable sponsored compute.
 4. Select **Test connection** and confirm health, authentication, and model
    discovery succeed.
 5. Select **Save securely**.
 
-The token is encrypted by Electron `safeStorage` using the macOS Keychain. It
+The token is encrypted by Electron `safeStorage` using Keychain, DPAPI, or a
+supported Linux secret store. It
 is not exposed to the renderer or written to the event journal. Remote servers
 must use HTTPS; plain HTTP is accepted only for loopback development URLs.
 
@@ -193,9 +196,9 @@ model availability.
 
 ## Data and security
 
-Application state is stored under the normal macOS user-data directory in
-SQLite and a small configuration file. The configuration contains only
-Keychain-encrypted token ciphertext. Deleting a chat removes application
+Application state is stored under the normal operating-system user-data
+directory in SQLite and a small configuration file. The configuration contains
+only OS-encrypted token ciphertext. Deleting a chat removes application
 history and review metadata but never deletes project files.
 
 The renderer is sandboxed and context-isolated, with no Node.js or raw
@@ -240,13 +243,14 @@ The available scripts are:
 | `npm run smoke:live` | Send a bounded no-tools request to a real router. |
 | `npm run make:mac` | Build a local universal macOS ZIP. |
 | `npm run verify:dist` | Verify the generated macOS artifacts. |
+| `npm run make:linux` | Build an Ubuntu/Linux x64 portable ZIP. |
+| `npm run make:windows` | Build a Windows x64 portable ZIP. |
 
 The deterministic E2E suite packages an inspector-enabled test build and uses
 an in-process fixture router. It does not need live credentials. To exercise a
 real router without printing its token:
 
 ```bash
-ADROUTER_API_URL=http://localhost:8787 \
 ADROUTER_API_KEY="$ADROUTER_API_KEY" \
 npm run smoke:live
 ```
@@ -311,14 +315,15 @@ npm run verify:dist
 ```
 
 The GitHub release workflow runs the complete deterministic and live gates,
-creates a credential-free ad-hoc-signed universal ZIP, verifies bundle
-integrity and both architectures, generates SHA-256 checksums and CycloneDX
-SBOMs, and opens a draft `vX.Y.Z` prerelease. It uses no Apple credentials and
-does not claim Developer ID or notarization trust.
+creates macOS universal, Ubuntu x64, and Windows x64 portable ZIPs, verifies
+their platform integrity, generates SHA-256 checksums and CycloneDX SBOMs, and
+opens a draft `vX.Y.Z` prerelease. It uses no signing credentials and does not
+claim publisher identity for the unsigned portable beta artifacts.
 
-The release operator must manually install the downloaded draft artifact on
-Apple Silicon and Intel before publishing it. Release tags are immutable; a
-defective release is withdrawn and replaced with a higher patch version.
+The release operator must manually install the downloaded draft artifacts on
+Apple Silicon, Intel, clean Ubuntu 24.04, and clean Windows 11 hosts before
+publishing. Release tags are immutable; a defective release is withdrawn and
+replaced with a higher patch version.
 
 ## License
 

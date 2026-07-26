@@ -6,26 +6,34 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { buildLauncherPackage } from './build-launcher-package.mjs';
 
-test('embeds the exact release ZIP digest in the generated npm package', () => {
+test('embeds all exact platform ZIP digests in the generated npm package', () => {
   const temporary = mkdtempSync(join(tmpdir(), 'adrouter-launcher-build-test-'));
   try {
     const version = JSON.parse(readFileSync('package.json', 'utf8')).version;
-    const zip = join(temporary, `AdRouter-Agent-${version}-universal.zip`);
     const body = Buffer.from('signed-zip-fixture');
-    writeFileSync(zip, body);
+    const artifacts = ['darwin-universal', 'linux-x64', 'win32-x64'].map((key) => {
+      const zipPath = join(temporary, `AdRouter-Agent-${version}-${key}.zip`);
+      writeFileSync(zipPath, Buffer.concat([body, Buffer.from(key)]));
+      return { key, zipPath };
+    });
     const result = buildLauncherPackage({
-      zipPath: zip,
+      artifacts,
       outputDirectory: temporary,
       stagingRoot: join(temporary, 'staging'),
     });
-    assert.equal(result.manifest.sha256, createHash('sha256').update(body).digest('hex'));
-    assert.equal(result.manifest.schema, 2);
-    assert.equal(result.manifest.distributionMode, 'credential-free-adhoc');
+    assert.equal(
+      result.manifest.artifacts[0].sha256,
+      createHash('sha256')
+        .update(Buffer.concat([body, Buffer.from('darwin-universal')]))
+        .digest('hex')
+    );
+    assert.equal(result.manifest.schema, 3);
+    assert.equal(result.manifest.distributionMode, 'credential-free-portable');
     assert.equal(result.manifest.bundleIdentifier, 'com.adrouter.agent');
     assert.equal(
-      result.manifest.assetUrl,
+      result.manifest.artifacts[0].assetUrl,
       `https://github.com/adrouter/adrouterAgent/releases/download/v${version}/` +
-        `AdRouter-Agent-${version}-universal.zip`
+        `AdRouter-Agent-${version}-darwin-universal.zip`
     );
   } finally {
     rmSync(temporary, { recursive: true, force: true });

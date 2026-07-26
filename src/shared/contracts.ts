@@ -288,6 +288,11 @@ export const ApplicationInfoSchema = z.object({
   version: z.string().min(1),
   platform: z.string().min(1),
   architecture: z.string().min(1),
+  sandbox: z.object({
+    status: z.enum(['ready', 'setup-required', 'unsupported']),
+    detail: z.string().min(1),
+    setupCommands: z.array(z.string().min(1)),
+  }),
 });
 export type ApplicationInfo = z.infer<typeof ApplicationInfoSchema>;
 export const RevertResultSchema = z.object({

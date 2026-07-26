@@ -18,12 +18,12 @@ npm run check:public
 ```
 
 `scripts/verify-source-parity.mjs` verifies those files byte-for-byte.
-`src/main/ipc.ts` is the sole product-source exception: its About/version IPC
-response reports the public SemVer `0.1.0-beta.3` while the macOS property list
-must use numeric short/build versions. Other changes outside the parity set are
-public-release packaging, documentation, dependency-resolution, and automation
-work. Version metadata is intentionally set to npm/GitHub version
-`0.1.0-beta.3`, macOS short version `0.1.0`, and macOS build version `10003`.
+`src/main/ipc.ts` remains outside the parity set because its About/version IPC
+response reports public release metadata and platform sandbox diagnostics.
+Other changes outside the parity set are public-release packaging,
+documentation, dependency-resolution, and automation work. Version metadata is
+intentionally set to npm/GitHub version
+`0.1.0-beta.4`, macOS short version `0.1.0`, and macOS build version `10004`.
 
 The original source Git history is deliberately not imported. This record and
 the checksum inventory provide the public review boundary without disclosing

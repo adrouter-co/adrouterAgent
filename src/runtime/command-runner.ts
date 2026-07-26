@@ -47,6 +47,14 @@ const appendCapped = (
 
 const terminateProcessTree = (child: ChildProcess): void => {
   const processId = child.pid;
+  if (processId && process.platform === 'win32') {
+    const killer = spawn('taskkill.exe', ['/pid', String(processId), '/t', '/f'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    killer.unref();
+    return;
+  }
   if (processId && process.platform !== 'win32') {
     try {
       process.kill(-processId, 'SIGTERM');

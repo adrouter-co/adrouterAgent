@@ -1,7 +1,7 @@
 {
   "name": "@adrouter/agent",
-  "version": "0.1.0-beta.3",
-  "description": "Verified installer and launcher for the AdRouter Agent macOS application.",
+  "version": "0.1.0-beta.4",
+  "description": "Verified installer and launcher for the AdRouter Agent desktop application.",
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
@@ -18,7 +18,9 @@
     "node": ">=22.19.0"
   },
   "os": [
-    "darwin"
+    "darwin",
+    "linux",
+    "win32"
   ],
   "cpu": [
     "arm64",

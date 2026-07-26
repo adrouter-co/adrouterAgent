@@ -1,61 +1,81 @@
-# Plan: Credential-free AdRouter Agent npm release
+# Plan: Cross-platform AdRouter Agent with live staging support
 
 ## Goal
 
-Publish AdRouter Agent as the dependency-free `@adrouter/agent` npm launcher,
-which installs and launches the credential-free universal macOS app at
-`~/Applications/AdRouter Agent.app` without a DMG or Apple release credentials.
+Ship the AdRouter Agent as a portable desktop application and npm-managed
+launcher for macOS, Ubuntu 24.04 LTS x64, and Windows 11 x64, with fresh
+installations preconfigured for `https://api-staging.adrouter.co` and no
+embedded credentials.
 
 ## Context
 
-- The public identities remain `adrouter/adrouterAgent`, `@adrouter/agent`, and
-  `adrouter-agent`.
-- The repository has not yet been committed or pushed, and the npm package has
-  not yet been published.
-- The existing protected validation, staging canary, draft release, candidate
-  smoke, and dist-tag promotion sequence is preserved.
-- The router backend deployment and its provider credentials are unchanged.
+- The current Electron application, packaging, release workflow, and npm
+  launcher are macOS-specific.
+- The desktop router client already supports configurable HTTPS origins and
+  uses `/health`, `/v1/profile`, `/v1/models`, and `/v1/agent/turn`.
+- The staging service is live at `https://api-staging.adrouter.co`; health and
+  model discovery match the current client contract, while authenticated routes
+  require a user-supplied bearer token.
+- macOS command execution uses Seatbelt. Linux will use Bubblewrap. Windows
+  command execution remains fail-closed until the pinned sandbox runtime's
+  one-time elevated setup has been run manually.
+- The existing macOS user-data path and saved router configuration must remain
+  unchanged.
 
 ## Research Summary
 
-- Electron supports distributing unsigned applications but warns that macOS
-  users may need advanced manual approval.
-- Ad-hoc signing provides local bundle integrity without an Apple identity; it
-  does not provide Developer ID or notarization trust.
-- `~/Applications` is the standard per-user application location on macOS.
-- npm trusted publishing covers `npm publish`, while dist-tag operations still
-  require traditional authenticated access.
+- Electron Forge's ZIP maker supports macOS, Windows, and Linux, so portable
+  archives do not require an additional maker dependency.
+- Electron `safeStorage` uses Keychain on macOS, DPAPI on Windows, and the
+  available secret store on Linux. Linux weak `basic_text` storage must be
+  rejected for bearer-token persistence.
+- Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor;
+  Bubblewrap needs a narrow executable profile rather than a global security
+  relaxation.
+- `@anthropic-ai/sandbox-runtime@0.0.65` documents macOS, Linux, and alpha
+  Windows support. Windows needs a one-time `windows-install` command with UAC.
 
 ## Constraints
 
-- Preserve desktop behavior, router contracts, user data, and Keychain-backed
-  configuration.
+- Preserve current macOS behavior, saved configuration, router routes, NDJSON
+  protocol, database data, and sponsor isolation.
 - Keep the launcher dependency-free and free of lifecycle scripts.
-- Never remove quarantine metadata or modify Gatekeeper settings.
-- Preserve immutable GitHub tags, release checksums, SBOMs, attestations, and
-  fail-closed download/archive validation.
-- Release the real-ZIP installer fix as `0.1.0-beta.3`; earlier beta tags remain
-  immutable, and beta.2 is not promoted beyond its temporary candidate state.
+- Preserve fail-closed archive, checksum, redirect, command-policy, credential,
+  and sandbox behavior.
+- Do not embed, log, package, or expose an AdRouter bearer token.
+- Keep Electron 43 pinned so the existing macOS 12 support is not silently
+  dropped.
+- Keep the first implementation small, reviewable, and reversible.
+- Prefer minimal diffs over broad rewrites and introduce no new runtime
+  dependencies unless explicitly required.
 
 ## Out of Scope
 
-- Backend deployment changes.
-- Windows or Linux desktop distribution.
-- Apple Developer ID signing, notarization, the Mac App Store, or auto-update.
-- Unrelated product refactors or UI redesign.
+- Native MSI/MSIX, DMG, deb, rpm, AppImage, Start-menu, or desktop-menu
+  installers.
+- Windows code signing, Linux package signing, Apple Developer ID signing,
+  notarization, or auto-update.
+- Windows/Linux ARM64, WSL, and Linux distributions other than Ubuntu 24.04 LTS.
+- Automatically elevating privileges or disabling AppArmor/system sandboxing.
+- Router backend deployment or API-contract changes.
+- Unrelated UI redesign, module renames, or opportunistic cleanup.
 
 ## Reversibility
 
-- Code and workflow changes remain reversible until the GitHub release and npm
-  version are public.
-- Application updates stage beside the destination and restore the prior bundle
-  if activation or receipt writing fails.
-- A defective public version must be replaced with a higher beta version; tags
-  and npm versions are never reused.
+- Add platform adapters and schema readers before replacing platform-specific
+  branches.
+- Preserve schema-2 macOS receipts and migrate only after verifying the managed
+  installation.
+- Keep platform release jobs isolated so any new target can be disabled without
+  changing macOS output.
+- Stage launcher updates beside the destination and restore the prior managed
+  installation on activation failure.
+- Keep implementation commits aligned with the steps and document any
+  irreversible release action before performing it.
 
 ---
 
-## Step A: Build ZIP-only credential-free release artifacts
+## Step A: Make the desktop runtime and configuration platform-aware
 
 ### Status
 
@@ -63,64 +83,158 @@ which installs and launches the credential-free universal macOS app at
 
 ### Objective
 
-Remove DMG, Developer ID, and notarization requirements while retaining a
-verified universal ad-hoc-signed application.
+Run the Electron application safely on macOS, Ubuntu, and Windows while making
+the live staging origin the editable default for fresh onboarding.
 
 ### Tasks
 
-- [x] Remove the DMG maker and Apple credential/notarization configuration.
-- [x] Retain universal slice handling and final ad-hoc signing.
-- [x] Make release preparation and verification ZIP-only.
-- [x] Add manifest schema 2 and the explicit credential-free distribution mode.
+- [x] Add one non-secret staging-origin constant and use it only when no router
+      configuration has been saved.
+- [x] Add platform-aware paths, environment construction, command quoting,
+      command-policy normalization, cancellation, and process-tree handling.
+- [x] Add sandbox readiness reporting and fail closed when the platform sandbox
+      or secure credential storage is unavailable.
+- [x] Use native title bars and platform-neutral user-facing copy outside macOS.
+- [x] Add Windows and Linux icon assets required by Electron packaging.
+- [x] Add platform-focused unit and integration coverage.
+
+### Relevant Files
+
+- `src/main/`
+- `src/runtime/`
+- `src/preload/`
+- `src/renderer/`
+- `assets/`
+- `test/`
+
+### Expected Changes
+
+- create: small platform/runtime adapter modules and focused tests
+- modify: configuration defaults, sandbox startup, command execution, app info,
+  credential handling, and platform-specific UI copy
+- delete: no persisted data, routes, or legacy receipt readers
+
+### Do Not Modify
+
+- Router API paths or NDJSON event contracts
+- Sponsor isolation and command approval flow
+- Existing saved router origins or user-data locations
+
+### Commands
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run test:integration
+```
+
+### Acceptance Criteria
+
+- [x] Fresh onboarding is prefilled with the exact staging origin and remains
+      editable; an existing saved origin is preserved.
+- [x] Unsafe Linux credential storage and missing Linux/Windows sandbox setup
+      remove shell/Git capabilities and surface actionable diagnostics.
+- [x] Windows command parsing handles executable suffixes, drive paths, UNC
+      paths, backslashes, PowerShell serialization, and process-tree shutdown.
+- [x] macOS behavior and all relevant tests continue to pass.
+
+### Validation Results
+
+- `npm run lint`: passed
+- `npm run typecheck`: passed
+- `npm test`: passed, 39 tests
+- `npm run test:integration`: passed, 6 tests
+
+### Findings / Notes
+
+- Windows sandbox setup is intentionally a manual prerequisite; the application
+  never requests elevation.
+
+---
+
+## Step B: Produce and verify portable artifacts for each operating system
+
+### Status
+
+`review`
+
+### Objective
+
+Build a macOS universal ZIP, Ubuntu x64 ZIP, and Windows x64 ZIP with an
+artifact manifest that lets the launcher choose and verify the exact target.
+
+### Tasks
+
+- [x] Configure Forge ZIP outputs and platform-specific executable/icon details.
+- [x] Generalize release preparation and verification to manifest schema 3 with
+      an `artifacts` collection keyed by `darwin-universal`, `linux-x64`, and
+      `win32-x64`.
+- [x] Preserve ad-hoc macOS verification and define portable checksum/archive
+      verification for unsigned Linux and Windows beta artifacts.
+- [x] Add native CI build jobs and aggregate checksums, SBOMs, manifest, ZIPs,
+      and the npm tarball before creating a draft release.
+- [x] Add release-script and manifest tests for supported and rejected targets.
 
 ### Relevant Files
 
 - `forge.config.ts`
-- `scripts/verify-dist.mjs`
-- `scripts/prepare-release-assets.mjs`
-- `scripts/verify-release-assets.mjs`
+- `package.json`
+- `scripts/`
+- `.github/workflows/`
+- `assets/`
 
 ### Expected Changes
 
-- modify: macOS packaging, release inventory, and artifact validation
-- delete: no source files; DMG output is no longer produced by clean builds
+- modify: Forge configuration, package scripts, release manifest preparation,
+  release verification, and CI matrices
+- create: platform icon assets or deterministic generation inputs if absent
 
 ### Do Not Modify
 
-- Desktop product behavior under `src/`
-- Bundle identifier or public version
+- Public package/application identity
+- Immutable release-tag and candidate-before-promotion policy
+- macOS universal architecture support
 
 ### Commands
 
 ```bash
 npm run make:mac
 npm run verify:dist
-node scripts/prepare-release-assets.mjs 0.1.0-beta.3
+npm run test:workflows
+node scripts/prepare-release-assets.mjs 0.1.0-beta.4
 node scripts/verify-release-assets.mjs out/release
 ```
 
 ### Acceptance Criteria
 
-- [x] The app contains arm64 and x86_64 slices.
-- [x] The bundle passes strict code-signature integrity checks as ad-hoc with no
-      Apple Team Identifier.
-- [x] The release directory contains one ZIP, the npm tarball, two SBOMs,
-      checksums, and the artifact manifest, with no DMG.
+- [ ] Native build jobs emit the exact three artifact keys and stable archive
+      layouts described by schema 3.
+- [x] Every archive has a checksum and SBOM entry and passes target-appropriate
+      verification.
+- [x] macOS remains universal and strictly verifies its ad-hoc signature.
+- [x] Linux and Windows outputs contain the expected executable paths and no
+      secrets.
 
 ### Validation Results
 
 - `npm run make:mac`: passed
 - `npm run verify:dist`: passed
-- release asset preparation and verification: passed for four checksummed assets
+- `npm run make:linux && npm run verify:dist:linux`: passed cross-build verification
+- `npm run make:windows && npm run verify:dist:windows`: passed cross-build verification
+- workflow policy checks: passed
+- release preparation and verification: passed, 8 checksummed assets
 
 ### Findings / Notes
 
-- An ignored DMG from the earlier local build may remain under `out/make`; clean
-  builds no longer create it and it is never copied into `out/release`.
+- Linux and Windows portable beta archives are unsigned; checksums and release
+  provenance establish artifact integrity but not publisher identity.
+- The native Ubuntu and Windows jobs are configured but must run on GitHub
+  before promotion; local cross-builds verified both archive layouts.
 
 ---
 
-## Step B: Install and manage the real per-user application
+## Step C: Generalize the npm launcher and diagnostics
 
 ### Status
 
@@ -128,35 +242,41 @@ node scripts/verify-release-assets.mjs out/release
 
 ### Objective
 
-Make the globally installed command safely install, update, diagnose, and open
-the real application in `~/Applications`.
+Install, update, diagnose, and launch the correct portable application on every
+supported OS without lifecycle downloads or runtime dependencies.
 
 ### Tasks
 
-- [x] Replace the versioned cache with the canonical per-user Applications path.
-- [x] Store an ownership/version/checksum receipt in Application Support.
-- [x] Verify archive layout, bundle identity, versions, architectures, ad-hoc
-      signature, and sealed resources before activation.
-- [x] Refuse root execution and unmanaged destination collisions.
-- [x] Implement staged updates with backup restoration on failure.
-- [x] Report Gatekeeper diagnostically and provide Open Anyway guidance without
-      modifying system security settings.
+- [x] Select schema-3 artifacts by exact OS/architecture and reject unsupported
+      combinations.
+- [x] Add XDG and LocalAppData installation/receipt paths while preserving the
+      macOS locations.
+- [x] Generalize safe archive extraction, executable validation, activation,
+      rollback, and launch behavior for ZIP layouts on all targets.
+- [x] Add schema-3 receipts and doctor output, retaining verified schema-2
+      macOS migration support.
+- [x] Expand npm `os` metadata and add installer/doctor tests for traversal,
+      checksum, redirect, collision, rollback, and migration failures.
 
 ### Relevant Files
 
+- `packages/agent-launcher/package.json`
 - `packages/agent-launcher/lib/`
 - `packages/agent-launcher/test/`
 - `packages/agent-launcher/README.md`
 
 ### Expected Changes
 
-- modify: launcher install paths, receipt schema, doctor JSON, and tests
+- modify: launcher platform selection, paths, archive validation, receipt,
+  doctor schema, startup, package metadata, and documentation
+- create: platform-focused launcher helpers/tests where useful
 
 ### Do Not Modify
 
-- Electron user-data path
-- Router configuration or model behavior
-- npm lifecycle scripts or runtime dependencies
+- Dependency-free package design
+- No-lifecycle-script policy
+- Canonical-host redirect and checksum enforcement
+- Safe staged activation and rollback guarantees
 
 ### Commands
 
@@ -167,62 +287,138 @@ npm run check:launcher-package
 
 ### Acceptance Criteria
 
-- [x] First invocation creates `~/Applications/AdRouter Agent.app`.
-- [x] Repeat invocation reuses an intact matching installation.
-- [x] Unmanaged collisions fail closed and interrupted updates restore the prior
-      managed bundle.
-- [x] `doctor --json` reports schema 2 receipt, integrity, ad-hoc signature, and
-      Gatekeeper assessment fields.
+- [x] The launcher chooses only the exact compatible artifact and refuses
+      unsupported OS/CPU combinations.
+- [x] Install paths are `~/Applications`, XDG data, and LocalAppData on macOS,
+      Linux, and Windows respectively.
+- [x] Schema-3 doctor output reports platform, architecture, sandbox readiness,
+      installation integrity, and actionable static setup guidance without
+      exposing credentials.
+- [x] Malicious or corrupt archives and interrupted updates fail safely.
 
 ### Validation Results
 
-- `npm run test:launcher`: passed, 11 tests
+- `npm run test:launcher`: passed, 16 tests
 - `npm run check:launcher-package`: passed
 
 ### Findings / Notes
 
-- Gatekeeper rejection is allowed for this distribution mode and is never used
-  as evidence of archive or bundle integrity.
+- npm CPU metadata retains `arm64` for the existing universal macOS build, but
+  the launcher rejects ARM64 on new operating-system targets.
 
 ---
 
-## Step C: Final verification and cleanup
+## Step D: Document setup, authentication, and live staging validation
 
 ### Status
 
-`done`
+`review`
 
 ### Objective
 
-Preserve the prior protected release flow, document all operator credentials,
-and verify the complete implementation before external publication.
+Give users and release operators exact platform prerequisites, bearer-token
+setup, and a protected live staging canary with no secret leakage.
 
 ### Tasks
 
-- [x] Remove Apple secrets from the release workflow while retaining the
-      protected `macos-release` approval environment.
-- [x] Update public smoke checks for the real Applications bundle and schema 2
-      doctor result.
-- [x] Separate first-package bootstrap authentication from dist-tag
-      authentication and document later OIDC migration.
-- [x] Update all public installation, release, support, and checklist documents.
-- [x] Run the full local validation suite and review the release inventory.
+- [x] Document Ubuntu dependencies and a narrow Bubblewrap AppArmor profile.
+- [x] Document the pinned manual Windows sandbox setup command and its UAC
+      requirement.
+- [x] Document that the desktop defaults to staging but requires the user's
+      AdRouter bearer token; distinguish it from provider credentials.
+- [x] Default public smoke checks to the exact staging origin while retaining an
+      explicit local-development override.
+- [x] Keep only `ADROUTER_STAGING_API_KEY` secret in protected canary jobs and
+      validate health, authentication, model discovery, and one bounded no-tools
+      streamed turn.
+- [x] Update security, privacy, support, release, and source-provenance docs.
 
 ### Relevant Files
 
-- `.github/workflows/`
+- `README.md`
 - `RELEASE.md`
-- `docs/release-checklist.md`
+- `SECURITY.md`
+- `PRIVACY.md`
+- `docs/`
+- `.github/workflows/`
 
 ### Expected Changes
 
-- modify: protected release/promotion workflows and public operator docs
+- modify: user setup, authentication, support, security, release, and CI canary
+  documentation/configuration
 
 ### Do Not Modify
 
-- Staging router deployment
-- Immutable release-tag behavior
-- Candidate-before-beta promotion ordering
+- Staging backend deployment or provider credentials
+- Secret values or authentication bypasses
+- Ad payload isolation rules
+
+### Commands
+
+```bash
+npm run check:public
+npm run test:staging-canary
+```
+
+### Acceptance Criteria
+
+- [x] A new user can identify every OS prerequisite and where to obtain/enter
+      the AdRouter bearer token without being told to expose it in a shell log.
+- [x] The staging URL is public configuration and the token remains protected.
+- [ ] The canary discovers a server-advertised model and reaches a terminal
+      `done` event without enabling tools.
+- [x] Documentation never suggests disabling AppArmor or reusing a provider key.
+
+### Validation Results
+
+- `npm run check:public`: passed
+- `npm run test:staging-canary`: not run (requires protected secret)
+
+### Findings / Notes
+
+- `/health` is unauthenticated and cannot prove that a bearer token is valid;
+  `/v1/profile` or `/v1/models` must be checked with authentication.
+- `https://api-staging.adrouter.co/health`: passed with `{"status":"ok"}`.
+
+---
+
+## Step E: Final verification and cleanup
+
+### Status
+
+`review`
+
+### Objective
+
+Verify the complete change, review the diff for scope and secret safety, and
+record any platform validation that still requires native hardware or release
+credentials.
+
+### Tasks
+
+- [x] Run the full local validation suite and packaged macOS E2E coverage.
+- [ ] Verify native Ubuntu and Windows CI jobs or record them as required
+      pre-release validation when not runnable locally.
+- [x] Review the final diff for unintended changes, credential exposure, stale
+      macOS-only claims, debugging code, unused files, and generated output.
+- [x] Confirm existing saved configurations and schema-2 macOS receipts remain
+      readable.
+- [x] Record remaining risks and follow-up release work.
+
+### Relevant Files
+
+- all files changed by Steps A-D
+- `PLAN.md`
+
+### Expected Changes
+
+- modify: only validation findings, documentation corrections, and plan status
+- delete: temporary/debug/generated files only if created by this work
+
+### Do Not Modify
+
+- Unrelated user changes
+- External releases, npm versions, tags, or deployment state
 
 ### Commands
 
@@ -230,44 +426,46 @@ and verify the complete implementation before external publication.
 npm run check
 npm run test:e2e
 npm audit --omit=dev --audit-level=moderate
+git diff --check
+git status --short
 ```
 
 ### Acceptance Criteria
 
-- [x] Lint, typecheck, unit, integration, public-boundary, workflow, launcher,
-      and packaged E2E tests pass.
-- [x] Production audit reports no moderate-or-higher vulnerability.
-- [x] No Apple credential is required by CI.
-- [x] Documentation gives exact GitHub, staging, npm bootstrap, dist-tag, tag,
-      promotion, OIDC, and credential-revocation steps.
+- [x] All locally runnable checks pass.
+- [ ] Native CI covers every supported target before release promotion.
+- [x] No secrets, generated artifacts, or unrelated changes are present.
+- [x] Documentation and diagnostics state any unsigned/alpha limitations clearly.
+- [x] Remaining external setup and authentication steps are listed for the user.
 
 ### Validation Results
 
-- `npm run check`: passed; 35 unit tests, 5 integration tests, 11 launcher tests
+- `npm run check`: passed
 - `npm run test:e2e`: passed, 2 packaged Electron tests
-- `npm audit --omit=dev --audit-level=moderate`: passed with zero findings
+- `npm audit --omit=dev --audit-level=moderate`: passed, 0 vulnerabilities
+- `git diff --check`: passed
 
 ### Findings / Notes
 
-- GitHub authentication is already valid for `HappyCool121`, which is an active
-  administrator of `adrouter`; the remote repository does not yet exist.
-- npm authentication is still required from the release operator.
+- Only macOS packaging can be executed locally; Ubuntu and Windows package/runtime
+  behavior must also pass on native CI runners before a public release.
 
 ---
 
 ## Follow-up Work
 
-- Create and push the public GitHub repository using `RELEASE.md`.
-- Enter the staging and short-lived npm secrets, then create and promote the
-  immutable release tag.
-- After the first npm package exists, configure trusted publishing and revoke
-  the bootstrap token.
-- Manually cover Apple Silicon, Intel, macOS 12, and a current macOS release.
+- Run a protected live staging canary with an issued AdRouter staging bearer
+  token.
+- Exercise installation, sandbox boundaries, update rollback, and GUI startup on
+  clean Ubuntu 24.04 and Windows 11 x64 machines.
+- Add signing/native installers only after the portable beta path is proven.
 
 ## Decision Log
 
 | Date | Decision | Rationale | Impact |
 | --- | --- | --- | --- |
-| 2026-07-26 | Use credential-free ad-hoc signing | Avoid Apple account and notarization requirements while retaining bundle integrity | Some users may need one-time Open Anyway approval |
-| 2026-07-26 | Install the real app on first command invocation | Avoid npm lifecycle downloads and fragile aliases | `npm install -g` installs only the CLI; `adrouter-agent` creates the app |
-| 2026-07-26 | Keep the scoped public identity and prior promotion sequence | Existing code and release policy are already wired to these names | One GitHub repository and one npm package are required |
+| 2026-07-26 | Target macOS universal, Ubuntu 24.04 x64, and Windows 11 x64 | Covers the requested additional operating systems while matching supported sandbox/runtime paths | Other Linux distributions, WSL, and new-OS ARM64 remain unsupported |
+| 2026-07-26 | Prioritize the dependency-free npm launcher and portable ZIPs | Reuses the hardened installer and avoids native installer/signing scope | Linux and Windows beta artifacts are unsigned |
+| 2026-07-26 | Prefill only fresh onboarding with `https://api-staging.adrouter.co` | Makes the live service immediately discoverable without overwriting saved choices | Users still provide their own bearer token |
+| 2026-07-26 | Require manual Windows sandbox provisioning | The pinned runtime's Windows support is alpha and needs UAC | Shell/Git tools fail closed until setup succeeds |
+| 2026-07-26 | Keep Ubuntu AppArmor enabled with a narrow Bubblewrap profile | Ubuntu 24.04 restricts user namespaces by design | Setup is explicit without weakening host-wide security |

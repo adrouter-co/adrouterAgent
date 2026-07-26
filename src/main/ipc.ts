@@ -1,4 +1,5 @@
 import { app, type IpcMainInvokeEvent, ipcMain, type WebContents } from 'electron';
+import { sandboxReadiness } from '../runtime/platform';
 import {
   ApprovalSchema,
   type IpcMethod,
@@ -13,7 +14,7 @@ import type { RepositoryService } from './repository-service';
 import type { ReviewService } from './review-service';
 import type { RuntimeSupervisor } from './runtime-supervisor';
 
-const PUBLIC_RELEASE_VERSION = '0.1.0-beta.3';
+const PUBLIC_RELEASE_VERSION = '0.1.0-beta.4';
 
 interface Subscription {
   id: string;
@@ -291,6 +292,7 @@ export const registerIpcHandlers = (dependencies: IpcDependencies): EventSubscri
     version: PUBLIC_RELEASE_VERSION,
     platform: process.platform,
     architecture: process.arch,
+    sandbox: sandboxReadiness(),
   }));
   register('app.getVersion', () => ({ version: PUBLIC_RELEASE_VERSION }));
   register('app.getPlatform', () => ({ platform: process.platform }));

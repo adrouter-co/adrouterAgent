@@ -1,13 +1,45 @@
 {
-  "schema": 2,
-  "distributionMode": "credential-free-adhoc",
-  "releaseVersion": "0.1.0-beta.3",
-  "releaseTag": "v0.1.0-beta.3",
-  "assetName": "AdRouter-Agent-0.1.0-beta.3-universal.zip",
-  "assetUrl": "https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.3/AdRouter-Agent-0.1.0-beta.3-universal.zip",
-  "sha256": "UNBUILT",
+  "schema": 3,
+  "distributionMode": "credential-free-portable",
+  "releaseVersion": "0.1.0-beta.4",
+  "releaseTag": "v0.1.0-beta.4",
   "repository": "adrouter/adrouterAgent",
   "bundleIdentifier": "com.adrouter.agent",
   "bundleShortVersion": "0.1.0",
-  "bundleVersion": "10003"
+  "bundleVersion": "10004",
+  "artifacts": [
+    {
+      "key": "darwin-universal",
+      "platform": "darwin",
+      "architectures": ["arm64", "x64"],
+      "assetName": "AdRouter-Agent-0.1.0-beta.4-darwin-universal.zip",
+      "assetUrl": "https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.4/AdRouter-Agent-0.1.0-beta.4-darwin-universal.zip",
+      "sha256": "UNBUILT",
+      "archiveRoot": "AdRouter Agent.app",
+      "executablePath": "Contents/MacOS/AdRouter Agent",
+      "verificationMode": "macos-adhoc"
+    },
+    {
+      "key": "linux-x64",
+      "platform": "linux",
+      "architectures": ["x64"],
+      "assetName": "AdRouter-Agent-0.1.0-beta.4-linux-x64.zip",
+      "assetUrl": "https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.4/AdRouter-Agent-0.1.0-beta.4-linux-x64.zip",
+      "sha256": "UNBUILT",
+      "archiveRoot": "AdRouter Agent-linux-x64",
+      "executablePath": "AdRouter Agent",
+      "verificationMode": "portable-checksum"
+    },
+    {
+      "key": "win32-x64",
+      "platform": "win32",
+      "architectures": ["x64"],
+      "assetName": "AdRouter-Agent-0.1.0-beta.4-win32-x64.zip",
+      "assetUrl": "https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.4/AdRouter-Agent-0.1.0-beta.4-win32-x64.zip",
+      "sha256": "UNBUILT",
+      "archiveRoot": "AdRouter Agent-win32-x64",
+      "executablePath": "AdRouter Agent.exe",
+      "verificationMode": "portable-checksum"
+    }
+  ]
 }

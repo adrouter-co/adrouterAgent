@@ -13,6 +13,7 @@ import type { RuntimeEvent, RuntimeStartSchema } from '../shared/runtime-protoco
 import { containsSponsorKey, now, removeSponsorData, safeRecord } from '../shared/security';
 import { SandboxedCommandRunner } from './command-runner';
 import { createAdRouterPiProvider } from './pi-provider';
+import { sandboxReadiness } from './platform';
 import { AdRouterClient } from './router-client';
 import { createDesktopTools, type ToolApproval } from './tools';
 
@@ -276,6 +277,7 @@ export class DesktopAgentSession {
     });
 
     const commandRunner = new SandboxedCommandRunner();
+    const sandbox = sandboxReadiness();
     const tools = createDesktopTools({
       workspaceRoot: this.start.project.path,
       permissionMode: this.start.project.permissionMode,
@@ -283,6 +285,7 @@ export class DesktopAgentSession {
       turnId: this.start.turnId,
       commandRunner,
       allowedCommands: this.start.allowedCommands,
+      commandsEnabled: sandbox.status === 'ready',
       requestApproval: (approval, signal) => this.requestApproval(approval, signal),
       emit: (type, payload) =>
         this.emit({ type, turnId: this.start.turnId, timestamp: now(), payload }),

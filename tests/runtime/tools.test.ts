@@ -15,6 +15,27 @@ afterEach(async () => {
 });
 
 describe('desktop tool approvals', () => {
+  it('omits command and Git tools when sandbox setup is unavailable', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'adrouter-tools-'));
+    directories.push(workspace);
+    const tools = createDesktopTools({
+      workspaceRoot: workspace,
+      permissionMode: 'workspace-write',
+      threadId: '11111111-1111-4111-8111-111111111111',
+      turnId: '22222222-2222-4222-8222-222222222222',
+      commandRunner: {} as SandboxedCommandRunner,
+      commandsEnabled: false,
+      requestApproval: vi.fn(),
+      emit: vi.fn(),
+    });
+    expect(tools.map((tool) => tool.name)).toEqual([
+      'list_files',
+      'read_file',
+      'search_text',
+      'apply_patch',
+    ]);
+  });
+
   it('asks again for every general command and every file mutation', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'adrouter-tools-'));
     directories.push(workspace);

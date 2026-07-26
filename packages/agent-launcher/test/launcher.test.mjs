@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -23,41 +24,89 @@ import {
   install,
   releasePaths,
 } from '../lib/installer.mjs';
-import { validateManifest } from '../lib/manifest.mjs';
+import { artifactKey, selectArtifact, validateManifest } from '../lib/manifest.mjs';
 
 const manifest = {
-  schema: 2,
-  distributionMode: 'credential-free-adhoc',
-  releaseVersion: '0.1.0-beta.3',
-  releaseTag: 'v0.1.0-beta.3',
-  assetName: 'AdRouter-Agent-0.1.0-beta.3-universal.zip',
-  assetUrl:
-    'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.3/AdRouter-Agent-0.1.0-beta.3-universal.zip',
-  sha256: 'a'.repeat(64),
+  schema: 3,
+  distributionMode: 'credential-free-portable',
+  releaseVersion: '0.1.0-beta.4',
+  releaseTag: 'v0.1.0-beta.4',
   repository: 'adrouter/adrouterAgent',
   bundleIdentifier: 'com.adrouter.agent',
   bundleShortVersion: '0.1.0',
-  bundleVersion: '10003',
+  bundleVersion: '10004',
+  artifacts: [
+    {
+      key: 'darwin-universal',
+      platform: 'darwin',
+      architectures: ['arm64', 'x64'],
+      assetName: 'AdRouter-Agent-0.1.0-beta.4-darwin-universal.zip',
+      assetUrl:
+        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.4/AdRouter-Agent-0.1.0-beta.4-darwin-universal.zip',
+      sha256: 'a'.repeat(64),
+      archiveRoot: 'AdRouter Agent.app',
+      executablePath: 'Contents/MacOS/AdRouter Agent',
+      verificationMode: 'macos-adhoc',
+    },
+    {
+      key: 'linux-x64',
+      platform: 'linux',
+      architectures: ['x64'],
+      assetName: 'AdRouter-Agent-0.1.0-beta.4-linux-x64.zip',
+      assetUrl:
+        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.4/AdRouter-Agent-0.1.0-beta.4-linux-x64.zip',
+      sha256: 'b'.repeat(64),
+      archiveRoot: 'AdRouter Agent-linux-x64',
+      executablePath: 'AdRouter Agent',
+      verificationMode: 'portable-checksum',
+    },
+    {
+      key: 'win32-x64',
+      platform: 'win32',
+      architectures: ['x64'],
+      assetName: 'AdRouter-Agent-0.1.0-beta.4-win32-x64.zip',
+      assetUrl:
+        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.4/AdRouter-Agent-0.1.0-beta.4-win32-x64.zip',
+      sha256: 'c'.repeat(64),
+      archiveRoot: 'AdRouter Agent-win32-x64',
+      executablePath: 'AdRouter Agent.exe',
+      verificationMode: 'portable-checksum',
+    },
+  ],
 };
 
 test('validates the exact credential-free release manifest', () => {
-  assert.equal(validateManifest(manifest).releaseVersion, '0.1.0-beta.3');
+  assert.equal(validateManifest(manifest).releaseVersion, '0.1.0-beta.4');
   assert.throws(() => validateManifest({ ...manifest, schema: 1 }));
   assert.throws(() => validateManifest({ ...manifest, distributionMode: 'notarized' }));
   assert.throws(() => validateManifest({ ...manifest, repository: 'attacker/repository' }));
   assert.throws(() => validateManifest({ ...manifest, bundleIdentifier: 'evil.app' }));
-  assert.throws(() => validateManifest({ ...manifest, sha256: 'UNBUILT' }));
-  assert.throws(() => validateManifest({ ...manifest, assetUrl: 'https://example.com/app.zip' }));
+  assert.throws(() =>
+    validateManifest({
+      ...manifest,
+      artifacts: manifest.artifacts.map((artifact, index) =>
+        index === 0 ? { ...artifact, sha256: 'UNBUILT' } : artifact
+      ),
+    })
+  );
+  assert.throws(() =>
+    validateManifest({
+      ...manifest,
+      artifacts: manifest.artifacts.map((artifact, index) =>
+        index === 0 ? { ...artifact, assetUrl: 'https://example.com/app.zip' } : artifact
+      ),
+    })
+  );
 });
 
-test('accepts only supported macOS CPU architectures', () => {
+test('selects only supported operating-system and CPU combinations', () => {
   assert.doesNotThrow(() => assertSupportedPlatform('darwin', 'arm64'));
   assert.doesNotThrow(() => assertSupportedPlatform('darwin', 'x64'));
-  assert.throws(() => assertSupportedPlatform('linux', 'x64'), /Unsupported platform/);
-  assert.throws(
-    () => assertSupportedPlatform('darwin', 'riscv64'),
-    /Unsupported macOS architecture/
-  );
+  assert.doesNotThrow(() => assertSupportedPlatform('linux', 'x64'));
+  assert.doesNotThrow(() => assertSupportedPlatform('win32', 'x64'));
+  assert.equal(artifactKey('linux', 'x64'), 'linux-x64');
+  assert.equal(selectArtifact(manifest, 'win32', 'x64').key, 'win32-x64');
+  assert.throws(() => assertSupportedPlatform('linux', 'arm64'), /Unsupported operating system/);
 });
 
 test('accepts macOS 12 or newer and refuses root execution', () => {
@@ -70,7 +119,7 @@ test('accepts macOS 12 or newer and refuses root execution', () => {
 });
 
 test('allows only canonical GitHub HTTPS download hosts', () => {
-  assert.equal(assertAllowedDownloadUrl(manifest.assetUrl).hostname, 'github.com');
+  assert.equal(assertAllowedDownloadUrl(manifest.artifacts[0].assetUrl).hostname, 'github.com');
   assert.equal(
     assertAllowedDownloadUrl('https://release-assets.githubusercontent.com/file').hostname,
     'release-assets.githubusercontent.com'
@@ -130,6 +179,15 @@ test('uses the real per-user Applications bundle and separate support receipt', 
   );
 });
 
+test('uses XDG and LocalAppData install locations for portable targets', () => {
+  const linux = releasePaths(manifest, '/tmp/home', 'linux', { xdgDataHome: '/tmp/xdg' });
+  assert.equal(linux.appPath, '/tmp/xdg/adrouter-agent/app');
+  const windows = releasePaths(manifest, 'C:\\Users\\fixture', 'win32', {
+    localAppData: 'C:\\Users\\fixture\\AppData\\Local',
+  });
+  assert.match(windows.appPath.replaceAll('\\', '/'), /Programs\/AdRouter Agent$/);
+});
+
 function fixtureExecute({ gatekeeper = 'rejected', running = false, safeSymlink = false } = {}) {
   return async (file, args) => {
     if (file === '/usr/bin/sw_vers') return { stdout: '15.7.7\n', stderr: '' };
@@ -172,7 +230,7 @@ function fixtureExecute({ gatekeeper = 'rejected', running = false, safeSymlink 
         return { stdout: 'com.adrouter.agent\n', stderr: '' };
       }
       return {
-        stdout: args[1].includes('Short') ? '0.1.0\n' : '10003\n',
+        stdout: args[1].includes('Short') ? '0.1.0\n' : '10004\n',
         stderr: '',
       };
     }
@@ -210,7 +268,11 @@ test('installs into Applications and reports credential-free integrity', async (
   const body = Buffer.from('fixture zip body');
   const fixtureManifest = {
     ...manifest,
-    sha256: createHash('sha256').update(body).digest('hex'),
+    artifacts: manifest.artifacts.map((artifact) =>
+      artifact.key === 'darwin-universal'
+        ? { ...artifact, sha256: createHash('sha256').update(body).digest('hex') }
+        : artifact
+    ),
   };
   try {
     const appPath = await install(fixtureManifest, {
@@ -224,7 +286,7 @@ test('installs into Applications and reports credential-free integrity', async (
       homeDirectory,
       executeImpl: fixtureExecute(),
     });
-    assert.equal(report.schema, 2);
+    assert.equal(report.schema, 3);
     assert.equal(report.installed, true);
     assert.equal(report.receiptMatches, true);
     assert.equal(report.bundleIntegrity, true);
@@ -255,7 +317,11 @@ test('installs a signed app containing safe internal framework symlinks', async 
   const body = Buffer.from('fixture zip body with safe framework symlinks');
   const fixtureManifest = {
     ...manifest,
-    sha256: createHash('sha256').update(body).digest('hex'),
+    artifacts: manifest.artifacts.map((artifact) =>
+      artifact.key === 'darwin-universal'
+        ? { ...artifact, sha256: createHash('sha256').update(body).digest('hex') }
+        : artifact
+    ),
   };
   try {
     await assert.doesNotReject(
@@ -270,6 +336,91 @@ test('installs a signed app containing safe internal framework symlinks', async 
     rmSync(homeDirectory, { recursive: true, force: true });
   }
 });
+
+function portableExecute(platform, archiveRoot, executableName) {
+  return async (file, args) => {
+    if (platform === 'linux' && file === '/usr/bin/unzip' && args[0] === '-Z1') {
+      return { stdout: `${archiveRoot}/\n${archiveRoot}/${executableName}\n`, stderr: '' };
+    }
+    if (platform === 'linux' && file === '/usr/bin/zipinfo') {
+      return { stdout: '-rw-r--r-- fixture\n', stderr: '' };
+    }
+    const isExtract =
+      (platform === 'linux' && file === '/usr/bin/unzip' && args[0] === '-q') ||
+      (platform === 'win32' &&
+        file === 'powershell.exe' &&
+        args.includes('Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force'));
+    if (isExtract) {
+      const destination = args.at(-1);
+      const root = join(destination, archiveRoot);
+      mkdirSync(root, { recursive: true });
+      const executable = join(root, executableName);
+      writeFileSync(executable, 'portable fixture');
+      if (platform === 'linux') chmodSync(executable, 0o755);
+      return { stdout: '', stderr: '' };
+    }
+    if (platform === 'win32' && file === 'powershell.exe') {
+      return { stdout: `${archiveRoot}/\r\n${archiveRoot}/${executableName}\r\n`, stderr: '' };
+    }
+    throw new Error(`Unexpected portable fixture executable ${file}`);
+  };
+}
+
+for (const target of [
+  {
+    platform: 'linux',
+    key: 'linux-x64',
+    archiveRoot: 'AdRouter Agent-linux-x64',
+    executable: 'AdRouter Agent',
+  },
+  {
+    platform: 'win32',
+    key: 'win32-x64',
+    archiveRoot: 'AdRouter Agent-win32-x64',
+    executable: 'AdRouter Agent.exe',
+  },
+]) {
+  test(`installs and verifies the ${target.key} portable artifact`, async () => {
+    const homeDirectory = mkdtempSync(join(tmpdir(), `adrouter-${target.key}-`));
+    const body = Buffer.from(`${target.key} fixture zip`);
+    const fixtureManifest = {
+      ...manifest,
+      artifacts: manifest.artifacts.map((artifact) =>
+        artifact.key === target.key
+          ? { ...artifact, sha256: createHash('sha256').update(body).digest('hex') }
+          : artifact
+      ),
+    };
+    const locationOptions =
+      target.platform === 'linux'
+        ? { xdgDataHome: join(homeDirectory, '.local', 'share') }
+        : { localAppData: join(homeDirectory, 'AppData', 'Local') };
+    try {
+      const appPath = await install(fixtureManifest, {
+        ...locationOptions,
+        platform: target.platform,
+        arch: 'x64',
+        homeDirectory,
+        uid: 501,
+        fetchImpl: fixtureResponse(body),
+        executeImpl: portableExecute(target.platform, target.archiveRoot, target.executable),
+      });
+      const report = await inspectInstallation(fixtureManifest, {
+        ...locationOptions,
+        platform: target.platform,
+        arch: 'x64',
+        homeDirectory,
+      });
+      assert.equal(report.installed, true);
+      assert.equal(report.receiptMatches, true);
+      assert.equal(report.bundleIntegrity, true);
+      assert.equal(report.signatureType, 'unsigned-portable');
+      assert.equal(existsSync(appPath), true);
+    } finally {
+      rmSync(homeDirectory, { recursive: true, force: true });
+    }
+  });
+}
 
 test('refuses to overwrite an unmanaged Applications bundle', async () => {
   const homeDirectory = mkdtempSync(join(tmpdir(), 'adrouter-launcher-collision-test-'));
@@ -294,7 +445,11 @@ test('restores the previous managed app when activation receipt writing fails', 
   const firstBody = Buffer.from('first fixture zip body');
   const firstManifest = {
     ...manifest,
-    sha256: createHash('sha256').update(firstBody).digest('hex'),
+    artifacts: manifest.artifacts.map((artifact) =>
+      artifact.key === 'darwin-universal'
+        ? { ...artifact, sha256: createHash('sha256').update(firstBody).digest('hex') }
+        : artifact
+    ),
   };
   try {
     const appPath = await install(firstManifest, {
@@ -309,7 +464,11 @@ test('restores the previous managed app when activation receipt writing fails', 
     const nextBody = Buffer.from('next fixture zip body');
     const nextManifest = {
       ...manifest,
-      sha256: createHash('sha256').update(nextBody).digest('hex'),
+      artifacts: manifest.artifacts.map((artifact) =>
+        artifact.key === 'darwin-universal'
+          ? { ...artifact, sha256: createHash('sha256').update(nextBody).digest('hex') }
+          : artifact
+      ),
     };
     await assert.rejects(
       install(nextManifest, {

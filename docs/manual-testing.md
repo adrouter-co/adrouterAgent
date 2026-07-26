@@ -7,7 +7,7 @@ settlement.
 
 ## Preconditions
 
-- macOS 12 or newer and Node.js 25.9.0.
+- A supported desktop OS (macOS 12+, Ubuntu 24.04 x64, or Windows 11 x64) and Node.js 25.9.0.
 - The sibling `router/backend` dependencies and this repository's dependencies
   are installed.
 - `router/backend/.env.local` contains distinct `ADROUTER_API_KEY` and
@@ -223,7 +223,7 @@ The build passes manual acceptance when all of the following hold:
 - Stop and restart produce deterministic cancelled/interrupted states.
 - Sponsor display and economics work without entering agent context.
 
-Record the app version, commit, macOS version, Node version, router mode, model,
+Record the app version, commit, operating-system version, Node version, router mode, model,
 thinking level, sponsored-compute setting, and any failed checklist item.
 Redact all tokens and provider credentials. Do not attach the application's
 SQLite database or configuration file without reviewing it for sensitive local

@@ -6,11 +6,12 @@ AdRouter Agent is a local-first desktop coding agent. It does not include
 telemetry, analytics, advertising trackers, crash-upload services, or automatic
 update checks.
 
-## Data stored on the Mac
+## Data stored on the device
 
 The app stores project references, chat history, approvals, settlements, and
 change-review baselines in its local application-data directory. The router
-access token is encrypted with the macOS Keychain. Project files remain in the
+access token is encrypted with Keychain on macOS, DPAPI on Windows, or a
+supported desktop secret store on Linux. Project files remain in the
 folders selected by the user.
 
 ## Data sent to AdRouter
@@ -35,5 +36,5 @@ contact GitHub or another service to check for updates.
 ## User control
 
 Users can delete chat history from the app and can remove all application data
-using the standard macOS application-data controls. Removing the app does not
+using the standard operating-system application-data controls. Removing the app does not
 delete project folders or files.

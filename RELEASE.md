@@ -1,6 +1,6 @@
 # Public-beta release procedure
 
-This is the operator runbook for `v0.1.0-beta.3`. It separates safe repository
+This is the operator runbook for `v0.1.0-beta.4`. It separates safe repository
 setup from credential entry and irreversible publication.
 
 ## 1. Prerequisites
@@ -49,7 +49,7 @@ Create an empty public repository and push the reviewed initial commit:
 ```bash
 gh repo create adrouter/adrouterAgent --public --source=. --remote=origin
 git add .
-git commit -m "Prepare AdRouter Agent 0.1.0-beta.3 public release"
+git commit -m "Prepare AdRouter Agent 0.1.0-beta.4 public release"
 git push --set-upstream origin main
 ```
 
@@ -70,10 +70,10 @@ release tag, enables public-repository security features, and creates main/tag
 rulesets when the organization plan permits them. Inspect its printed summary
 and confirm the required `ci / validate` check name in repository settings.
 
-Add secrets without printing their values:
+Add the single staging secret without printing its value. The staging URL is
+the public constant `https://api-staging.adrouter.co` in the workflow:
 
 ```bash
-gh secret set ADROUTER_STAGING_URL --env adrouter-staging
 gh secret set ADROUTER_STAGING_API_KEY --env adrouter-staging
 ```
 
@@ -113,26 +113,27 @@ Wait for required CI on `main`, then create the exact annotated tag:
 git fetch origin main --tags
 git switch main
 git pull --ff-only
-test "$(node -p "require('./package.json').version")" = "0.1.0-beta.3"
-git tag -a v0.1.0-beta.3 -m "AdRouter Agent 0.1.0-beta.3"
-git push origin v0.1.0-beta.3
+test "$(node -p "require('./package.json').version")" = "0.1.0-beta.4"
+git tag -a v0.1.0-beta.4 -m "AdRouter Agent 0.1.0-beta.4"
+git push origin v0.1.0-beta.4
 ```
 
 Approve the `adrouter-staging` and `macos-release` jobs when GitHub prompts.
-The workflow runs the live canary, builds and ad-hoc signs the universal app,
-creates the ZIP and npm tarball, generates checksums/SBOMs/manifests, attests
-the assets, and creates a **draft prerelease**. Never move or reuse the tag.
+The workflow runs the live canary, builds the macOS universal, Ubuntu x64, and
+Windows x64 portable apps on native runners, creates the schema-3 npm launcher,
+generates checksums/SBOMs/manifests, attests the assets, and creates a **draft
+prerelease**. Never move or reuse the tag.
 
 ## 6. Inspect and promote
 
 Download the draft assets and follow `docs/release-checklist.md`. Verify the
-asset inventory and both CPU slices. Dispatch the promotion **from the release
+asset inventory, all three target keys, and both macOS CPU slices. Dispatch the promotion **from the release
 tag ref** so the environment's deployment-tag policy applies:
 
 ```bash
 gh workflow run promote-release.yml \
-  --ref v0.1.0-beta.3 \
-  -f tag=v0.1.0-beta.3
+  --ref v0.1.0-beta.4 \
+  -f tag=v0.1.0-beta.4
 ```
 
 Approve `npm-publish` and `adrouter-staging` when prompted. The Intel smoke job
@@ -141,13 +142,13 @@ are enabled and funded for the organization before promotion.
 
 Promotion publishes the GitHub prerelease first, verifies the attached npm
 tarball, publishes it under temporary `candidate`, runs anonymous launcher
-checks on Apple Silicon and Intel, then moves `beta` and `latest` to the exact
-version and removes `candidate`.
+checks on Apple Silicon, Intel, Ubuntu, and Windows, then moves `beta` and
+`latest` to the exact version and removes `candidate`.
 
 Final registry checks:
 
 ```bash
-npm view @adrouter/agent@0.1.0-beta.3 version dist.integrity repository --json
+npm view @adrouter/agent@0.1.0-beta.4 version dist.integrity repository --json
 npm view @adrouter/agent dist-tags --json
 npm install --global @adrouter/agent@beta
 adrouter-agent doctor --json
@@ -182,7 +183,7 @@ After the first release finishes:
    store only `NPM_DIST_TAG_TOKEN`. Trusted publishing handles `npm publish`,
    while npm dist-tag changes still require traditional authenticated access.
 
-Do not attempt to republish `0.1.0-beta.3` to test OIDC. npm versions are
+Do not attempt to republish `0.1.0-beta.4` to test OIDC. npm versions are
 immutable; use a higher beta version.
 
 ## 8. Recovery

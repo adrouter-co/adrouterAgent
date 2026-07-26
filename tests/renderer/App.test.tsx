@@ -38,6 +38,7 @@ beforeEach(() => {
     version: '0.1.0',
     platform: 'darwin',
     architecture: 'arm64',
+    sandbox: { status: 'ready', detail: 'Sandbox available.', setupCommands: [] },
   });
 });
 
@@ -62,6 +63,9 @@ describe('App onboarding', () => {
 
     expect(await screen.findByRole('heading', { name: 'Connect AdRouter' })).toBeInTheDocument();
     expect(screen.getByLabelText('Enable sponsored compute')).toBeChecked();
+    expect(screen.getByLabelText('AdRouter server URL')).toHaveValue(
+      'https://api-staging.adrouter.co'
+    );
   });
 
   it('shows repository instruction sources and saves user project instructions', async () => {

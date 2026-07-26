@@ -2,14 +2,24 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const serverUrl = process.env.ADROUTER_API_URL?.replace(/\/+$/, '');
+const serverUrl = (process.env.ADROUTER_API_URL ?? 'https://api-staging.adrouter.co').replace(
+  /\/+$/,
+  ''
+);
 const token = process.env.ADROUTER_API_KEY;
-if (!serverUrl || !token) {
-  throw new Error('Set ADROUTER_API_URL and ADROUTER_API_KEY to run the optional live smoke test.');
+if (!token) {
+  throw new Error('Set ADROUTER_API_KEY to run the optional live staging smoke test.');
 }
 const workspace = await mkdtemp(join(tmpdir(), 'adrouter-live-smoke-'));
 const headers = { authorization: `Bearer ${token}` };
 try {
+  const healthResponse = await fetch(`${serverUrl}/health`);
+  if (!healthResponse.ok)
+    throw new Error(`Health check failed with HTTP ${healthResponse.status}.`);
+  const profileResponse = await fetch(`${serverUrl}/v1/profile`, { headers });
+  if (!profileResponse.ok) {
+    throw new Error(`Authentication failed with HTTP ${profileResponse.status}.`);
+  }
   const modelsResponse = await fetch(`${serverUrl}/v1/models`, { headers });
   if (!modelsResponse.ok)
     throw new Error(`Model discovery failed with HTTP ${modelsResponse.status}.`);

@@ -1,9 +1,8 @@
 # `@adrouter/agent`
 
-This dependency-free package installs and launches the credential-free,
-ad-hoc-signed universal macOS application from the matching
-[AdRouter Agent GitHub release](https://github.com/adrouter/adrouterAgent/releases).
-The desktop application is not duplicated in the npm tarball.
+This dependency-free package installs and launches the matching AdRouter Agent
+portable application from the canonical GitHub release. The desktop binaries
+are not duplicated in the npm tarball.
 
 ```bash
 npm install --global @adrouter/agent@beta
@@ -11,25 +10,25 @@ adrouter-agent doctor --json
 adrouter-agent
 ```
 
-The launcher supports macOS 12 or newer, Apple Silicon and Intel, and Node.js
-22.19.0 or newer. It accepts no alternate download URL or checksum. Downloads
-are bounded, checked against the release manifest embedded in this package,
-and installed as the real application at `~/Applications/AdRouter Agent.app`
-after archive, bundle identity, universal architecture, and ad-hoc `codesign`
-integrity checks.
+Supported targets are macOS 12+ arm64/x64, Ubuntu Desktop 24.04 LTS x64, and
+Windows 11 x64 with Node.js 22.19 or newer. The launcher accepts no alternate
+download URL or checksum. It validates the embedded schema-3 manifest, bounded
+download, SHA-256 digest, archive paths, executable, managed receipt, and
+staged-update rollback before activation.
 
-This beta is not Developer ID signed or notarized. If macOS blocks the first
-launch, open **System Settings → Privacy & Security** and choose **Open Anyway**.
-The launcher never removes quarantine metadata or changes Gatekeeper settings.
+macOS is ad-hoc signed but not notarized. Linux and Windows portable beta
+artifacts are unsigned. Run `adrouter-agent doctor --json` for the platform
+install path, artifact key, verification result, sandbox readiness, and static
+setup guidance. The launcher never disables host security or auto-elevates.
 
 Commands:
 
 - `adrouter-agent` or `adrouter-agent launch`: install if needed, then launch.
 - `adrouter-agent install`: install and verify without launching.
-- `adrouter-agent doctor --json`: report platform, installation receipt,
-  bundle integrity, ad-hoc signature, and diagnostic Gatekeeper status.
+- `adrouter-agent doctor --json`: report installation, integrity, and sandbox
+  status without credentials.
 - `adrouter-agent --version`: print the package/release version without a
   network request.
 
-See the [repository security policy](https://github.com/adrouter/adrouterAgent/blob/main/SECURITY.md)
-before reporting a vulnerability.
+See the repository's platform-setup guide for Ubuntu dependencies, Windows
+one-time sandbox provisioning, and staging bearer-token onboarding.

@@ -2,6 +2,7 @@ import { DiffEditor } from '@monaco-editor/react';
 import type { JSX, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { DEFAULT_ADROUTER_SERVER_URL } from '../shared/constants';
 import type {
   ApplicationInfo,
   Approval,
@@ -795,9 +796,18 @@ function AboutPanel({ info }: { info?: ApplicationInfo }): JSX.Element {
         </div>
       </dl>
       <p className="empty-copy">
-        Local project data stays on this Mac. Agent requests are sent only to your configured
+        Local project data stays on this device. Agent requests are sent only to your configured
         AdRouter server. Updates are installed manually.
       </p>
+      {info?.sandbox.status !== 'ready' && info?.sandbox ? (
+        <div className="notice-card" role="status">
+          <strong>Command sandbox: {info.sandbox.status}</strong>
+          <p>{info.sandbox.detail}</p>
+          {info.sandbox.setupCommands.map((command) => (
+            <code key={command}>{command}</code>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -809,7 +819,7 @@ function Onboarding({
   onConfigured: () => Promise<void>;
   onModels: (models: RouterModelDescriptor[]) => void;
 }): JSX.Element {
-  const [serverUrl, setServerUrl] = useState('http://localhost:8787');
+  const [serverUrl, setServerUrl] = useState(DEFAULT_ADROUTER_SERVER_URL);
   const [token, setToken] = useState('');
   const [sponsoredCompute, setSponsoredCompute] = useState(true);
   const [diagnostics, setDiagnostics] = useState<RouterDiagnostics>();
@@ -858,7 +868,10 @@ function Onboarding({
         </span>
         <p className="eyebrow">Local-first desktop coding agent</p>
         <h1 id="onboarding-title">Connect AdRouter</h1>
-        <p>Your token is encrypted with macOS Keychain and is never available to the renderer.</p>
+        <p>
+          Your token is encrypted with the operating system credential store and is never available
+          to the renderer.
+        </p>
         <label htmlFor="router-url">AdRouter server URL</label>
         <input
           id="router-url"
@@ -1106,7 +1119,7 @@ function EmptyTimeline({
       <p className="welcome-copy">
         {hasProject
           ? 'Ask AdRouter Agent to inspect, explain, change, or test this project. It reads safely and asks before running commands or editing files.'
-          : 'Choose a local project folder from the toolbar. Your files remain on this Mac, and every command or edit requires your approval.'}
+          : 'Choose a local project folder from the toolbar. Your files remain on this device, and every command or edit requires your approval.'}
       </p>
       {hasProject ? (
         <div className="suggestion-grid">
