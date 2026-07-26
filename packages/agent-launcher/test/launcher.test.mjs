@@ -171,7 +171,7 @@ test('allows only relative archive symlinks that remain inside the app bundle', 
 });
 
 test('uses the real per-user Applications bundle and separate support receipt', () => {
-  const paths = releasePaths(manifest, '/tmp/adrouter-agent-home');
+  const paths = releasePaths(manifest, '/tmp/adrouter-agent-home', 'darwin');
   assert.equal(paths.appPath, '/tmp/adrouter-agent-home/Applications/AdRouter Agent.app');
   assert.equal(
     paths.receiptPath,
@@ -276,6 +276,8 @@ test('installs into Applications and reports credential-free integrity', async (
   };
   try {
     const appPath = await install(fixtureManifest, {
+      platform: 'darwin',
+      arch: 'arm64',
       homeDirectory,
       uid: 501,
       fetchImpl: fixtureResponse(body),
@@ -283,6 +285,8 @@ test('installs into Applications and reports credential-free integrity', async (
     });
     assert.equal(appPath, join(homeDirectory, 'Applications', 'AdRouter Agent.app'));
     const report = await inspectInstallation(fixtureManifest, {
+      platform: 'darwin',
+      arch: 'arm64',
       homeDirectory,
       executeImpl: fixtureExecute(),
     });
@@ -326,6 +330,8 @@ test('installs a signed app containing safe internal framework symlinks', async 
   try {
     await assert.doesNotReject(
       install(fixtureManifest, {
+        platform: 'darwin',
+        arch: 'arm64',
         homeDirectory,
         uid: 501,
         fetchImpl: fixtureResponse(body),
@@ -429,6 +435,8 @@ test('refuses to overwrite an unmanaged Applications bundle', async () => {
   try {
     await assert.rejects(
       install(manifest, {
+        platform: 'darwin',
+        arch: 'arm64',
         homeDirectory,
         uid: 501,
         executeImpl: fixtureExecute(),
@@ -453,6 +461,8 @@ test('restores the previous managed app when activation receipt writing fails', 
   };
   try {
     const appPath = await install(firstManifest, {
+      platform: 'darwin',
+      arch: 'arm64',
       homeDirectory,
       uid: 501,
       fetchImpl: fixtureResponse(firstBody),
@@ -472,6 +482,8 @@ test('restores the previous managed app when activation receipt writing fails', 
     };
     await assert.rejects(
       install(nextManifest, {
+        platform: 'darwin',
+        arch: 'arm64',
         homeDirectory,
         uid: 501,
         fetchImpl: fixtureResponse(nextBody),
@@ -493,6 +505,8 @@ test('fails closed on a checksum mismatch or non-canonical redirect', async () =
   try {
     await assert.rejects(
       install(manifest, {
+        platform: 'darwin',
+        arch: 'arm64',
         homeDirectory,
         uid: 501,
         fetchImpl: async () => new Response('wrong body', { status: 200 }),
@@ -502,6 +516,8 @@ test('fails closed on a checksum mismatch or non-canonical redirect', async () =
     );
     await assert.rejects(
       install(manifest, {
+        platform: 'darwin',
+        arch: 'arm64',
         homeDirectory,
         uid: 501,
         fetchImpl: async () =>
