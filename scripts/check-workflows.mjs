@@ -36,6 +36,7 @@ for (const forbidden of [
   assert.ok(!release.includes(forbidden), `release workflow still references ${forbidden}`);
 }
 const promotion = readFileSync(join(workflowDirectory, 'promote-release.yml'), 'utf8');
+const packageVersion = JSON.parse(readFileSync('package.json', 'utf8')).version;
 for (const required of [
   'npm-publish',
   'NPM_BOOTSTRAP_TOKEN',
@@ -47,5 +48,9 @@ for (const required of [
 ]) {
   assert.ok(promotion.includes(required), `promotion workflow is missing ${required}`);
 }
+assert.ok(
+  promotion.includes(`default: v${packageVersion}`),
+  'promotion workflow default must match the immutable package version'
+);
 
 console.log(`Workflow pinning and release-policy checks passed for ${workflows.length} workflows.`);

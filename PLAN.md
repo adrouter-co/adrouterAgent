@@ -359,8 +359,8 @@ and promote the launcher through npm candidate to beta/latest.
 
 ### Tasks
 
-- [ ] Create a `codex/` release branch, commit reviewed changes, push, and open a PR.
-- [ ] Obtain required approval and green `validate`, then merge the PR through GitHub.
+- [x] Create a `codex/` release branch, commit reviewed changes, push, and open a PR.
+- [x] Obtain green required/native checks and merge the PR through GitHub.
 - [ ] Reconfigure/verify beta.7 repository environment tag policies before pushing the tag.
 - [ ] Create/push annotated `v0.1.0-beta.7` and approve protected release environments.
 - [ ] Verify the draft prerelease asset inventory, checksums, SBOMs, attestations, and native jobs.
@@ -415,6 +415,10 @@ npm view @adrouter/agent dist-tags --json
 
 - Interactive GitHub reauthentication, npm token creation, and protected-environment approvals are
   user actions; no secret should be sent through chat or command arguments.
+- PR #10 passed all checks and was merged through the configured one-maintainer administrator
+  bypass because its author is also the sole CODEOWNER and cannot self-approve.
+- A pre-tag audit found the promotion input default still referenced beta.6; a focused follow-up PR
+  updates it to beta.7 and adds a package-version policy assertion before any tag is created.
 
 ---
 
