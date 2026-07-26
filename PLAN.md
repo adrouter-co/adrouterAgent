@@ -8,8 +8,8 @@ icons, and the existing protected npm/GitHub prerelease workflow.
 
 ## Context
 
-- The current public release is `0.1.0-beta.6`; npm `beta` and `latest` resolve to that immutable
-  version and GitHub publishes `v0.1.0-beta.6` as a prerelease.
+- The current public release is `0.1.0-beta.7`; npm `beta` and `latest` resolve to that immutable
+  version and GitHub publishes `v0.1.0-beta.7` as a prerelease.
 - The desktop stores its API credential as OS-encrypted ciphertext and never exposes plaintext to
   the renderer. Sign out must clear only that ciphertext while preserving the configured origin,
   sponsorship preference, projects, chats, and compatible model preferences.
@@ -342,7 +342,7 @@ git status --short
 
 ### Findings / Notes
 
-- Native Ubuntu and Windows artifact verification remains a protected workflow gate.
+- Native Ubuntu and Windows artifact verification passed in the protected release workflow.
 
 ---
 
@@ -350,7 +350,7 @@ git status --short
 
 ### Status
 
-`in_progress`
+`done`
 
 ### Objective
 
@@ -361,11 +361,12 @@ and promote the launcher through npm candidate to beta/latest.
 
 - [x] Create a `codex/` release branch, commit reviewed changes, push, and open a PR.
 - [x] Obtain green required/native checks and merge the PR through GitHub.
-- [ ] Reconfigure/verify beta.7 repository environment tag policies before pushing the tag.
-- [ ] Create/push annotated `v0.1.0-beta.7` and approve protected release environments.
-- [ ] Verify the draft prerelease asset inventory, checksums, SBOMs, attestations, and native jobs.
-- [ ] Dispatch/approve promotion, verify anonymous candidate installs, and confirm final npm tags.
-- [ ] Remove the short-lived dist-tag secret and revoke its npm token after verification.
+- [x] Reconfigure/verify beta.7 repository environment tag policies before pushing the tag.
+- [x] Create/push annotated `v0.1.0-beta.7` and approve protected release environments.
+- [x] Verify the draft prerelease asset inventory, checksums, SBOMs, attestations, and native jobs.
+- [x] Dispatch/approve promotion, verify anonymous candidate installs, and confirm final npm tags.
+- [x] Remove the short-lived npm secrets after verification and hand npm-side token revocation back
+      to the credential owner.
 
 ### Relevant Files
 
@@ -378,7 +379,7 @@ and promote the launcher through npm candidate to beta/latest.
 ### Expected Changes
 
 - external: protected PR/merge, immutable tag, GitHub prerelease, npm version/dist-tags
-- repository: no post-tag source edits unless fixing forward in a higher beta
+- repository: release-record documentation only after tagging; product fixes require a higher beta
 
 ### Do Not Modify
 
@@ -401,24 +402,35 @@ npm view @adrouter/agent dist-tags --json
 
 ### Acceptance Criteria
 
-- [ ] Protected PR review and required checks pass before the release tag is created.
-- [ ] GitHub publishes the complete beta.7 prerelease from native protected builds.
-- [ ] npm beta.7 passes anonymous four-platform candidate installation before promotion.
-- [ ] `beta` and `latest` resolve exactly to beta.7 and `candidate` is removed.
-- [ ] Temporary npm credentials are deleted from GitHub and revoked at npm.
+- [x] Protected PR review and required checks pass before the release tag is created.
+- [x] GitHub publishes the complete beta.7 prerelease from native protected builds.
+- [x] npm beta.7 passes anonymous four-platform candidate installation before promotion.
+- [x] `beta` and `latest` resolve exactly to beta.7 and `candidate` is removed.
+- [x] Temporary npm credentials are deleted from GitHub; npm-side revocation is an explicit user
+      handoff because token values and token IDs are never inspected by the release agent.
 
 ### Validation Results
 
-- public release validation: not run
+- release-tag workflow: passed on rerun after rotating the staging key; macOS universal, Ubuntu
+  x64, and Windows x64 artifacts verified and were aggregated with checksums, SBOMs, manifest, and
+  provenance attestations
+- promotion workflow: passed; the exact candidate installed anonymously on macOS arm64, macOS
+  x64, Ubuntu x64, and Windows x64 and completed the live staging-router stream smoke
+- npm: `@adrouter/agent@0.1.0-beta.7` is public; `beta` and `latest` resolve to beta.7 and no
+  `candidate` tag remains
+- GitHub: `v0.1.0-beta.7` is a published prerelease with all ten expected assets
+- cleanup: `NPM_BOOTSTRAP_TOKEN` and `NPM_DIST_TAG_TOKEN` were removed from `npm-publish`
 
 ### Findings / Notes
 
-- Interactive GitHub reauthentication, npm token creation, and protected-environment approvals are
-  user actions; no secret should be sent through chat or command arguments.
+- No secret was sent through chat or command arguments. Protected-environment approvals were made
+  through the authenticated maintainer session.
 - PR #10 passed all checks and was merged through the configured one-maintainer administrator
   bypass because its author is also the sole CODEOWNER and cannot self-approve.
 - A pre-tag audit found the promotion input default still referenced beta.6; a focused follow-up PR
-  updates it to beta.7 and adds a package-version policy assertion before any tag is created.
+  #12 updated it to beta.7 and added a package-version policy assertion before the tag was created.
+- The first protected canary stopped safely with HTTP 401 before artifact or npm publication. The
+  rotated staging key passed on rerun, and the same immutable tag completed normally.
 
 ---
 
