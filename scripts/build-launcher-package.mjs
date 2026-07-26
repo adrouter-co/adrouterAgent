@@ -118,7 +118,7 @@ export function buildLauncherPackage({ artifacts, outputDirectory, stagingRoot }
       repository: 'adrouter/adrouterAgent',
       bundleIdentifier: 'com.adrouter.agent',
       bundleShortVersion: '0.1.0',
-      bundleVersion: '10004',
+      bundleVersion: '10005',
       artifacts: releaseArtifacts,
     };
     writeFileSync(

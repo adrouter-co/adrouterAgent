@@ -12,7 +12,7 @@ assert.equal(manifest.repository, 'adrouter/adrouterAgent');
 assert.match(manifest.releaseVersion, /^\d+\.\d+\.\d+-beta\.\d+$/);
 assert.equal(manifest.releaseTag, `v${manifest.releaseVersion}`);
 assert.equal(manifest.bundleShortVersion, '0.1.0');
-assert.equal(manifest.bundleVersion, '10004');
+assert.equal(manifest.bundleVersion, '10005');
 
 const expectedNames = [
   ...['darwin-universal', 'linux-x64', 'win32-x64'].flatMap((target) => [

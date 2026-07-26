@@ -6,7 +6,7 @@ on:
       tag:
         description: Immutable release tag
         required: true
-        default: v0.1.0-beta.4
+        default: v0.1.0-beta.5
         type: string
 
 permissions:
@@ -45,9 +45,7 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           test "${{ inputs.tag }}" = "v$version"
-          test "$GITHUB_REF" = "refs/tags/v$version" || \
-            test "$GITHUB_REF" = "refs/tags/promote-v$version" || \
-            test "$GITHUB_REF" = "refs/tags/promote2-v$version"
+          test "$GITHUB_REF" = "refs/tags/v$version"
           test "$(git rev-list -n 1 "${{ inputs.tag }}")" = "$(git rev-parse HEAD)"
           test "$(gh release view "${{ inputs.tag }}" --json isPrerelease --jq .isPrerelease)" = "true"
           was_draft="$(gh release view "${{ inputs.tag }}" --json isDraft --jq .isDraft)"

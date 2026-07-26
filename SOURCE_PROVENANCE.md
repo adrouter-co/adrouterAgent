@@ -23,7 +23,7 @@ response reports public release metadata and platform sandbox diagnostics.
 Other changes outside the parity set are public-release packaging,
 documentation, dependency-resolution, and automation work. Version metadata is
 intentionally set to npm/GitHub version
-`0.1.0-beta.4`, macOS short version `0.1.0`, and macOS build version `10004`.
+`0.1.0-beta.5`, macOS short version `0.1.0`, and macOS build version `10005`.
 
 The original source Git history is deliberately not imported. This record and
 the checksum inventory provide the public review boundary without disclosing

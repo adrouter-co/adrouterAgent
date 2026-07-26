@@ -315,8 +315,10 @@ async function download(manifest, artifact, destination, fetchImpl = fetch) {
 async function archiveEntries(zipPath, artifact, executeImpl = execute) {
   if (artifact.platform === 'win32') {
     const script =
+      '& { param([string]$zipPath) ' +
       'Add-Type -AssemblyName System.IO.Compression.FileSystem; ' +
-      '$z=[IO.Compression.ZipFile]::OpenRead($args[0]); try {$z.Entries.FullName} finally {$z.Dispose()}';
+      '$z=[IO.Compression.ZipFile]::OpenRead($zipPath); ' +
+      'try {$z.Entries.FullName} finally {$z.Dispose()} }';
     const { stdout } = await executeImpl('powershell.exe', [
       '-NoProfile',
       '-NonInteractive',
@@ -348,7 +350,9 @@ async function extractArchive(archive, extracted, artifact, executeImpl) {
   } else if (artifact.platform === 'linux') {
     await executeImpl('/usr/bin/unzip', ['-q', archive, '-d', extracted]);
   } else {
-    const script = 'Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force';
+    const script =
+      '& { param([string]$archive, [string]$destination) ' +
+      'Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force }';
     await executeImpl('powershell.exe', [
       '-NoProfile',
       '-NonInteractive',

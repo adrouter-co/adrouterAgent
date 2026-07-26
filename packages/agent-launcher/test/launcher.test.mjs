@@ -29,20 +29,20 @@ import { artifactKey, selectArtifact, validateManifest } from '../lib/manifest.m
 const manifest = {
   schema: 3,
   distributionMode: 'credential-free-portable',
-  releaseVersion: '0.1.0-beta.4',
-  releaseTag: 'v0.1.0-beta.4',
+  releaseVersion: '0.1.0-beta.5',
+  releaseTag: 'v0.1.0-beta.5',
   repository: 'adrouter/adrouterAgent',
   bundleIdentifier: 'com.adrouter.agent',
   bundleShortVersion: '0.1.0',
-  bundleVersion: '10004',
+  bundleVersion: '10005',
   artifacts: [
     {
       key: 'darwin-universal',
       platform: 'darwin',
       architectures: ['arm64', 'x64'],
-      assetName: 'AdRouter-Agent-0.1.0-beta.4-darwin-universal.zip',
+      assetName: 'AdRouter-Agent-0.1.0-beta.5-darwin-universal.zip',
       assetUrl:
-        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.4/AdRouter-Agent-0.1.0-beta.4-darwin-universal.zip',
+        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.5/AdRouter-Agent-0.1.0-beta.5-darwin-universal.zip',
       sha256: 'a'.repeat(64),
       archiveRoot: 'AdRouter Agent.app',
       executablePath: 'Contents/MacOS/AdRouter Agent',
@@ -52,9 +52,9 @@ const manifest = {
       key: 'linux-x64',
       platform: 'linux',
       architectures: ['x64'],
-      assetName: 'AdRouter-Agent-0.1.0-beta.4-linux-x64.zip',
+      assetName: 'AdRouter-Agent-0.1.0-beta.5-linux-x64.zip',
       assetUrl:
-        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.4/AdRouter-Agent-0.1.0-beta.4-linux-x64.zip',
+        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.5/AdRouter-Agent-0.1.0-beta.5-linux-x64.zip',
       sha256: 'b'.repeat(64),
       archiveRoot: 'AdRouter Agent-linux-x64',
       executablePath: 'AdRouter Agent',
@@ -64,9 +64,9 @@ const manifest = {
       key: 'win32-x64',
       platform: 'win32',
       architectures: ['x64'],
-      assetName: 'AdRouter-Agent-0.1.0-beta.4-win32-x64.zip',
+      assetName: 'AdRouter-Agent-0.1.0-beta.5-win32-x64.zip',
       assetUrl:
-        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.4/AdRouter-Agent-0.1.0-beta.4-win32-x64.zip',
+        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.5/AdRouter-Agent-0.1.0-beta.5-win32-x64.zip',
       sha256: 'c'.repeat(64),
       archiveRoot: 'AdRouter Agent-win32-x64',
       executablePath: 'AdRouter Agent.exe',
@@ -76,7 +76,7 @@ const manifest = {
 };
 
 test('validates the exact credential-free release manifest', () => {
-  assert.equal(validateManifest(manifest).releaseVersion, '0.1.0-beta.4');
+  assert.equal(validateManifest(manifest).releaseVersion, '0.1.0-beta.5');
   assert.throws(() => validateManifest({ ...manifest, schema: 1 }));
   assert.throws(() => validateManifest({ ...manifest, distributionMode: 'notarized' }));
   assert.throws(() => validateManifest({ ...manifest, repository: 'attacker/repository' }));
@@ -239,7 +239,7 @@ function fixtureExecute({ gatekeeper = 'rejected', running = false, safeSymlink 
         return { stdout: 'com.adrouter.agent\n', stderr: '' };
       }
       return {
-        stdout: args[1].includes('Short') ? '0.1.0\n' : '10004\n',
+        stdout: args[1].includes('Short') ? '0.1.0\n' : '10005\n',
         stderr: '',
       };
     }
@@ -366,7 +366,13 @@ function portableExecute(platform, archiveRoot, executableName) {
       (platform === 'linux' && file === '/usr/bin/unzip' && args[0] === '-q') ||
       (platform === 'win32' &&
         file === 'powershell.exe' &&
-        args.includes('Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force'));
+        args.some(
+          (argument) =>
+            argument.includes('param([string]$archive, [string]$destination)') &&
+            argument.includes(
+              'Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force'
+            )
+        ));
     if (isExtract) {
       const destination = args.at(-1);
       const root = join(destination, archiveRoot);
@@ -377,6 +383,8 @@ function portableExecute(platform, archiveRoot, executableName) {
       return { stdout: '', stderr: '' };
     }
     if (platform === 'win32' && file === 'powershell.exe') {
+      assert.ok(args.some((argument) => argument.includes('param([string]$zipPath)')));
+      assert.ok(args.some((argument) => argument.includes('OpenRead($zipPath)')));
       return { stdout: `${archiveRoot}/\r\n${archiveRoot}/${executableName}\r\n`, stderr: '' };
     }
     throw new Error(`Unexpected portable fixture executable ${file}`);

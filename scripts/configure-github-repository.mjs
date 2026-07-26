@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 
 const repository = 'adrouter/adrouterAgent';
 const reviewer = 'HappyCool121';
-const releaseTag = 'v0.1.0-beta.4';
+const releaseTag = 'v0.1.0-beta.5';
 const dryRun = process.argv.includes('--dry-run');
 const unknown = process.argv.slice(2).filter((argument) => argument !== '--dry-run');
 if (unknown.length > 0) {

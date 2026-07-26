@@ -2,6 +2,17 @@
 
 All notable changes to AdRouter Agent are documented here.
 
+## [0.1.0-beta.5] - 2026-07-26
+
+### Fixed
+
+- The Windows launcher now binds ZIP inspection and extraction paths through
+  explicit PowerShell parameters, so a verified portable archive is listed and
+  expanded correctly on Windows 11.
+- Windows npm smoke tests invoke the native `.cmd` launcher shim instead of the
+  MSYS shell shim, preventing runner drive-letter translation from corrupting
+  the installed package path.
+
 ## [0.1.0-beta.4] - 2026-07-26
 
 ### Added
@@ -73,6 +84,7 @@ All notable changes to AdRouter Agent are documented here.
 - Updates are downloaded and installed manually.
 - A reachable AdRouter server and valid bearer token are required.
 
+[0.1.0-beta.5]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.5
 [0.1.0-beta.4]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.4
 [0.1.0-beta.3]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.2

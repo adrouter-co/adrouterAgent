@@ -7,7 +7,8 @@ should manually install the latest release before reporting a problem.
 
 | Version | Supported |
 | --- | --- |
-| 0.1.0-beta.4 | Yes |
+| 0.1.0-beta.5 | Yes |
+| 0.1.0-beta.4 | No |
 | 0.1.0-beta.3 | No |
 | 0.1.0-beta.2 | No |
 | Older builds | No |
