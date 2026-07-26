@@ -46,7 +46,8 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           test "${{ inputs.tag }}" = "v$version"
           test "$GITHUB_REF" = "refs/tags/v$version" || \
-            test "$GITHUB_REF" = "refs/tags/promote-v$version"
+            test "$GITHUB_REF" = "refs/tags/promote-v$version" || \
+            test "$GITHUB_REF" = "refs/tags/promote2-v$version"
           test "$(git rev-list -n 1 "${{ inputs.tag }}")" = "$(git rev-parse HEAD)"
           test "$(gh release view "${{ inputs.tag }}" --json isPrerelease --jq .isPrerelease)" = "true"
           was_draft="$(gh release view "${{ inputs.tag }}" --json isDraft --jq .isDraft)"
@@ -149,14 +150,16 @@ jobs:
             --ignore-scripts
           if test "$RUNNER_OS" = "Windows"; then
             export PATH="$RUNNER_TEMP/npm-prefix:$PATH"
+            cli=adrouter-agent.cmd
           else
             export PATH="$RUNNER_TEMP/npm-prefix/bin:$PATH"
+            cli=adrouter-agent
           fi
-          test "$(adrouter-agent --version)" = "${{ needs.publish-candidate.outputs.version }}"
-          adrouter-agent install
-          adrouter-agent doctor --json | tee "$RUNNER_TEMP/doctor.json"
+          test "$("$cli" --version | tr -d '\r')" = "${{ needs.publish-candidate.outputs.version }}"
+          "$cli" install
+          "$cli" doctor --json | tee "$RUNNER_TEMP/doctor.json"
           node -e "const r=require(process.env.RUNNER_TEMP + '/doctor.json'); const signature=r.platform==='darwin'?'adhoc':'unsigned-portable'; if (r.schema!==3 || !r.installed || !r.receiptMatches || !r.bundleIntegrity || r.signatureType!==signature) process.exit(1)"
-          adrouter-agent launch
+          "$cli" launch
       - run: npm ci
       - name: Run staging-router terminal stream smoke
         env:
