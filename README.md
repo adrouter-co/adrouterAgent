@@ -10,7 +10,7 @@ selection and settlement use a separate display channel; sponsor data is never
 added to model prompts, tool arguments, commands, patches, or compacted agent
 context.
 
-> **Public beta:** AdRouter Agent 0.1.0-beta.6 supports macOS 12+ on Apple Silicon
+> **Public beta:** AdRouter Agent 0.1.0-beta.7 supports macOS 12+ on Apple Silicon
 > and Intel, Ubuntu Desktop 24.04 LTS x64, and Windows 11 x64. One agent task can
 > run at a time, and updates are installed manually.
 
@@ -160,6 +160,8 @@ agent-authored diffs only; it never stages, commits, or pushes changes.
 - Read-only agent-authored diffs that exclude pre-existing user changes.
 - Tier A/B/C/NONE sponsor placement and settlement/economics summaries.
 - Stop, permanent chat deletion, and local project instructions.
+- Device-local sign out for replacing the OS-encrypted AdRouter API credential without removing
+  projects, chats, or preferences.
 
 ### Current desktop interaction surface
 

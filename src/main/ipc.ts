@@ -14,7 +14,7 @@ import type { RepositoryService } from './repository-service';
 import type { ReviewService } from './review-service';
 import type { RuntimeSupervisor } from './runtime-supervisor';
 
-const PUBLIC_RELEASE_VERSION = '0.1.0-beta.6';
+const PUBLIC_RELEASE_VERSION = '0.1.0-beta.7';
 
 interface Subscription {
   id: string;
@@ -110,6 +110,12 @@ export const registerIpcHandlers = (dependencies: IpcDependencies): EventSubscri
     configuration.test(IpcSchemas['configuration.testRouter'].input.parse(raw))
   );
   register('configuration.status', () => configuration.status());
+  register('configuration.signOut', () => {
+    if (supervisor.activeThreadId) {
+      throw new Error('Stop the active agent task before signing out.');
+    }
+    return configuration.signOut();
+  });
   register('configuration.updatePreferences', (raw) =>
     configuration.updatePreferences(IpcSchemas['configuration.updatePreferences'].input.parse(raw))
   );

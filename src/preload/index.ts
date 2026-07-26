@@ -64,6 +64,7 @@ const api: AdrouterApi = {
         await invoke('configuration.testRouter', RouterTestInputSchema.parse(input))
       ),
     status: async () => RouterDiagnosticsSchema.parse(await invoke('configuration.status', {})),
+    signOut: async () => RouterConfigurationSchema.parse(await invoke('configuration.signOut', {})),
     updatePreferences: async (input) =>
       RouterConfigurationSchema.parse(
         await invoke('configuration.updatePreferences', RouterPreferencesInputSchema.parse(input))

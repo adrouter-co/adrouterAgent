@@ -9,6 +9,7 @@ const api = {
     save: vi.fn(),
     testRouter: vi.fn(),
     status: vi.fn(),
+    signOut: vi.fn(),
     updatePreferences: vi.fn(),
   },
   projects: { open: vi.fn(), list: vi.fn(), get: vi.fn(), update: vi.fn(), remove: vi.fn() },
@@ -132,6 +133,52 @@ describe('App onboarding', () => {
     });
     expect(screen.queryByLabelText('Permission')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Model')).not.toBeInTheDocument();
+  });
+
+  it('signs out locally and returns to prefilled credential onboarding', async () => {
+    api.configuration.get.mockResolvedValue({
+      serverUrl: 'https://router.example',
+      sponsoredCompute: false,
+      tokenStored: true,
+      configured: true,
+      models: [],
+      selectedModel: null,
+      selectedThinkingLevel: 'medium',
+      lastCheckedAt: null,
+    });
+    api.configuration.status.mockResolvedValue({
+      health: true,
+      authenticated: true,
+      mode: 'live',
+      models: [],
+      modelsStale: false,
+      checkedAt: '2026-07-26T00:00:00.000Z',
+      error: null,
+    });
+    api.configuration.signOut.mockResolvedValue({
+      serverUrl: 'https://router.example',
+      sponsoredCompute: false,
+      tokenStored: false,
+      configured: false,
+      models: [],
+      selectedModel: null,
+      selectedThinkingLevel: 'medium',
+      lastCheckedAt: null,
+    });
+    api.projects.list.mockResolvedValue([]);
+    Object.defineProperty(window, 'adrouter', { configurable: true, value: api });
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('does not revoke the key');
+    await userEvent.click(screen.getByRole('button', { name: 'Sign out locally' }));
+
+    expect(await screen.findByRole('heading', { name: 'Connect AdRouter' })).toBeInTheDocument();
+    expect(screen.getByLabelText('AdRouter server URL')).toHaveValue('https://router.example');
+    expect(screen.getByLabelText('Enable sponsored compute')).not.toBeChecked();
+    expect(api.configuration.signOut).toHaveBeenCalledOnce();
   });
 
   it('renders compact activity and every tier in its turn-scoped placement', async () => {
@@ -429,9 +476,22 @@ describe('App onboarding', () => {
     await waitFor(() =>
       expect(screen.getByLabelText('history drawer')).toHaveAttribute('data-state', 'open')
     );
+    expect(screen.getByLabelText('history drawer')).toHaveAttribute('data-side', 'left');
     await user.click(await screen.findByRole('button', { name: 'Delete Delete me' }));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Delete permanently' }));
     await waitFor(() => expect(api.threads.delete).toHaveBeenCalledWith({ id: thread.id }));
+
+    await user.click(screen.getByRole('button', { name: 'History' }));
+    const closingDrawer = screen.getByLabelText('history drawer');
+    await waitFor(() => expect(closingDrawer).toHaveAttribute('data-state', 'closed'));
+    fireEvent.transitionEnd(closingDrawer, { propertyName: 'transform' });
+    expect(screen.queryByLabelText('history drawer')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await waitFor(() =>
+      expect(screen.getByLabelText('settings drawer')).toHaveAttribute('data-state', 'open')
+    );
+    expect(screen.getByLabelText('settings drawer')).toHaveAttribute('data-side', 'right');
   });
 });

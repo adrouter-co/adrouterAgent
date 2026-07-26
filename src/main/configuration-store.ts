@@ -14,10 +14,10 @@ import type {
 import { assertSecureCredentialStorage } from './credential-storage';
 
 interface PersistedConfiguration {
-  version: 2;
+  version: 3;
   serverUrl: string;
   sponsoredCompute: boolean;
-  encryptedToken: string;
+  encryptedToken: string | null;
   models: RouterModelDescriptor[];
   selectedModel: string | null;
   selectedThinkingLevel: ThinkingLevel;
@@ -69,18 +69,18 @@ export class ConfigurationStore {
     token: string;
     sponsoredCompute: boolean;
   }): Promise<RouterConfiguration> {
+    const existing = await this.read();
     if (__ADROUTER_E2E__) {
       const serverUrl = allowRouterUrl(input.serverUrl);
       const diagnostics = await new AdRouterClient({ serverUrl, token: input.token }).diagnostics();
       this.assertConnected(diagnostics);
       await this.write({
-        version: 2,
+        version: 3,
         serverUrl,
         sponsoredCompute: input.sponsoredCompute,
         encryptedToken: 'e2e-runtime-token',
         models: diagnostics.models,
-        selectedModel: diagnostics.models[0]?.id ?? null,
-        selectedThinkingLevel: diagnostics.models[0]?.defaultThinkingLevel ?? 'medium',
+        ...this.selectPreferences(existing, diagnostics.models),
         lastCheckedAt: diagnostics.checkedAt,
       });
       return this.get();
@@ -91,16 +91,24 @@ export class ConfigurationStore {
     this.assertConnected(diagnostics);
     const encryptedToken = (await safeStorage.encryptStringAsync(input.token)).toString('base64');
     const configuration: PersistedConfiguration = {
-      version: 2,
+      version: 3,
       serverUrl,
       sponsoredCompute: input.sponsoredCompute,
       encryptedToken,
       models: diagnostics.models,
-      selectedModel: diagnostics.models[0]?.id ?? null,
-      selectedThinkingLevel: diagnostics.models[0]?.defaultThinkingLevel ?? 'medium',
+      ...this.selectPreferences(existing, diagnostics.models),
       lastCheckedAt: diagnostics.checkedAt,
     };
     await this.write(configuration);
+    return this.get();
+  }
+
+  public async signOut(): Promise<RouterConfiguration> {
+    const configuration = await this.read();
+    if (!configuration) {
+      return this.get();
+    }
+    await this.write({ ...configuration, encryptedToken: null });
     return this.get();
   }
 
@@ -200,7 +208,7 @@ export class ConfigurationStore {
     sponsoredCompute: boolean;
   }> {
     const configuration = await this.read();
-    if (!configuration) {
+    if (!configuration?.encryptedToken) {
       throw new Error('Complete AdRouter onboarding before starting an agent task.');
     }
     if (__ADROUTER_E2E__) {
@@ -244,7 +252,7 @@ export class ConfigurationStore {
     ) {
       const models = (parsed.models as string[]).map(legacyModel);
       const migrated: PersistedConfiguration = {
-        version: 2,
+        version: 3,
         serverUrl: allowRouterUrl(parsed.serverUrl),
         sponsoredCompute: parsed.sponsoredCompute,
         encryptedToken: parsed.encryptedToken,
@@ -257,10 +265,40 @@ export class ConfigurationStore {
       return migrated;
     }
     if (
-      parsed.version !== 2 ||
+      parsed.version === 2 &&
+      typeof parsed.serverUrl === 'string' &&
+      typeof parsed.sponsoredCompute === 'boolean' &&
+      typeof parsed.encryptedToken === 'string' &&
+      Array.isArray(parsed.models) &&
+      parsed.models.every(
+        (model) =>
+          model &&
+          typeof model === 'object' &&
+          typeof (model as RouterModelDescriptor).id === 'string' &&
+          Array.isArray((model as RouterModelDescriptor).thinkingLevels)
+      ) &&
+      (parsed.selectedModel === null || typeof parsed.selectedModel === 'string') &&
+      ['none', 'medium', 'high'].includes(String(parsed.selectedThinkingLevel)) &&
+      (parsed.lastCheckedAt === null || typeof parsed.lastCheckedAt === 'string')
+    ) {
+      const migrated: PersistedConfiguration = {
+        version: 3,
+        serverUrl: allowRouterUrl(parsed.serverUrl),
+        sponsoredCompute: parsed.sponsoredCompute,
+        encryptedToken: parsed.encryptedToken,
+        models: parsed.models as RouterModelDescriptor[],
+        selectedModel: parsed.selectedModel as string | null,
+        selectedThinkingLevel: parsed.selectedThinkingLevel as ThinkingLevel,
+        lastCheckedAt: parsed.lastCheckedAt as string | null,
+      };
+      await this.write(migrated);
+      return migrated;
+    }
+    if (
+      parsed.version !== 3 ||
       typeof parsed.serverUrl !== 'string' ||
       typeof parsed.sponsoredCompute !== 'boolean' ||
-      typeof parsed.encryptedToken !== 'string' ||
+      !(parsed.encryptedToken === null || typeof parsed.encryptedToken === 'string') ||
       !Array.isArray(parsed.models) ||
       !parsed.models.every(
         (model) =>
@@ -276,10 +314,10 @@ export class ConfigurationStore {
       throw new Error('AdRouter configuration is corrupted. Re-enter the server settings.');
     }
     return {
-      version: 2,
+      version: 3,
       serverUrl: allowRouterUrl(parsed.serverUrl),
       sponsoredCompute: parsed.sponsoredCompute,
-      encryptedToken: parsed.encryptedToken,
+      encryptedToken: parsed.encryptedToken as string | null,
       models: parsed.models as RouterModelDescriptor[],
       selectedModel: parsed.selectedModel as string | null,
       selectedThinkingLevel: parsed.selectedThinkingLevel as ThinkingLevel,
@@ -291,6 +329,27 @@ export class ConfigurationStore {
     if (!diagnostics.health || !diagnostics.authenticated) {
       throw new Error(diagnostics.error ?? 'AdRouter connection verification failed.');
     }
+  }
+
+  private selectPreferences(
+    existing: PersistedConfiguration | undefined,
+    models: RouterModelDescriptor[]
+  ): Pick<PersistedConfiguration, 'selectedModel' | 'selectedThinkingLevel'> {
+    const previous = models.find((model) => model.id === existing?.selectedModel);
+    if (previous) {
+      return {
+        selectedModel: previous.id,
+        selectedThinkingLevel: previous.thinkingLevels.includes(
+          existing?.selectedThinkingLevel ?? previous.defaultThinkingLevel
+        )
+          ? (existing?.selectedThinkingLevel ?? previous.defaultThinkingLevel)
+          : previous.defaultThinkingLevel,
+      };
+    }
+    return {
+      selectedModel: models[0]?.id ?? null,
+      selectedThinkingLevel: models[0]?.defaultThinkingLevel ?? 'medium',
+    };
   }
 
   private async write(configuration: PersistedConfiguration): Promise<void> {
