@@ -172,16 +172,25 @@ test('allows only relative archive symlinks that remain inside the app bundle', 
 
 test('uses the real per-user Applications bundle and separate support receipt', () => {
   const paths = releasePaths(manifest, '/tmp/adrouter-agent-home', 'darwin');
-  assert.equal(paths.appPath, '/tmp/adrouter-agent-home/Applications/AdRouter Agent.app');
+  assert.equal(
+    paths.appPath,
+    join('/tmp/adrouter-agent-home', 'Applications', 'AdRouter Agent.app')
+  );
   assert.equal(
     paths.receiptPath,
-    '/tmp/adrouter-agent-home/Library/Application Support/adrouter-agent-launcher/receipt.json'
+    join(
+      '/tmp/adrouter-agent-home',
+      'Library',
+      'Application Support',
+      'adrouter-agent-launcher',
+      'receipt.json'
+    )
   );
 });
 
 test('uses XDG and LocalAppData install locations for portable targets', () => {
   const linux = releasePaths(manifest, '/tmp/home', 'linux', { xdgDataHome: '/tmp/xdg' });
-  assert.equal(linux.appPath, '/tmp/xdg/adrouter-agent/app');
+  assert.equal(linux.appPath, join('/tmp/xdg', 'adrouter-agent', 'app'));
   const windows = releasePaths(manifest, 'C:\\Users\\fixture', 'win32', {
     localAppData: 'C:\\Users\\fixture\\AppData\\Local',
   });
@@ -316,7 +325,9 @@ test('installs into Applications and reports credential-free integrity', async (
   }
 });
 
-test('installs a signed app containing safe internal framework symlinks', async () => {
+test('installs a signed app containing safe internal framework symlinks', {
+  skip: process.platform === 'win32',
+}, async () => {
   const homeDirectory = mkdtempSync(join(tmpdir(), 'adrouter-launcher-symlink-test-'));
   const body = Buffer.from('fixture zip body with safe framework symlinks');
   const fixtureManifest = {

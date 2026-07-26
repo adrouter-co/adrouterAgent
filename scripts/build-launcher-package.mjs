@@ -119,7 +119,7 @@ export function buildLauncherPackage({ artifacts, outputDirectory, stagingRoot }
       `${JSON.stringify(releaseManifest, null, 2)}\n`
     );
     const packedJson = run(
-      'npm',
+      process.platform === 'win32' ? 'npm.cmd' : 'npm',
       ['pack', '--ignore-scripts', '--json', '--pack-destination', output],
       { cwd: packageDirectory }
     );
