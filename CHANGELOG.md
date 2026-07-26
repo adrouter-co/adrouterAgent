@@ -2,6 +2,17 @@
 
 All notable changes to AdRouter Agent are documented here.
 
+## [0.1.0-beta.6] - 2026-07-26
+
+### Fixed
+
+- The Windows launcher now accepts Electron Forge's verified flat portable ZIP
+  layout while continuing to reject absolute paths, drive-qualified paths,
+  traversal, ambiguous path segments, and escaping symbolic links.
+- Cross-platform promotion smokes no longer cancel healthy operating-system
+  jobs when another matrix member fails, preserving complete deployment
+  evidence before public distribution tags can move.
+
 ## [0.1.0-beta.5] - 2026-07-26
 
 ### Fixed
@@ -84,6 +95,7 @@ All notable changes to AdRouter Agent are documented here.
 - Updates are downloaded and installed manually.
 - A reachable AdRouter server and valid bearer token are required.
 
+[0.1.0-beta.6]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.6
 [0.1.0-beta.5]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.5
 [0.1.0-beta.4]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.4
 [0.1.0-beta.3]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.3

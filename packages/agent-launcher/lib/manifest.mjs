@@ -22,7 +22,7 @@ const ARTIFACTS = Object.freeze({
   'win32-x64': {
     platform: 'win32',
     architectures: ['x64'],
-    archiveRoot: 'AdRouter Agent-win32-x64',
+    archiveRoot: '.',
     executablePath: 'AdRouter Agent.exe',
     verificationMode: 'portable-checksum',
     suffix: 'win32-x64',

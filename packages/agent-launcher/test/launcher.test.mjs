@@ -29,20 +29,20 @@ import { artifactKey, selectArtifact, validateManifest } from '../lib/manifest.m
 const manifest = {
   schema: 3,
   distributionMode: 'credential-free-portable',
-  releaseVersion: '0.1.0-beta.5',
-  releaseTag: 'v0.1.0-beta.5',
+  releaseVersion: '0.1.0-beta.6',
+  releaseTag: 'v0.1.0-beta.6',
   repository: 'adrouter/adrouterAgent',
   bundleIdentifier: 'com.adrouter.agent',
   bundleShortVersion: '0.1.0',
-  bundleVersion: '10005',
+  bundleVersion: '10006',
   artifacts: [
     {
       key: 'darwin-universal',
       platform: 'darwin',
       architectures: ['arm64', 'x64'],
-      assetName: 'AdRouter-Agent-0.1.0-beta.5-darwin-universal.zip',
+      assetName: 'AdRouter-Agent-0.1.0-beta.6-darwin-universal.zip',
       assetUrl:
-        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.5/AdRouter-Agent-0.1.0-beta.5-darwin-universal.zip',
+        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.6/AdRouter-Agent-0.1.0-beta.6-darwin-universal.zip',
       sha256: 'a'.repeat(64),
       archiveRoot: 'AdRouter Agent.app',
       executablePath: 'Contents/MacOS/AdRouter Agent',
@@ -52,9 +52,9 @@ const manifest = {
       key: 'linux-x64',
       platform: 'linux',
       architectures: ['x64'],
-      assetName: 'AdRouter-Agent-0.1.0-beta.5-linux-x64.zip',
+      assetName: 'AdRouter-Agent-0.1.0-beta.6-linux-x64.zip',
       assetUrl:
-        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.5/AdRouter-Agent-0.1.0-beta.5-linux-x64.zip',
+        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.6/AdRouter-Agent-0.1.0-beta.6-linux-x64.zip',
       sha256: 'b'.repeat(64),
       archiveRoot: 'AdRouter Agent-linux-x64',
       executablePath: 'AdRouter Agent',
@@ -64,11 +64,11 @@ const manifest = {
       key: 'win32-x64',
       platform: 'win32',
       architectures: ['x64'],
-      assetName: 'AdRouter-Agent-0.1.0-beta.5-win32-x64.zip',
+      assetName: 'AdRouter-Agent-0.1.0-beta.6-win32-x64.zip',
       assetUrl:
-        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.5/AdRouter-Agent-0.1.0-beta.5-win32-x64.zip',
+        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.6/AdRouter-Agent-0.1.0-beta.6-win32-x64.zip',
       sha256: 'c'.repeat(64),
-      archiveRoot: 'AdRouter Agent-win32-x64',
+      archiveRoot: '.',
       executablePath: 'AdRouter Agent.exe',
       verificationMode: 'portable-checksum',
     },
@@ -76,7 +76,7 @@ const manifest = {
 };
 
 test('validates the exact credential-free release manifest', () => {
-  assert.equal(validateManifest(manifest).releaseVersion, '0.1.0-beta.5');
+  assert.equal(validateManifest(manifest).releaseVersion, '0.1.0-beta.6');
   assert.throws(() => validateManifest({ ...manifest, schema: 1 }));
   assert.throws(() => validateManifest({ ...manifest, distributionMode: 'notarized' }));
   assert.throws(() => validateManifest({ ...manifest, repository: 'attacker/repository' }));
@@ -144,7 +144,21 @@ test('rejects path traversal and unexpected archive layouts', () => {
   );
   assert.throws(() => assertSafeArchiveEntries(['../escape']), /Unsafe ZIP entry/);
   assert.throws(() => assertSafeArchiveEntries(['/absolute']), /Unsafe ZIP entry/);
+  assert.throws(() => assertSafeArchiveEntries(['C:\\absolute']), /Unsafe ZIP entry/);
   assert.throws(() => assertSafeArchiveEntries(['Other.app/file']), /Unexpected ZIP layout/);
+  assert.doesNotThrow(() =>
+    assertSafeArchiveEntries(['AdRouter Agent.exe', 'resources\\app.asar'], '.')
+  );
+  assert.throws(() => assertSafeArchiveEntries(['..\\escape'], '.'), /Unsafe ZIP entry/);
+  assert.throws(() => assertSafeArchiveEntries(['C:\\escape'], '.'), /Unsafe ZIP entry/);
+});
+
+test('keeps flat archive symlinks inside the extraction root', () => {
+  assert.doesNotThrow(() => assertSafeArchiveSymlink('resources/current', 'app.asar', '.'));
+  assert.throws(
+    () => assertSafeArchiveSymlink('resources/escape', '../../outside', '.'),
+    /escapes \./
+  );
 });
 
 test('allows only relative archive symlinks that remain inside the app bundle', () => {
@@ -239,7 +253,7 @@ function fixtureExecute({ gatekeeper = 'rejected', running = false, safeSymlink 
         return { stdout: 'com.adrouter.agent\n', stderr: '' };
       }
       return {
-        stdout: args[1].includes('Short') ? '0.1.0\n' : '10005\n',
+        stdout: args[1].includes('Short') ? '0.1.0\n' : '10006\n',
         stderr: '',
       };
     }
@@ -375,7 +389,7 @@ function portableExecute(platform, archiveRoot, executableName) {
         ));
     if (isExtract) {
       const destination = args.at(-1);
-      const root = join(destination, archiveRoot);
+      const root = archiveRoot === '.' ? destination : join(destination, archiveRoot);
       mkdirSync(root, { recursive: true });
       const executable = join(root, executableName);
       writeFileSync(executable, 'portable fixture');
@@ -385,7 +399,9 @@ function portableExecute(platform, archiveRoot, executableName) {
     if (platform === 'win32' && file === 'powershell.exe') {
       assert.ok(args.some((argument) => argument.includes('param([string]$zipPath)')));
       assert.ok(args.some((argument) => argument.includes('OpenRead($zipPath)')));
-      return { stdout: `${archiveRoot}/\r\n${archiveRoot}/${executableName}\r\n`, stderr: '' };
+      return archiveRoot === '.'
+        ? { stdout: `${executableName}\r\nresources\\app.asar\r\n`, stderr: '' }
+        : { stdout: `${archiveRoot}/\r\n${archiveRoot}/${executableName}\r\n`, stderr: '' };
     }
     throw new Error(`Unexpected portable fixture executable ${file}`);
   };
@@ -401,7 +417,7 @@ for (const target of [
   {
     platform: 'win32',
     key: 'win32-x64',
-    archiveRoot: 'AdRouter Agent-win32-x64',
+    archiveRoot: '.',
     executable: 'AdRouter Agent.exe',
   },
 ]) {

@@ -79,13 +79,21 @@ export function assertSafeArchiveEntries(entries, archiveRoot = 'AdRouter Agent.
       typeof entry !== 'string' ||
       entry.includes('\0') ||
       entry.startsWith('/') ||
+      /^[A-Za-z]:/.test(entry) ||
       entry.startsWith('\\') ||
       entry.split(/[\\/]/).includes('..')
     ) {
       throw new Error(`Unsafe ZIP entry: ${JSON.stringify(entry)}`);
     }
     const normalized = entry.replaceAll('\\', '/').replace(/\/$/, '');
-    if (normalized !== archiveRoot && !normalized.startsWith(`${archiveRoot}/`)) {
+    if (!normalized || normalized.split('/').some((segment) => segment === '' || segment === '.')) {
+      throw new Error(`Unsafe ZIP entry: ${JSON.stringify(entry)}`);
+    }
+    if (
+      archiveRoot !== '.' &&
+      normalized !== archiveRoot &&
+      !normalized.startsWith(`${archiveRoot}/`)
+    ) {
       throw new Error(`Unexpected ZIP layout entry: ${entry}`);
     }
   }
@@ -103,8 +111,15 @@ export function assertSafeArchiveSymlink(entry, target, archiveRoot = 'AdRouter 
   ) {
     throw new Error(`Unsafe ZIP symbolic link target: ${JSON.stringify(target)}`);
   }
-  const resolved = posix.resolve('/', posix.dirname(entry), target);
-  const root = `/${archiveRoot}`;
+  const root = archiveRoot === '.' ? '/_archive' : `/${archiveRoot}`;
+  const relativeEntry =
+    archiveRoot === '.'
+      ? entry.split(String.fromCodePoint(92)).join('/')
+      : entry
+          .split(String.fromCodePoint(92))
+          .join('/')
+          .slice(archiveRoot.length + 1);
+  const resolved = posix.resolve(root, posix.dirname(relativeEntry), target);
   if (resolved !== root && !resolved.startsWith(`${root}/`)) {
     throw new Error(`ZIP symbolic link escapes ${archiveRoot}: ${entry} -> ${target}`);
   }
@@ -252,7 +267,10 @@ async function verifyExtractedTree(root, appPath, archiveRoot) {
     for (const entry of await readdir(path)) await visit(join(path, entry));
   }
   const topLevel = await readdir(root);
-  if (topLevel.length !== 1 || topLevel[0] !== archiveRoot) {
+  if (archiveRoot === '.' && topLevel.length === 0) {
+    throw new Error('Release archive is empty after extraction.');
+  }
+  if (archiveRoot !== '.' && (topLevel.length !== 1 || topLevel[0] !== archiveRoot)) {
     throw new Error(`Release archive must contain exactly ${archiveRoot}.`);
   }
   await visit(appPath);
@@ -518,7 +536,8 @@ export async function install(manifest, options = {}) {
   const staging = await mkdtemp(join(paths.applicationsDirectory, '.adrouter-agent-staging-'));
   const archive = join(staging, basename(artifact.assetName));
   const extracted = join(staging, 'extracted');
-  const stagedApp = join(extracted, artifact.archiveRoot);
+  const stagedApp =
+    artifact.archiveRoot === '.' ? extracted : join(extracted, artifact.archiveRoot);
   const backupPath = join(
     paths.applicationsDirectory,
     `.adrouter-agent-backup-${process.pid}-${Date.now()}`

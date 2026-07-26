@@ -58,7 +58,7 @@ const targetMetadata = [
     key: 'win32-x64',
     platform: 'win32',
     architectures: ['x64'],
-    archiveRoot: 'AdRouter Agent-win32-x64',
+    archiveRoot: '.',
     executablePath: 'AdRouter Agent.exe',
     verificationMode: 'portable-checksum',
   },
@@ -118,7 +118,7 @@ export function buildLauncherPackage({ artifacts, outputDirectory, stagingRoot }
       repository: 'adrouter/adrouterAgent',
       bundleIdentifier: 'com.adrouter.agent',
       bundleShortVersion: '0.1.0',
-      bundleVersion: '10005',
+      bundleVersion: '10006',
       artifacts: releaseArtifacts,
     };
     writeFileSync(

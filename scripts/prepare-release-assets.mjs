@@ -113,7 +113,7 @@ writeFileSync(
       releaseVersion: version,
       releaseTag: `v${version}`,
       bundleShortVersion: '0.1.0',
-      bundleVersion: '10005',
+      bundleVersion: '10006',
       launcherManifest: launcher.manifest,
       files: records,
     },

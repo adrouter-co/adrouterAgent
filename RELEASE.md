@@ -1,6 +1,6 @@
 # Public-beta release procedure
 
-This is the operator runbook for `v0.1.0-beta.5`. It separates safe repository
+This is the operator runbook for `v0.1.0-beta.6`. It separates safe repository
 setup from credential entry and irreversible publication.
 
 ## 1. Prerequisites
@@ -49,7 +49,7 @@ Create an empty public repository and push the reviewed initial commit:
 ```bash
 gh repo create adrouter/adrouterAgent --public --source=. --remote=origin
 git add .
-git commit -m "Prepare AdRouter Agent 0.1.0-beta.5 public release"
+git commit -m "Prepare AdRouter Agent 0.1.0-beta.6 public release"
 git push --set-upstream origin main
 ```
 
@@ -113,9 +113,9 @@ Wait for required CI on `main`, then create the exact annotated tag:
 git fetch origin main --tags
 git switch main
 git pull --ff-only
-test "$(node -p "require('./package.json').version")" = "0.1.0-beta.5"
-git tag -a v0.1.0-beta.5 -m "AdRouter Agent 0.1.0-beta.5"
-git push origin v0.1.0-beta.5
+test "$(node -p "require('./package.json').version")" = "0.1.0-beta.6"
+git tag -a v0.1.0-beta.6 -m "AdRouter Agent 0.1.0-beta.6"
+git push origin v0.1.0-beta.6
 ```
 
 Approve the `adrouter-staging` and `macos-release` jobs when GitHub prompts.
@@ -132,8 +132,8 @@ tag ref** so the environment's deployment-tag policy applies:
 
 ```bash
 gh workflow run promote-release.yml \
-  --ref v0.1.0-beta.5 \
-  -f tag=v0.1.0-beta.5
+  --ref v0.1.0-beta.6 \
+  -f tag=v0.1.0-beta.6
 ```
 
 Approve `npm-publish` and `adrouter-staging` when prompted. The Intel smoke job
@@ -148,7 +148,7 @@ checks on Apple Silicon, Intel, Ubuntu, and Windows, then moves `beta` and
 Final registry checks:
 
 ```bash
-npm view @adrouter/agent@0.1.0-beta.5 version dist.integrity repository --json
+npm view @adrouter/agent@0.1.0-beta.6 version dist.integrity repository --json
 npm view @adrouter/agent dist-tags --json
 npm install --global @adrouter/agent@beta
 adrouter-agent doctor --json
@@ -183,7 +183,7 @@ After the first release finishes:
    store only `NPM_DIST_TAG_TOKEN`. Trusted publishing handles `npm publish`,
    while npm dist-tag changes still require traditional authenticated access.
 
-Do not attempt to republish `0.1.0-beta.5` to test OIDC. npm versions are
+Do not attempt to republish `0.1.0-beta.6` to test OIDC. npm versions are
 immutable; use a higher beta version.
 
 ## 8. Recovery

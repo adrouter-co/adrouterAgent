@@ -202,7 +202,7 @@ artifact manifest that lets the launcher choose and verify the exact target.
 npm run make:mac
 npm run verify:dist
 npm run test:workflows
-node scripts/prepare-release-assets.mjs 0.1.0-beta.5
+node scripts/prepare-release-assets.mjs 0.1.0-beta.6
 node scripts/verify-release-assets.mjs out/release
 ```
 

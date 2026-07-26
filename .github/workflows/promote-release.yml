@@ -6,7 +6,7 @@ on:
       tag:
         description: Immutable release tag
         required: true
-        default: v0.1.0-beta.5
+        default: v0.1.0-beta.6
         type: string
 
 permissions:
@@ -101,7 +101,7 @@ jobs:
     name: anonymous public smoke (${{ matrix.architecture }})
     needs: publish-candidate
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - architecture: arm64
