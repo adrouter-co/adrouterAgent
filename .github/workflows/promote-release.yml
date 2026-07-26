@@ -166,11 +166,25 @@ jobs:
           test "$(npm view "@adrouter/agent@$VERSION" version)" = "$VERSION"
           npm dist-tag add "@adrouter/agent@$VERSION" beta
           npm dist-tag add "@adrouter/agent@$VERSION" latest
-          if npm view @adrouter/agent dist-tags.candidate >/dev/null 2>&1; then
+          candidate="$(npm view @adrouter/agent dist-tags.candidate)"
+          if test "$candidate" = "$VERSION"; then
             npm dist-tag rm @adrouter/agent candidate
+          else
+            test -z "$candidate"
           fi
-          test "$(npm view @adrouter/agent dist-tags.beta)" = "$VERSION"
-          test "$(npm view @adrouter/agent dist-tags.latest)" = "$VERSION"
+          for attempt in {1..18}; do
+            tags_json="$(npm view @adrouter/agent dist-tags --json)"
+            if TAGS_JSON="$tags_json" VERSION="$VERSION" node -e '
+              const tags = JSON.parse(process.env.TAGS_JSON);
+              process.exit(tags.beta === process.env.VERSION &&
+                tags.latest === process.env.VERSION &&
+                !Object.hasOwn(tags, "candidate") ? 0 : 1);
+            '; then
+              break
+            fi
+            test "$attempt" -lt 18
+            sleep 5
+          done
           npm view "@adrouter/agent@$VERSION" dist.integrity repository --json
       - name: Require post-bootstrap credential migration
         run: |
