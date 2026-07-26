@@ -59,7 +59,7 @@ describe('command policy', () => {
         .filesystem.allowWrite
     ).toEqual(['/tmp/adrouter-home']);
     expect(environment.HOME).toBe('/tmp/adrouter-home');
-    expect(shellQuote(['npm', 'test', "it's-safe"])).toContain("'it'\\''s-safe'");
+    expect(shellQuote(['npm', 'test', "it's-safe"], 'darwin')).toContain("'it'\\''s-safe'");
     expect(shellQuote(['npm.cmd', 'test', "it's-safe"], 'win32')).toBe(
       "& 'npm.cmd' 'test' 'it''s-safe'"
     );
