@@ -41,7 +41,13 @@ describe('command policy', () => {
   });
 
   it('builds a network-denied sandbox configuration and strips credentials', () => {
-    const config = buildSandboxConfig('/tmp/workspace', '/tmp/adrouter-home');
+    const config = buildSandboxConfig(
+      '/tmp/workspace',
+      '/tmp/adrouter-home',
+      true,
+      undefined,
+      'darwin'
+    );
     const environment = sanitizedEnvironment('/tmp/adrouter-home');
 
     expect(config.network.deniedDomains).toContain('*');
@@ -49,7 +55,8 @@ describe('command policy', () => {
     expect(config.filesystem.allowWrite).toEqual(['/tmp/workspace', '/tmp/adrouter-home']);
     expect(config.filesystem.denyRead).toContain('/');
     expect(
-      buildSandboxConfig('/tmp/workspace', '/tmp/adrouter-home', false).filesystem.allowWrite
+      buildSandboxConfig('/tmp/workspace', '/tmp/adrouter-home', false, undefined, 'darwin')
+        .filesystem.allowWrite
     ).toEqual(['/tmp/adrouter-home']);
     expect(environment.HOME).toBe('/tmp/adrouter-home');
     expect(shellQuote(['npm', 'test', "it's-safe"])).toContain("'it'\\''s-safe'");
