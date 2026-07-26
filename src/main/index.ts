@@ -19,8 +19,11 @@ const createMainWindow = (): BrowserWindow => {
     height: 940,
     minWidth: 980,
     minHeight: 680,
-    backgroundColor: '#0f172a',
+    backgroundColor: '#fffff0',
     show: false,
+    ...(process.platform === 'linux'
+      ? { icon: join(__dirname, '..', '..', 'assets', 'icon.png') }
+      : {}),
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),

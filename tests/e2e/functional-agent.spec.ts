@@ -174,8 +174,23 @@ test.describe('packaged functional agent', () => {
       await page.getByLabel('Task message').fill('stop this run');
       await page.getByRole('button', { name: 'Send' }).click();
       await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
+      await expect(page.evaluate(() => window.adrouter.configuration.signOut())).rejects.toThrow(
+        'Stop the active agent task before signing out.'
+      );
+      await page.getByRole('button', { name: 'Settings' }).click();
+      await expect(page.getByRole('button', { name: 'Sign out' })).toBeDisabled();
+      await page.getByRole('button', { name: 'Close' }).click();
       await page.getByRole('button', { name: 'Stop' }).click();
       await expect(page.getByRole('button', { name: 'Send' })).toBeVisible({ timeout: 15_000 });
+      await page.getByRole('button', { name: 'Settings' }).click();
+      await page.getByRole('button', { name: 'Sign out' }).click();
+      await expect(page.getByRole('dialog')).toContainText('does not revoke the key');
+      await page.getByRole('button', { name: 'Sign out locally' }).click();
+      await expect(page.getByRole('heading', { name: 'Connect AdRouter' })).toBeVisible();
+      await expect(page.getByLabel('AdRouter server URL')).toHaveValue(
+        `http://127.0.0.1:${address.port}`
+      );
+      await expect(page.getByLabel('Access token')).toHaveValue('');
     } finally {
       await app.close();
       server.closeAllConnections();

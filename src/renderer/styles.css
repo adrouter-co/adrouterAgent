@@ -1000,12 +1000,17 @@ body,
   color: var(--text);
 }
 .top-bar .brand-mark {
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  font-size: 0;
-  background: var(--blue);
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: rgba(63, 101, 245, 0.08);
   box-shadow: none;
+}
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 .top-bar nav {
   display: flex;
@@ -1024,6 +1029,9 @@ body,
 }
 .top-bar .secondary-button {
   min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border-color: transparent;
   border-radius: 7px;
   background: transparent;
@@ -1299,6 +1307,15 @@ body,
   opacity: 1;
   transform: translateX(0);
 }
+.drawer[data-side="left"] {
+  inset: 80px auto 0 0;
+  border-right: 1px solid var(--border);
+  border-left: 0;
+  box-shadow: 20px 0 60px rgba(45, 37, 24, 0.12);
+}
+.drawer[data-side="left"][data-state="closed"] {
+  transform: translateX(-100%);
+}
 .drawer-header {
   display: flex;
   align-items: center;
@@ -1307,6 +1324,14 @@ body,
 }
 .drawer-header h2 {
   margin: 0;
+}
+.drawer-header .text-button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 9px;
 }
 .drawer .thread-list button {
   width: 100%;
@@ -1319,6 +1344,19 @@ body,
   border-radius: 10px;
   background: transparent;
   text-align: left;
+}
+.drawer .thread-list .thread-delete {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  grid-template-columns: 1fr;
+  place-items: center;
+  padding: 0;
+  color: var(--muted);
+}
+.drawer .thread-list .thread-delete:hover {
+  color: var(--red);
+  background: var(--red-soft);
 }
 .drawer .thread-list button.selected {
   border-color: var(--border);
@@ -1457,16 +1495,20 @@ body,
   align-items: center;
 }
 .welcome-orb {
-  width: 56px;
-  height: 56px;
+  width: 112px;
+  height: 112px;
   display: grid;
   place-items: center;
   margin-bottom: 18px;
-  border: 1px solid rgba(0, 82, 255, 0.18);
-  border-radius: 18px;
-  color: var(--blue);
-  background: rgba(0, 82, 255, 0.07);
-  box-shadow: 0 14px 38px rgba(0, 82, 255, 0.08);
+  border: 0;
+  border-radius: 30px;
+  background: transparent;
+  filter: drop-shadow(0 16px 28px rgba(63, 101, 245, 0.17));
+  box-shadow: none;
+}
+.welcome-orb img {
+  width: 100%;
+  height: 100%;
 }
 .empty-timeline .eyebrow {
   color: var(--blue);
@@ -1518,6 +1560,45 @@ body,
   background: rgba(255, 255, 255, 0.92);
   transform: translateY(-2px);
 }
+.composer .primary-button,
+.composer .stop-button,
+.danger-outline-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.danger-outline-button {
+  min-height: 36px;
+  padding: 0 12px;
+  color: var(--red);
+  border: 1px solid rgba(194, 54, 43, 0.24);
+  border-radius: 8px;
+  background: rgba(255, 233, 232, 0.55);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+.danger-outline-button:hover:not(:disabled) {
+  background: var(--red-soft);
+}
+.credential-panel {
+  margin-top: 22px;
+}
+.credential-panel .empty-copy {
+  margin-bottom: 8px;
+}
+.credential-panel small {
+  color: var(--muted);
+}
+.onboarding-card .brand-mark.large {
+  width: 78px;
+  height: 78px;
+  padding: 0;
+  border-radius: 22px;
+  background: rgba(63, 101, 245, 0.07);
+  box-shadow: 0 14px 38px rgba(63, 101, 245, 0.12);
+}
 .welcome-steps {
   display: flex;
   flex-wrap: wrap;
@@ -1562,6 +1643,9 @@ body,
     width: min(100% - 24px, 850px);
   }
   .drawer {
+    top: 124px;
+  }
+  .drawer[data-side="left"] {
     top: 124px;
   }
   .timeline {

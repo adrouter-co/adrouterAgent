@@ -1,7 +1,21 @@
 import { DiffEditor } from '@monaco-editor/react';
+import {
+  ArrowRight,
+  FolderOpen,
+  History,
+  LogOut,
+  MessageSquarePlus,
+  PanelRight,
+  Send,
+  Settings,
+  Square,
+  Trash2,
+  X,
+} from 'lucide-react';
 import type { JSX, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import jellyfishLogo from '../../assets/icon.svg?url';
 import { DEFAULT_ADROUTER_SERVER_URL } from '../shared/constants';
 import type {
   ApplicationInfo,
@@ -9,6 +23,7 @@ import type {
   DiffFile,
   JournalEvent,
   Project,
+  RouterConfiguration,
   RouterDiagnostics,
   RouterModelDescriptor,
   Sponsor,
@@ -113,12 +128,18 @@ export function App(): JSX.Element {
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [applicationInfo, setApplicationInfo] = useState<ApplicationInfo>();
+  const [onboardingDefaults, setOnboardingDefaults] = useState<
+    Pick<RouterConfiguration, 'serverUrl' | 'sponsoredCompute'>
+  >({ serverUrl: DEFAULT_ADROUTER_SERVER_URL, sponsoredCompute: true });
+  const [confirmingSignOut, setConfirmingSignOut] = useState(false);
+  const [signOutBusy, setSignOutBusy] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
   const followTimeline = useRef(true);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
   const selectedThread = threads.find((thread) => thread.id === selectedThreadId) ?? detail?.thread;
   const isRunning = selectedThread ? !isTerminal(selectedThread.status) : false;
+  const hasActiveTask = isRunning || threads.some((thread) => !isTerminal(thread.status));
   const runningTurnId = isRunning ? detail?.turns.at(-1)?.id : undefined;
   const timeline = useMemo(
     () => buildTimeline(detail?.events ?? [], runningTurnId),
@@ -225,6 +246,10 @@ export function App(): JSX.Element {
           if (info) setApplicationInfo(info);
         }
         const configuration = await window.adrouter.configuration.get();
+        setOnboardingDefaults({
+          serverUrl: configuration.serverUrl,
+          sponsoredCompute: configuration.sponsoredCompute,
+        });
         setConfigured(configuration.configured);
         setServerUrl(configuration.serverUrl);
         const configuredModels = normalizeModels(configuration.models);
@@ -252,9 +277,16 @@ export function App(): JSX.Element {
       setDrawerExpanded(false);
       return undefined;
     }
+    setDrawerExpanded(false);
     setRenderedDrawer(drawer);
-    const frame = requestAnimationFrame(() => setDrawerExpanded(true));
-    return () => cancelAnimationFrame(frame);
+    let openFrame = 0;
+    const mountFrame = requestAnimationFrame(() => {
+      openFrame = requestAnimationFrame(() => setDrawerExpanded(true));
+    });
+    return () => {
+      cancelAnimationFrame(mountFrame);
+      cancelAnimationFrame(openFrame);
+    };
   }, [drawer]);
 
   useEffect(() => {
@@ -346,6 +378,8 @@ export function App(): JSX.Element {
   if (!configured) {
     return (
       <Onboarding
+        initialServerUrl={onboardingDefaults.serverUrl}
+        initialSponsoredCompute={onboardingDefaults.sponsoredCompute}
         onConfigured={async () => {
           setConfigured(true);
           const configuration = await window.adrouter.configuration.get();
@@ -492,7 +526,7 @@ export function App(): JSX.Element {
       <header className="top-bar">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
-            ◆
+            <img src={jellyfishLogo} alt="" />
           </span>
           <span>AdRouter Agent</span>
         </div>
@@ -503,6 +537,7 @@ export function App(): JSX.Element {
             onClick={() => void openProject()}
             disabled={busy}
           >
+            <FolderOpen size={16} aria-hidden="true" />
             Choose folder
           </button>
           <select
@@ -526,6 +561,7 @@ export function App(): JSX.Element {
               setDrawer(null);
             }}
           >
+            <MessageSquarePlus size={16} aria-hidden="true" />
             New Chat
           </button>
           <button
@@ -534,6 +570,7 @@ export function App(): JSX.Element {
             disabled={!selectedProject}
             onClick={() => setDrawer(drawer === 'history' ? null : 'history')}
           >
+            <History size={16} aria-hidden="true" />
             History
           </button>
           <button
@@ -542,6 +579,7 @@ export function App(): JSX.Element {
             disabled={!selectedThreadId}
             onClick={() => setDrawer(drawer === 'changes' ? null : 'changes')}
           >
+            <PanelRight size={16} aria-hidden="true" />
             Changes{diffs.length ? ` (${diffs.length})` : ''}
           </button>
           <button
@@ -549,6 +587,7 @@ export function App(): JSX.Element {
             type="button"
             onClick={() => setDrawer(drawer === 'settings' ? null : 'settings')}
           >
+            <Settings size={16} aria-hidden="true" />
             Settings
           </button>
         </nav>
@@ -651,6 +690,7 @@ export function App(): JSX.Element {
           aria-label={`${renderedDrawer} drawer`}
           aria-hidden={!drawerExpanded}
           data-state={drawerExpanded ? 'open' : 'closed'}
+          data-side={renderedDrawer === 'history' ? 'left' : 'right'}
           onTransitionEnd={(event) => {
             if (
               event.target === event.currentTarget &&
@@ -668,7 +708,8 @@ export function App(): JSX.Element {
               {renderedDrawer.slice(1)}
             </h2>
             <button className="text-button" type="button" onClick={() => setDrawer(null)}>
-              Close
+              <X size={17} aria-hidden="true" />
+              <span className="sr-only">Close</span>
             </button>
           </div>
           {renderedDrawer === 'history' && (
@@ -696,7 +737,8 @@ export function App(): JSX.Element {
                     disabled={thread.status === 'running' || thread.status === 'awaiting_approval'}
                     onClick={() => setDeletingThread(thread)}
                   >
-                    Delete
+                    <Trash2 size={15} aria-hidden="true" />
+                    <span className="sr-only">Delete</span>
                   </button>
                 </div>
               ))}
@@ -739,6 +781,28 @@ export function App(): JSX.Element {
                 )}
               </section>
               <EconomicsPanel events={detail?.events ?? []} sponsor={sponsor} />
+              <section className="detail-panel credential-panel" aria-label="AdRouter credential">
+                <div className="detail-heading">
+                  <div>
+                    <p className="eyebrow">API credential</p>
+                    <h2>Rotate access on this device</h2>
+                  </div>
+                  <button
+                    className="danger-outline-button"
+                    type="button"
+                    disabled={hasActiveTask || signOutBusy}
+                    onClick={() => setConfirmingSignOut(true)}
+                  >
+                    <LogOut size={16} aria-hidden="true" />
+                    Sign out
+                  </button>
+                </div>
+                <p className="empty-copy">
+                  Sign out removes the encrypted API key from this device. Your server, preferences,
+                  projects, and chats stay here so you can enter a replacement key.
+                </p>
+                {hasActiveTask && <small>Stop the active agent task before signing out.</small>}
+              </section>
               <AboutPanel info={applicationInfo} />
             </>
           )}
@@ -767,6 +831,57 @@ export function App(): JSX.Element {
               </button>
               <button className="deny-button" type="button" onClick={() => void deleteThread()}>
                 Delete permanently
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {confirmingSignOut && (
+        <div className="modal-backdrop">
+          <section
+            className="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sign-out-title"
+          >
+            <h2 id="sign-out-title">Sign out and replace this API key?</h2>
+            <p>
+              This removes only the encrypted key stored on this device. It does not revoke the key
+              on the AdRouter server; revoke or create credentials from the AdRouter WebUI.
+            </p>
+            <div className="approval-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={signOutBusy}
+                onClick={() => setConfirmingSignOut(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="deny-button"
+                type="button"
+                disabled={signOutBusy || hasActiveTask}
+                onClick={() => {
+                  setSignOutBusy(true);
+                  setError(undefined);
+                  void window.adrouter.configuration
+                    .signOut()
+                    .then((configuration) => {
+                      setOnboardingDefaults({
+                        serverUrl: configuration.serverUrl,
+                        sponsoredCompute: configuration.sponsoredCompute,
+                      });
+                      setRouterStatus(undefined);
+                      setDrawer(null);
+                      setConfirmingSignOut(false);
+                      setConfigured(false);
+                    })
+                    .catch((caught) => setError(errorMessage(caught)))
+                    .finally(() => setSignOutBusy(false));
+                }}
+              >
+                {signOutBusy ? 'Signing out…' : 'Sign out locally'}
               </button>
             </div>
           </section>
@@ -813,15 +928,19 @@ function AboutPanel({ info }: { info?: ApplicationInfo }): JSX.Element {
 }
 
 function Onboarding({
+  initialServerUrl,
+  initialSponsoredCompute,
   onConfigured,
   onModels,
 }: {
+  initialServerUrl: string;
+  initialSponsoredCompute: boolean;
   onConfigured: () => Promise<void>;
   onModels: (models: RouterModelDescriptor[]) => void;
 }): JSX.Element {
-  const [serverUrl, setServerUrl] = useState(DEFAULT_ADROUTER_SERVER_URL);
+  const [serverUrl, setServerUrl] = useState(initialServerUrl || DEFAULT_ADROUTER_SERVER_URL);
   const [token, setToken] = useState('');
-  const [sponsoredCompute, setSponsoredCompute] = useState(true);
+  const [sponsoredCompute, setSponsoredCompute] = useState(initialSponsoredCompute);
   const [diagnostics, setDiagnostics] = useState<RouterDiagnostics>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -864,7 +983,7 @@ function Onboarding({
     <main className="onboarding-shell">
       <section className="onboarding-card" aria-labelledby="onboarding-title">
         <span className="brand-mark large" aria-hidden="true">
-          ◆
+          <img src={jellyfishLogo} alt="" />
         </span>
         <p className="eyebrow">Local-first desktop coding agent</p>
         <h1 id="onboarding-title">Connect AdRouter</h1>
@@ -1104,7 +1223,7 @@ function EmptyTimeline({
   return (
     <div className="empty-timeline">
       <div className="welcome-orb" aria-hidden="true">
-        ◆
+        <img src={jellyfishLogo} alt="" />
       </div>
       <p className="eyebrow">Local-first coding agent</p>
       <h2>
@@ -1126,7 +1245,7 @@ function EmptyTimeline({
           {starterSuggestions.map((suggestion) => (
             <button type="button" key={suggestion} onClick={() => onSuggestion(suggestion)}>
               <span>{suggestion}</span>
-              <span aria-hidden="true">→</span>
+              <ArrowRight size={16} aria-hidden="true" />
             </button>
           ))}
         </div>
@@ -1273,10 +1392,12 @@ function Composer({
         </label>
         {isRunning ? (
           <button className="stop-button" type="button" onClick={() => void onStop()}>
+            <Square size={14} aria-hidden="true" />
             Stop
           </button>
         ) : (
           <button className="primary-button" type="submit" disabled={disabled || !value.trim()}>
+            <Send size={15} aria-hidden="true" />
             Send
           </button>
         )}

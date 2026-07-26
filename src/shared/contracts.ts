@@ -315,6 +315,7 @@ export const IpcSchemas = {
   },
   'configuration.testRouter': { input: RouterTestInputSchema, output: RouterDiagnosticsSchema },
   'configuration.status': { input: z.object({}), output: RouterDiagnosticsSchema },
+  'configuration.signOut': { input: z.object({}), output: RouterConfigurationSchema },
   'configuration.updatePreferences': {
     input: RouterPreferencesInputSchema,
     output: RouterConfigurationSchema,
@@ -357,6 +358,7 @@ export interface AdrouterApi {
     save(input: z.input<typeof RouterConfigurationInputSchema>): Promise<RouterConfiguration>;
     testRouter(input: z.input<typeof RouterTestInputSchema>): Promise<RouterDiagnostics>;
     status(): Promise<RouterDiagnostics>;
+    signOut(): Promise<RouterConfiguration>;
     updatePreferences(
       input: z.input<typeof RouterPreferencesInputSchema>
     ): Promise<RouterConfiguration>;

@@ -1,7 +1,7 @@
 # Source provenance
 
 This public repository was created as a history-free export of the tracked
-files in the private review source:
+files in the private review source. The original export baseline was:
 
 - source repository: sibling `adrouterAgent` development repository
 - source commit: `0335159465b445b7be4b35f75af7dbc040133a1a`
@@ -10,7 +10,8 @@ files in the private review source:
 
 The export did not copy `.git`, untracked files, environment files,
 dependencies, build output, caches, databases, logs, or local application
-state. Product code, icons, and entitlements are recorded in
+state. Subsequent public-beta changes are reviewed in this repository and the
+current product code, icons, and entitlements are recorded in
 `provenance/source-files.sha256`. Run:
 
 ```bash
@@ -23,7 +24,7 @@ response reports public release metadata and platform sandbox diagnostics.
 Other changes outside the parity set are public-release packaging,
 documentation, dependency-resolution, and automation work. Version metadata is
 intentionally set to npm/GitHub version
-`0.1.0-beta.6`, macOS short version `0.1.0`, and macOS build version `10006`.
+`0.1.0-beta.7`, macOS short version `0.1.0`, and macOS build version `10007`.
 
 The original source Git history is deliberately not imported. This record and
 the checksum inventory provide the public review boundary without disclosing

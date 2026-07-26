@@ -2,6 +2,28 @@
 
 All notable changes to AdRouter Agent are documented here.
 
+## [0.1.0-beta.7] - 2026-07-26
+
+### Added
+
+- Device-local sign out clears only the OS-encrypted AdRouter API credential and returns to
+  prefilled onboarding so users can replace a rotated key without losing projects, chats, or
+  preferences.
+- Canonical jellyfish branding and Lucide controls now carry through the first-run experience,
+  workspace toolbar, chat empty state, native app bundle, executable, and Linux window identity.
+
+### Changed
+
+- The desktop chat and tiered sponsor surfaces now more closely follow the shared WebUI ivory/blue
+  design while retaining desktop project, approval, and review controls.
+- History slides in and out from the left; Changes and Settings slide in and out from the right,
+  with reduced-motion behavior preserved.
+
+### Security
+
+- Sign out remains a privileged main-process operation, is rejected while an agent task is active,
+  and never exposes credential plaintext to the renderer.
+
 ## [0.1.0-beta.6] - 2026-07-26
 
 ### Fixed
@@ -95,6 +117,7 @@ All notable changes to AdRouter Agent are documented here.
 - Updates are downloaded and installed manually.
 - A reachable AdRouter server and valid bearer token are required.
 
+[0.1.0-beta.7]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.7
 [0.1.0-beta.6]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.6
 [0.1.0-beta.5]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.5
 [0.1.0-beta.4]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.4

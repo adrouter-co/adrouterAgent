@@ -50,6 +50,58 @@ describe('ConfigurationStore', () => {
     ).resolves.toMatchObject({ selectedModel: 'model-flash', selectedThinkingLevel: 'high' });
 
     const persisted = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
-    expect(persisted).toMatchObject({ version: 2, encryptedToken: 'preserve-ciphertext' });
+    expect(persisted).toMatchObject({ version: 3, encryptedToken: 'preserve-ciphertext' });
+  });
+
+  it('signs out locally while preserving non-secret settings and cached preferences', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'adrouter-config-'));
+    directories.push(directory);
+    const path = join(directory, 'configuration.json');
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 2,
+        serverUrl: 'https://router.example',
+        sponsoredCompute: false,
+        encryptedToken: 'remove-ciphertext',
+        models: [
+          {
+            id: 'model-pro',
+            provider: 'router',
+            displayName: 'Model Pro',
+            providerLabel: 'AdRouter',
+            thinkingLevels: ['medium', 'high'],
+            defaultThinkingLevel: 'medium',
+            configured: true,
+          },
+        ],
+        selectedModel: 'model-pro',
+        selectedThinkingLevel: 'high',
+        lastCheckedAt: '2026-07-26T00:00:00.000Z',
+      })
+    );
+
+    const store = new ConfigurationStore(path);
+    await expect(store.signOut()).resolves.toMatchObject({
+      serverUrl: 'https://router.example',
+      sponsoredCompute: false,
+      tokenStored: false,
+      configured: false,
+      selectedModel: 'model-pro',
+      selectedThinkingLevel: 'high',
+    });
+    await expect(store.getRuntimeConfiguration()).rejects.toThrow(
+      'Complete AdRouter onboarding before starting an agent task.'
+    );
+
+    const persisted = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+    expect(persisted).toMatchObject({
+      version: 3,
+      serverUrl: 'https://router.example',
+      sponsoredCompute: false,
+      encryptedToken: null,
+      selectedModel: 'model-pro',
+      selectedThinkingLevel: 'high',
+    });
   });
 });
