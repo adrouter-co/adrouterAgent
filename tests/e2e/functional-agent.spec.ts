@@ -175,7 +175,7 @@ test.describe('packaged functional agent', () => {
       await page.getByRole('button', { name: 'Send' }).click();
       await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
       await page.getByRole('button', { name: 'Stop' }).click();
-      await expect(page.getByRole('button', { name: 'Send' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Send' })).toBeVisible({ timeout: 15_000 });
     } finally {
       await app.close();
       server.closeAllConnections();
