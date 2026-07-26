@@ -1,13 +1,13 @@
 {
   "schema": 2,
   "distributionMode": "credential-free-adhoc",
-  "releaseVersion": "0.1.0-beta.1",
-  "releaseTag": "v0.1.0-beta.1",
-  "assetName": "AdRouter-Agent-0.1.0-beta.1-universal.zip",
-  "assetUrl": "https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.1/AdRouter-Agent-0.1.0-beta.1-universal.zip",
+  "releaseVersion": "0.1.0-beta.2",
+  "releaseTag": "v0.1.0-beta.2",
+  "assetName": "AdRouter-Agent-0.1.0-beta.2-universal.zip",
+  "assetUrl": "https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.2/AdRouter-Agent-0.1.0-beta.2-universal.zip",
   "sha256": "UNBUILT",
   "repository": "adrouter/adrouterAgent",
   "bundleIdentifier": "com.adrouter.agent",
   "bundleShortVersion": "0.1.0",
-  "bundleVersion": "10001"
+  "bundleVersion": "10002"
 }

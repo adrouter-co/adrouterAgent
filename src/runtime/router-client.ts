@@ -199,7 +199,7 @@ export class AdRouterClient {
     const requestBody = {
       model: input.model,
       thinking_level: input.thinkingLevel,
-      runtime_mode: input.runtimeMode,
+      ...(input.runtimeMode === 'auto' ? {} : { runtime_mode: input.runtimeMode }),
       context: removeSponsorData({
         systemPrompt: input.systemPrompt,
         messages: getMessageText({ messages: input.messages }),

@@ -28,7 +28,6 @@ try {
     body: JSON.stringify({
       model,
       thinking_level: 'medium',
-      runtime_mode: 'auto',
       context: {
         systemPrompt: 'This is a bounded read-only connectivity check. Do not call tools.',
         messages: [{ role: 'user', content: 'Reply with READY only.' }],
@@ -37,7 +36,12 @@ try {
       metadata: { client: 'adrouter-agent-live-smoke', workspace, ads_enabled: false },
     }),
   });
-  if (!response.ok) throw new Error(`Agent turn failed with HTTP ${response.status}.`);
+  if (!response.ok) {
+    const detail = (await response.text()).replace(token, '[credential]').slice(0, 500);
+    throw new Error(
+      `Agent turn failed with HTTP ${response.status}${detail ? `: ${detail}` : '.'}`
+    );
+  }
   const body = await response.text();
   if (!body.split(/\r?\n/).some((line) => line && JSON.parse(line).type === 'done')) {
     throw new Error('The live router stream ended without a done event.');

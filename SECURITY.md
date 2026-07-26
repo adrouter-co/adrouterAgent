@@ -7,7 +7,7 @@ should manually install the latest release before reporting a problem.
 
 | Version | Supported |
 | --- | --- |
-| 0.1.0-beta.1 | Yes |
+| 0.1.0-beta.2 | Yes |
 | Older builds | No |
 
 ## Reporting a vulnerability

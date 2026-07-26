@@ -2,7 +2,7 @@
 
 All notable changes to AdRouter Agent are documented here.
 
-## [0.1.0-beta.1] - 2026-07-26
+## [0.1.0-beta.2] - 2026-07-26
 
 ### Added
 
@@ -23,10 +23,16 @@ All notable changes to AdRouter Agent are documented here.
 - npm accepts no URL/checksum environment overrides and rejects unsupported
   platforms before downloading.
 
+### Fixed
+
+- Hosted AdRouter requests now leave `runtime_mode` unset when automatic routing
+  is selected, preserving the server default and avoiding a rejected explicit
+  `auto` value.
+
 ### Known limitations
 
 - macOS only, with one active agent run at a time.
 - Updates are downloaded and installed manually.
 - A reachable AdRouter server and valid bearer token are required.
 
-[0.1.0-beta.1]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.1
+[0.1.0-beta.2]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.2

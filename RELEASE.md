@@ -1,6 +1,6 @@
 # Public-beta release procedure
 
-This is the operator runbook for `v0.1.0-beta.1`. It separates safe repository
+This is the operator runbook for `v0.1.0-beta.2`. It separates safe repository
 setup from credential entry and irreversible publication.
 
 ## 1. Prerequisites
@@ -49,7 +49,7 @@ Create an empty public repository and push the reviewed initial commit:
 ```bash
 gh repo create adrouter/adrouterAgent --public --source=. --remote=origin
 git add .
-git commit -m "Prepare AdRouter Agent 0.1.0-beta.1 public release"
+git commit -m "Prepare AdRouter Agent 0.1.0-beta.2 public release"
 git push --set-upstream origin main
 ```
 
@@ -113,9 +113,9 @@ Wait for required CI on `main`, then create the exact annotated tag:
 git fetch origin main --tags
 git switch main
 git pull --ff-only
-test "$(node -p "require('./package.json').version")" = "0.1.0-beta.1"
-git tag -a v0.1.0-beta.1 -m "AdRouter Agent 0.1.0-beta.1"
-git push origin v0.1.0-beta.1
+test "$(node -p "require('./package.json').version")" = "0.1.0-beta.2"
+git tag -a v0.1.0-beta.2 -m "AdRouter Agent 0.1.0-beta.2"
+git push origin v0.1.0-beta.2
 ```
 
 Approve the `adrouter-staging` and `macos-release` jobs when GitHub prompts.
@@ -131,8 +131,8 @@ tag ref** so the environment's deployment-tag policy applies:
 
 ```bash
 gh workflow run promote-release.yml \
-  --ref v0.1.0-beta.1 \
-  -f tag=v0.1.0-beta.1
+  --ref v0.1.0-beta.2 \
+  -f tag=v0.1.0-beta.2
 ```
 
 Approve `npm-publish` and `adrouter-staging` when prompted. The Intel smoke job
@@ -147,7 +147,7 @@ version and removes `candidate`.
 Final registry checks:
 
 ```bash
-npm view @adrouter/agent@0.1.0-beta.1 version dist.integrity repository --json
+npm view @adrouter/agent@0.1.0-beta.2 version dist.integrity repository --json
 npm view @adrouter/agent dist-tags --json
 npm install --global @adrouter/agent@beta
 adrouter-agent doctor --json
@@ -182,7 +182,7 @@ After the first release finishes:
    store only `NPM_DIST_TAG_TOKEN`. Trusted publishing handles `npm publish`,
    while npm dist-tag changes still require traditional authenticated access.
 
-Do not attempt to republish `0.1.0-beta.1` to test OIDC. npm versions are
+Do not attempt to republish `0.1.0-beta.2` to test OIDC. npm versions are
 immutable; use a higher beta version.
 
 ## 8. Recovery

@@ -34,7 +34,8 @@ which installs and launches the credential-free universal macOS app at
 - Never remove quarantine metadata or modify Gatekeeper settings.
 - Preserve immutable GitHub tags, release checksums, SBOMs, attestations, and
   fail-closed download/archive validation.
-- Keep the first release at `0.1.0-beta.1` because it is not yet public.
+- Release the canary compatibility fix as `0.1.0-beta.2`; the failed beta.1 tag
+  remains immutable and was never published.
 
 ## Out of Scope
 
@@ -94,7 +95,7 @@ verified universal ad-hoc-signed application.
 ```bash
 npm run make:mac
 npm run verify:dist
-node scripts/prepare-release-assets.mjs 0.1.0-beta.1
+node scripts/prepare-release-assets.mjs 0.1.0-beta.2
 node scripts/verify-release-assets.mjs out/release
 ```
 

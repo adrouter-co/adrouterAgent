@@ -10,7 +10,7 @@ selection and settlement use a separate display channel; sponsor data is never
 added to model prompts, tool arguments, commands, patches, or compacted agent
 context.
 
-> **Public beta:** AdRouter Agent 0.1.0-beta.1 supports macOS 12 or newer on Apple
+> **Public beta:** AdRouter Agent 0.1.0-beta.2 supports macOS 12 or newer on Apple
 > Silicon and Intel. One agent task can run at a time, and updates are installed
 > manually.
 

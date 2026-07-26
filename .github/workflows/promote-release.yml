@@ -6,7 +6,7 @@ on:
       tag:
         description: Immutable release tag
         required: true
-        default: v0.1.0-beta.1
+        default: v0.1.0-beta.2
         type: string
 
 permissions:
@@ -43,10 +43,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          test "${{ inputs.tag }}" = "v0.1.0-beta.1"
-          test "$GITHUB_REF_NAME" = "v0.1.0-beta.1"
+          test "${{ inputs.tag }}" = "v0.1.0-beta.2"
+          test "$GITHUB_REF_NAME" = "v0.1.0-beta.2"
           version="$(node -p "require('./package.json').version")"
-          test "$version" = "0.1.0-beta.1"
+          test "$version" = "0.1.0-beta.2"
           test "$(git rev-list -n 1 "${{ inputs.tag }}")" = "$GITHUB_SHA"
           test "$(gh release view "${{ inputs.tag }}" --json isPrerelease --jq .isPrerelease)" = "true"
           was_draft="$(gh release view "${{ inputs.tag }}" --json isDraft --jq .isDraft)"
@@ -68,25 +68,25 @@ jobs:
         run: |
           curl --fail --silent --show-error --location --retry 6 --retry-all-errors \
             --output "$RUNNER_TEMP/public.zip" \
-            "https://github.com/adrouter/adrouterAgent/releases/download/${{ inputs.tag }}/AdRouter-Agent-0.1.0-beta.1-universal.zip"
-          expected="$(awk '$2 == "AdRouter-Agent-0.1.0-beta.1-universal.zip" { print $1 }' "$RUNNER_TEMP/release/SHA256SUMS")"
+            "https://github.com/adrouter/adrouterAgent/releases/download/${{ inputs.tag }}/AdRouter-Agent-0.1.0-beta.2-universal.zip"
+          expected="$(awk '$2 == "AdRouter-Agent-0.1.0-beta.2-universal.zip" { print $1 }' "$RUNNER_TEMP/release/SHA256SUMS")"
           test "$(shasum -a 256 "$RUNNER_TEMP/public.zip" | awk '{ print $1 }')" = "$expected"
       - name: Bootstrap new npm package under candidate
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |
-          if published="$(npm view @adrouter/agent@0.1.0-beta.1 version 2>/dev/null)"; then
-            test "$published" = "0.1.0-beta.1"
-            test "$(npm view @adrouter/agent dist-tags.candidate)" = "0.1.0-beta.1"
+          if published="$(npm view @adrouter/agent@0.1.0-beta.2 version 2>/dev/null)"; then
+            test "$published" = "0.1.0-beta.2"
+            test "$(npm view @adrouter/agent dist-tags.candidate)" = "0.1.0-beta.2"
           elif npm view @adrouter/agent name >/dev/null 2>&1; then
-            env -u NODE_AUTH_TOKEN npm publish "$RUNNER_TEMP/release/adrouter-agent-0.1.0-beta.1.tgz" \
+            env -u NODE_AUTH_TOKEN npm publish "$RUNNER_TEMP/release/adrouter-agent-0.1.0-beta.2.tgz" \
               --access public \
               --tag candidate \
               --provenance \
               --ignore-scripts
           else
             test -n "$NODE_AUTH_TOKEN"
-            npm publish "$RUNNER_TEMP/release/adrouter-agent-0.1.0-beta.1.tgz" \
+            npm publish "$RUNNER_TEMP/release/adrouter-agent-0.1.0-beta.2.tgz" \
               --access public \
               --tag candidate \
               --provenance \
@@ -132,7 +132,7 @@ jobs:
             --userconfig "$RUNNER_TEMP/empty.npmrc" \
             --ignore-scripts
           export PATH="$RUNNER_TEMP/npm-prefix/bin:$PATH"
-          test "$(adrouter-agent --version)" = "0.1.0-beta.1"
+          test "$(adrouter-agent --version)" = "0.1.0-beta.2"
           adrouter-agent install
           adrouter-agent doctor --json | tee "$RUNNER_TEMP/doctor.json"
           node -e "const r=require(process.env.RUNNER_TEMP + '/doctor.json'); if (!r.installed || !r.receiptMatches || !r.bundleIntegrity || r.signatureType !== 'adhoc') process.exit(1)"
@@ -162,7 +162,7 @@ jobs:
           VERSION: ${{ needs.publish-candidate.outputs.version }}
         run: |
           test -n "$NODE_AUTH_TOKEN"
-          test "$VERSION" = "0.1.0-beta.1"
+          test "$VERSION" = "0.1.0-beta.2"
           test "$(npm view "@adrouter/agent@$VERSION" version)" = "$VERSION"
           npm dist-tag add "@adrouter/agent@$VERSION" beta
           npm dist-tag add "@adrouter/agent@$VERSION" latest

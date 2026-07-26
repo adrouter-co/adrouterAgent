@@ -19,20 +19,20 @@ import { validateManifest } from '../lib/manifest.mjs';
 const manifest = {
   schema: 2,
   distributionMode: 'credential-free-adhoc',
-  releaseVersion: '0.1.0-beta.1',
-  releaseTag: 'v0.1.0-beta.1',
-  assetName: 'AdRouter-Agent-0.1.0-beta.1-universal.zip',
+  releaseVersion: '0.1.0-beta.2',
+  releaseTag: 'v0.1.0-beta.2',
+  assetName: 'AdRouter-Agent-0.1.0-beta.2-universal.zip',
   assetUrl:
-    'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.1/AdRouter-Agent-0.1.0-beta.1-universal.zip',
+    'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.2/AdRouter-Agent-0.1.0-beta.2-universal.zip',
   sha256: 'a'.repeat(64),
   repository: 'adrouter/adrouterAgent',
   bundleIdentifier: 'com.adrouter.agent',
   bundleShortVersion: '0.1.0',
-  bundleVersion: '10001',
+  bundleVersion: '10002',
 };
 
 test('validates the exact credential-free release manifest', () => {
-  assert.equal(validateManifest(manifest).releaseVersion, '0.1.0-beta.1');
+  assert.equal(validateManifest(manifest).releaseVersion, '0.1.0-beta.2');
   assert.throws(() => validateManifest({ ...manifest, schema: 1 }));
   assert.throws(() => validateManifest({ ...manifest, distributionMode: 'notarized' }));
   assert.throws(() => validateManifest({ ...manifest, repository: 'attacker/repository' }));
@@ -123,7 +123,7 @@ function fixtureExecute({ gatekeeper = 'rejected', running = false } = {}) {
         return { stdout: 'com.adrouter.agent\n', stderr: '' };
       }
       return {
-        stdout: args[1].includes('Short') ? '0.1.0\n' : '10001\n',
+        stdout: args[1].includes('Short') ? '0.1.0\n' : '10002\n',
         stderr: '',
       };
     }

@@ -77,6 +77,7 @@ describe('AdRouterClient', () => {
       workspace: 'safe-project',
       ads_enabled: true,
     });
+    expect(body.runtime_mode).toBe('mock');
     expect(body).not.toHaveProperty('messages');
     expect(body).not.toHaveProperty('tools');
     expect(body.context).toMatchObject({
@@ -85,6 +86,25 @@ describe('AdRouterClient', () => {
     });
     expect(JSON.stringify(body.context)).not.toContain('Acme');
     expect(events.map((event) => event.type)).toEqual(['ad', 'text', 'done']);
+  });
+
+  it('uses the hosted router default when runtime mode is auto', async () => {
+    const fetchFn: typeof fetch = vi.fn(
+      async () => new Response('{"type":"done"}\n', { status: 200 })
+    );
+    const client = new AdRouterClient({
+      serverUrl: 'https://router.example',
+      token: 'never-log-me',
+      fetchFn,
+    });
+
+    await collect(client.turn({ ...turnInput, runtimeMode: 'auto' }));
+
+    const body = JSON.parse(String(vi.mocked(fetchFn).mock.calls[0]?.[1]?.body)) as Record<
+      string,
+      unknown
+    >;
+    expect(body).not.toHaveProperty('runtime_mode');
   });
 
   it('retries transient 409/502 responses but fails closed on authentication errors', async () => {
