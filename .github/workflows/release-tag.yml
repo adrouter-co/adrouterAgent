@@ -38,6 +38,8 @@ jobs:
       - run: npm run check
       - run: npm run check:launcher-package
       - run: npm run test:e2e
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
 
   package:
     name: build ${{ matrix.key }} portable artifact
@@ -71,6 +73,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run ${{ matrix.make }}
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - run: npm run ${{ matrix.verify }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
