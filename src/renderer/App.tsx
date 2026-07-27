@@ -16,11 +16,12 @@ import type { JSX, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import jellyfishLogo from '../../assets/icon.svg?url';
-import { DEFAULT_ADROUTER_SERVER_URL } from '../shared/constants';
+import { classifyRouterOrigin, DEFAULT_ADROUTER_SERVER_URL } from '../shared/constants';
 import type {
   ApplicationInfo,
   Approval,
   DiffFile,
+  EnrollmentStatus,
   JournalEvent,
   Project,
   RouterConfiguration,
@@ -133,6 +134,7 @@ export function App(): JSX.Element {
   >({ serverUrl: DEFAULT_ADROUTER_SERVER_URL, sponsoredCompute: true });
   const [confirmingSignOut, setConfirmingSignOut] = useState(false);
   const [signOutBusy, setSignOutBusy] = useState(false);
+  const [signOutNotice, setSignOutNotice] = useState<string>();
   const timelineRef = useRef<HTMLDivElement>(null);
   const followTimeline = useRef(true);
 
@@ -250,6 +252,11 @@ export function App(): JSX.Element {
           serverUrl: configuration.serverUrl,
           sponsoredCompute: configuration.sponsoredCompute,
         });
+        if (configuration.authentication?.mode === 'legacy_hosted') {
+          setSignOutNotice(
+            'Copied hosted API keys are no longer used. Connect this Agent and approve the installation in the AdRouter WebUI.'
+          );
+        }
         setConfigured(configuration.configured);
         setServerUrl(configuration.serverUrl);
         const configuredModels = normalizeModels(configuration.models);
@@ -380,6 +387,7 @@ export function App(): JSX.Element {
       <Onboarding
         initialServerUrl={onboardingDefaults.serverUrl}
         initialSponsoredCompute={onboardingDefaults.sponsoredCompute}
+        notice={signOutNotice}
         onConfigured={async () => {
           setConfigured(true);
           const configuration = await window.adrouter.configuration.get();
@@ -784,8 +792,8 @@ export function App(): JSX.Element {
               <section className="detail-panel credential-panel" aria-label="AdRouter credential">
                 <div className="detail-heading">
                   <div>
-                    <p className="eyebrow">API credential</p>
-                    <h2>Rotate access on this device</h2>
+                    <p className="eyebrow">Authentication</p>
+                    <h2>Manage this installation</h2>
                   </div>
                   <button
                     className="danger-outline-button"
@@ -798,8 +806,8 @@ export function App(): JSX.Element {
                   </button>
                 </div>
                 <p className="empty-copy">
-                  Sign out removes the encrypted API key from this device. Your server, preferences,
-                  projects, and chats stay here so you can enter a replacement key.
+                  Sign out attempts to revoke this installation, then always removes its encrypted
+                  key and refresh credential locally. Projects, chats, and preferences stay here.
                 </p>
                 {hasActiveTask && <small>Stop the active agent task before signing out.</small>}
               </section>
@@ -844,10 +852,11 @@ export function App(): JSX.Element {
             aria-modal="true"
             aria-labelledby="sign-out-title"
           >
-            <h2 id="sign-out-title">Sign out and replace this API key?</h2>
+            <h2 id="sign-out-title">Sign out this Agent?</h2>
             <p>
-              This removes only the encrypted key stored on this device. It does not revoke the key
-              on the AdRouter server; revoke or create credentials from the AdRouter WebUI.
+              AdRouter Agent will try to revoke this installation remotely, then remove all local
+              authentication material even if the server is unavailable. Your projects and chats are
+              not removed.
             </p>
             <div className="approval-actions">
               <button
@@ -867,7 +876,8 @@ export function App(): JSX.Element {
                   setError(undefined);
                   void window.adrouter.configuration
                     .signOut()
-                    .then((configuration) => {
+                    .then((result) => {
+                      const configuration = result.configuration;
                       setOnboardingDefaults({
                         serverUrl: configuration.serverUrl,
                         sponsoredCompute: configuration.sponsoredCompute,
@@ -875,13 +885,18 @@ export function App(): JSX.Element {
                       setRouterStatus(undefined);
                       setDrawer(null);
                       setConfirmingSignOut(false);
+                      setSignOutNotice(
+                        result.remoteRevocationConfirmed
+                          ? 'This installation was revoked and removed from this device.'
+                          : 'Local authentication was removed. If this device was offline, confirm revocation in the AdRouter WebUI.'
+                      );
                       setConfigured(false);
                     })
                     .catch((caught) => setError(errorMessage(caught)))
                     .finally(() => setSignOutBusy(false));
                 }}
               >
-                {signOutBusy ? 'Signing out…' : 'Sign out locally'}
+                {signOutBusy ? 'Signing out…' : 'Sign out and remove'}
               </button>
             </div>
           </section>
@@ -930,20 +945,57 @@ function AboutPanel({ info }: { info?: ApplicationInfo }): JSX.Element {
 function Onboarding({
   initialServerUrl,
   initialSponsoredCompute,
+  notice,
   onConfigured,
   onModels,
 }: {
   initialServerUrl: string;
   initialSponsoredCompute: boolean;
+  notice?: string;
   onConfigured: () => Promise<void>;
   onModels: (models: RouterModelDescriptor[]) => void;
 }): JSX.Element {
   const [serverUrl, setServerUrl] = useState(initialServerUrl || DEFAULT_ADROUTER_SERVER_URL);
   const [token, setToken] = useState('');
+  const [advancedCustom, setAdvancedCustom] = useState(false);
+  const [enrollment, setEnrollment] = useState<EnrollmentStatus>();
   const [sponsoredCompute, setSponsoredCompute] = useState(initialSponsoredCompute);
   const [diagnostics, setDiagnostics] = useState<RouterDiagnostics>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const originClass = useMemo(() => {
+    try {
+      return classifyRouterOrigin(serverUrl);
+    } catch {
+      return 'custom';
+    }
+  }, [serverUrl]);
+  const official = originClass === 'official';
+
+  useEffect(() => {
+    if (typeof window.adrouter.configuration.enrollmentStatus !== 'function') return undefined;
+    let active = true;
+    void window.adrouter.configuration.enrollmentStatus().then((status) => {
+      if (active && status.state !== 'idle') setEnrollment(status);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (enrollment?.state !== 'pending') return undefined;
+    const interval = window.setInterval(() => {
+      void window.adrouter.configuration
+        .enrollmentStatus()
+        .then(async (status) => {
+          setEnrollment(status);
+          if (status.state === 'approved') await onConfigured();
+        })
+        .catch((caught) => setError(errorMessage(caught)));
+    }, 1_000);
+    return () => window.clearInterval(interval);
+  }, [enrollment?.state, onConfigured]);
 
   const test = async (): Promise<void> => {
     setBusy(true);
@@ -979,6 +1031,22 @@ function Onboarding({
       setBusy(false);
     }
   };
+  const connect = async (): Promise<void> => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      const status = await window.adrouter.configuration.startEnrollment({
+        serverUrl,
+        sponsoredCompute,
+        displayName: 'AdRouter Agent',
+      });
+      setEnrollment(status);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <main className="onboarding-shell">
       <section className="onboarding-card" aria-labelledby="onboarding-title">
@@ -988,23 +1056,16 @@ function Onboarding({
         <p className="eyebrow">Local-first desktop coding agent</p>
         <h1 id="onboarding-title">Connect AdRouter</h1>
         <p>
-          Your token is encrypted with the operating system credential store and is never available
-          to the renderer.
+          Official AdRouter access uses a unique installation key protected by your operating system
+          credential store. Private keys and tokens never enter this screen.
         </p>
+        {notice && <div className="diagnostics success">{notice}</div>}
         <label htmlFor="router-url">AdRouter server URL</label>
         <input
           id="router-url"
           value={serverUrl}
           onChange={(event) => setServerUrl(event.target.value)}
           autoComplete="url"
-        />
-        <label htmlFor="router-token">Access token</label>
-        <input
-          id="router-token"
-          value={token}
-          onChange={(event) => setToken(event.target.value)}
-          type="password"
-          autoComplete="off"
         />
         <label className="toggle-row" htmlFor="sponsored-compute">
           <input
@@ -1032,24 +1093,115 @@ function Onboarding({
             <span>{diagnostics.error ?? `${diagnostics.models.length} model(s) discovered`}</span>
           </div>
         )}
-        <div className="onboarding-actions">
-          <button
-            className="secondary-button"
-            type="button"
-            onClick={() => void test()}
-            disabled={busy || !serverUrl || !token}
+        {official &&
+          enrollment &&
+          enrollment.state !== 'idle' &&
+          enrollment.state !== 'pending' &&
+          enrollment.message && (
+            <div
+              className={`diagnostics ${enrollment.state === 'approved' ? 'success' : 'failure'}`}
+              role="status"
+            >
+              {enrollment.message}
+            </div>
+          )}
+        {official ? (
+          enrollment?.state === 'pending' ? (
+            <section className="enrollment-panel" aria-live="polite">
+              <p className="eyebrow">Compare this code in the AdRouter WebUI</p>
+              <strong className="user-code">{enrollment.userCode}</strong>
+              <p>{enrollment.message ?? 'Waiting for your approval…'}</p>
+              <div className="onboarding-actions">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => {
+                    void window.adrouter.configuration
+                      .openEnrollment()
+                      .catch((caught) => setError(errorMessage(caught)));
+                  }}
+                >
+                  Open approval page
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard
+                      .writeText(enrollment.userCode ?? '')
+                      .catch((caught) => setError(errorMessage(caught)));
+                  }}
+                >
+                  Copy code
+                </button>
+                <button
+                  className="danger-outline-button"
+                  type="button"
+                  onClick={() => {
+                    void window.adrouter.configuration
+                      .cancelEnrollment()
+                      .then(setEnrollment)
+                      .catch((caught) => setError(errorMessage(caught)));
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+              <small>
+                If the page does not open, visit {enrollment.verificationUri} and enter the code
+                manually.
+              </small>
+            </section>
+          ) : (
+            <div className="onboarding-actions">
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => void connect()}
+                disabled={busy || !serverUrl}
+              >
+                {busy ? 'Connecting…' : 'Connect this Agent'}
+              </button>
+            </div>
+          )
+        ) : (
+          <details
+            open={advancedCustom}
+            onToggle={(event) => setAdvancedCustom(event.currentTarget.open)}
           >
-            Test connection
-          </button>
-          <button
-            className="primary-button"
-            type="button"
-            onClick={() => void save()}
-            disabled={busy || !serverUrl || !token}
-          >
-            Save securely
-          </button>
-        </div>
+            <summary>Advanced: connect a custom or local router</summary>
+            <p>
+              Bearer tokens are supported only for explicit non-official routers. They cannot
+              override official hosted installation authentication.
+            </p>
+            <label htmlFor="router-token">Custom router access token</label>
+            <input
+              id="router-token"
+              value={token}
+              onChange={(event) => setToken(event.target.value)}
+              type="password"
+              autoComplete="off"
+            />
+            <div className="onboarding-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => void test()}
+                disabled={busy || !serverUrl || !token}
+              >
+                Test connection
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => void save()}
+                disabled={busy || !serverUrl || !token}
+              >
+                Save custom router
+              </button>
+            </div>
+          </details>
+        )}
       </section>
     </main>
   );
@@ -1536,6 +1688,30 @@ function AgentStatusPanel({
         <div>
           <dt>Last checked</dt>
           <dd>{status ? new Date(status.checkedAt).toLocaleTimeString() : '—'}</dd>
+        </div>
+        <div>
+          <dt>Authentication</dt>
+          <dd>{status?.authentication?.mode.replace('_', ' ') ?? 'unknown'}</dd>
+        </div>
+        <div>
+          <dt>Installation</dt>
+          <dd>
+            {status?.authentication?.installationIdSuffix
+              ? `…${status.authentication.installationIdSuffix}`
+              : (status?.authentication?.state ?? 'none')}
+          </dd>
+        </div>
+        <div>
+          <dt>Secret storage</dt>
+          <dd>{status?.authentication?.storageClassification ?? 'not used'}</dd>
+        </div>
+        <div>
+          <dt>Signed requests</dt>
+          <dd>{status?.authentication?.signedRequestSupport ? 'supported' : 'not active'}</dd>
+        </div>
+        <div>
+          <dt>Refresh</dt>
+          <dd>{status?.authentication?.refreshHealthy ? 'healthy' : 'not active'}</dd>
         </div>
       </dl>
       {status?.error && <p className="status-error">{status.error}</p>}

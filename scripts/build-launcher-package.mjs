@@ -68,8 +68,8 @@ export function buildLauncherPackage({ artifacts, outputDirectory, stagingRoot }
   const rootPackage = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   const launcherPackage = JSON.parse(readFileSync(join(launcherDirectory, 'package.json'), 'utf8'));
   const version = rootPackage.version;
-  if (launcherPackage.version !== version || !/^\d+\.\d+\.\d+-beta\.\d+$/.test(version)) {
-    throw new Error('Root and launcher versions must match the beta release version.');
+  if (launcherPackage.version !== version || !/^\d+\.\d+\.\d+(?:-beta\.\d+)?$/.test(version)) {
+    throw new Error('Root and launcher versions must match the supported release version.');
   }
 
   if (!Array.isArray(artifacts) || artifacts.length !== targetMetadata.length) {
@@ -118,7 +118,12 @@ export function buildLauncherPackage({ artifacts, outputDirectory, stagingRoot }
       repository: 'adrouter/adrouterAgent',
       bundleIdentifier: 'com.adrouter.agent',
       bundleShortVersion: '0.1.0',
-      bundleVersion: '10007',
+      bundleVersion: '10008',
+      authentication: {
+        fixture: 'tests/fixtures/platform-auth-v1.json',
+        fixtureSha256: '93a8ec8d4eba38f9165179aa0cdfe3316f8134a882bd0426bd83339af55d17f8',
+        acceptanceAsset: 'authentication-acceptance.json',
+      },
       artifacts: releaseArtifacts,
     };
     writeFileSync(

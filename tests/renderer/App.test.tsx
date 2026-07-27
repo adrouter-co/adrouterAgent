@@ -10,6 +10,10 @@ const api = {
     testRouter: vi.fn(),
     status: vi.fn(),
     signOut: vi.fn(),
+    startEnrollment: vi.fn(),
+    enrollmentStatus: vi.fn(),
+    cancelEnrollment: vi.fn(),
+    openEnrollment: vi.fn(),
     updatePreferences: vi.fn(),
   },
   projects: { open: vi.fn(), list: vi.fn(), get: vi.fn(), update: vi.fn(), remove: vi.fn() },
@@ -34,6 +38,15 @@ const api = {
 };
 
 beforeEach(() => {
+  api.configuration.enrollmentStatus.mockResolvedValue({
+    state: 'idle',
+    userCode: null,
+    verificationUri: null,
+    verificationUriComplete: null,
+    expiresAt: null,
+    nextPollAt: null,
+    message: null,
+  });
   api.app.getInfo.mockResolvedValue({
     name: 'AdRouter Agent',
     version: '0.1.0',
@@ -67,6 +80,60 @@ describe('App onboarding', () => {
     expect(screen.getByLabelText('AdRouter server URL')).toHaveValue(
       'https://api-staging.adrouter.co'
     );
+    expect(screen.queryByLabelText(/access token/i)).not.toBeInTheDocument();
+  });
+
+  it('starts explicit installation approval and exposes only the comparison code', async () => {
+    api.configuration.get.mockResolvedValue({
+      serverUrl: 'https://api-staging.adrouter.co',
+      sponsoredCompute: true,
+      tokenStored: false,
+      configured: false,
+      models: [],
+    });
+    api.configuration.startEnrollment.mockResolvedValue({
+      state: 'pending',
+      userCode: 'ABCD-EFGH',
+      verificationUri: 'https://app-staging.adrouter.co/connect',
+      verificationUriComplete: 'https://app-staging.adrouter.co/connect?code=ABCD-EFGH',
+      expiresAt: '2026-07-27T01:00:00.000Z',
+      nextPollAt: '2026-07-27T00:00:05.000Z',
+      message: null,
+    });
+    api.projects.list.mockResolvedValue([]);
+    Object.defineProperty(window, 'adrouter', { configurable: true, value: api });
+
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect this Agent' }));
+
+    expect(await screen.findByText('ABCD-EFGH')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open approval page' })).toBeInTheDocument();
+    expect(api.configuration.startEnrollment).toHaveBeenCalledWith({
+      serverUrl: 'https://api-staging.adrouter.co',
+      sponsoredCompute: true,
+      displayName: 'AdRouter Agent',
+    });
+    expect(screen.queryByLabelText(/access token/i)).not.toBeInTheDocument();
+  });
+
+  it('warns migrated hosted-key users to approve an installation instead', async () => {
+    api.configuration.get.mockResolvedValue({
+      serverUrl: 'https://api-staging.adrouter.co',
+      sponsoredCompute: true,
+      tokenStored: true,
+      configured: false,
+      models: [],
+      authentication: { mode: 'legacy_hosted' },
+    });
+    api.projects.list.mockResolvedValue([]);
+    Object.defineProperty(window, 'adrouter', { configurable: true, value: api });
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(/Copied hosted API keys are no longer used/)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connect this Agent' })).toBeInTheDocument();
   });
 
   it('shows repository instruction sources and saves user project instructions', async () => {
@@ -156,14 +223,17 @@ describe('App onboarding', () => {
       error: null,
     });
     api.configuration.signOut.mockResolvedValue({
-      serverUrl: 'https://router.example',
-      sponsoredCompute: false,
-      tokenStored: false,
-      configured: false,
-      models: [],
-      selectedModel: null,
-      selectedThinkingLevel: 'medium',
-      lastCheckedAt: null,
+      configuration: {
+        serverUrl: 'https://router.example',
+        sponsoredCompute: false,
+        tokenStored: false,
+        configured: false,
+        models: [],
+        selectedModel: null,
+        selectedThinkingLevel: 'medium',
+        lastCheckedAt: null,
+      },
+      remoteRevocationConfirmed: false,
     });
     api.projects.list.mockResolvedValue([]);
     Object.defineProperty(window, 'adrouter', { configurable: true, value: api });
@@ -172,8 +242,8 @@ describe('App onboarding', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
-    expect(screen.getByRole('dialog')).toHaveTextContent('does not revoke the key');
-    await userEvent.click(screen.getByRole('button', { name: 'Sign out locally' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('try to revoke this installation');
+    await userEvent.click(screen.getByRole('button', { name: 'Sign out and remove' }));
 
     expect(await screen.findByRole('heading', { name: 'Connect AdRouter' })).toBeInTheDocument();
     expect(screen.getByLabelText('AdRouter server URL')).toHaveValue('https://router.example');

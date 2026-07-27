@@ -1,4 +1,4 @@
-import { app, type IpcMainInvokeEvent, ipcMain, type WebContents } from 'electron';
+import { app, type IpcMainInvokeEvent, ipcMain, shell, type WebContents } from 'electron';
 import { sandboxReadiness } from '../runtime/platform';
 import {
   ApprovalSchema,
@@ -10,11 +10,12 @@ import {
 import { createId } from '../shared/security';
 import type { ConfigurationStore } from './configuration-store';
 import type { AppDatabase } from './database';
+import type { InstallationAuthManager } from './installation-auth';
 import type { RepositoryService } from './repository-service';
 import type { ReviewService } from './review-service';
 import type { RuntimeSupervisor } from './runtime-supervisor';
 
-const PUBLIC_RELEASE_VERSION = '0.1.0-beta.7';
+const PUBLIC_RELEASE_VERSION = '0.1.0-beta.8';
 
 interface Subscription {
   id: string;
@@ -90,10 +91,12 @@ export interface IpcDependencies {
   repositories: RepositoryService;
   review: ReviewService;
   supervisor: RuntimeSupervisor;
+  installationAuth: InstallationAuthManager;
 }
 
 export const registerIpcHandlers = (dependencies: IpcDependencies): EventSubscriptions => {
-  const { configuration, database, repositories, review, supervisor } = dependencies;
+  const { configuration, database, installationAuth, repositories, review, supervisor } =
+    dependencies;
   const subscriptions = new EventSubscriptions();
   const publishLastEvent = (threadId: string): void => {
     const event = database.listEvents(threadId).at(-1);
@@ -109,12 +112,22 @@ export const registerIpcHandlers = (dependencies: IpcDependencies): EventSubscri
   register('configuration.testRouter', (raw) =>
     configuration.test(IpcSchemas['configuration.testRouter'].input.parse(raw))
   );
-  register('configuration.status', () => configuration.status());
+  register('configuration.status', () => installationAuth.diagnostics());
   register('configuration.signOut', () => {
     if (supervisor.activeThreadId) {
       throw new Error('Stop the active agent task before signing out.');
     }
-    return configuration.signOut();
+    return installationAuth.signOut();
+  });
+  register('configuration.startEnrollment', (raw) =>
+    installationAuth.startEnrollment(IpcSchemas['configuration.startEnrollment'].input.parse(raw))
+  );
+  register('configuration.enrollmentStatus', () => installationAuth.enrollmentStatus());
+  register('configuration.cancelEnrollment', () => installationAuth.cancelEnrollment());
+  register('configuration.openEnrollment', async () => {
+    const url = await installationAuth.approvalUrl();
+    await shell.openExternal(url);
+    return { ok: true };
   });
   register('configuration.updatePreferences', (raw) =>
     configuration.updatePreferences(IpcSchemas['configuration.updatePreferences'].input.parse(raw))

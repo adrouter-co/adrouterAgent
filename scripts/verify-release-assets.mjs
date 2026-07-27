@@ -1,18 +1,19 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 
 const directory = resolve(process.argv[2] ?? 'out/release');
+const requireAcceptance = process.argv.includes('--require-acceptance');
 const manifest = JSON.parse(readFileSync(join(directory, 'artifact-manifest.json'), 'utf8'));
 assert.equal(manifest.schema, 3);
 assert.equal(manifest.distributionMode, 'credential-free-portable');
 assert.equal(manifest.repository, 'adrouter/adrouterAgent');
-assert.match(manifest.releaseVersion, /^\d+\.\d+\.\d+-beta\.\d+$/);
+assert.match(manifest.releaseVersion, /^\d+\.\d+\.\d+(?:-beta\.\d+)?$/);
 assert.equal(manifest.releaseTag, `v${manifest.releaseVersion}`);
 assert.equal(manifest.bundleShortVersion, '0.1.0');
-assert.equal(manifest.bundleVersion, '10007');
+assert.equal(manifest.bundleVersion, '10008');
 
 const expectedNames = [
   ...['darwin-universal', 'linux-x64', 'win32-x64'].flatMap((target) => [
@@ -70,6 +71,11 @@ assert.deepEqual(embeddedManifest.artifacts.map((artifact) => artifact.key).sort
   'win32-x64',
 ]);
 assert.equal(embeddedManifest.bundleIdentifier, 'com.adrouter.agent');
+assert.deepEqual(embeddedManifest.authentication, {
+  fixture: 'tests/fixtures/platform-auth-v1.json',
+  fixtureSha256: '93a8ec8d4eba38f9165179aa0cdfe3316f8134a882bd0426bd83339af55d17f8',
+  acceptanceAsset: 'authentication-acceptance.json',
+});
 
 for (const sbomName of expectedNames.filter((name) => name.endsWith('.cdx.json'))) {
   const sbom = JSON.parse(readFileSync(join(directory, sbomName), 'utf8'));
@@ -79,7 +85,29 @@ for (const sbomName of expectedNames.filter((name) => name.endsWith('.cdx.json')
 const actualNames = readdirSync(directory)
   .filter((name) => !name.startsWith('.'))
   .sort();
-const completeNames = [...expectedNames, 'SHA256SUMS', 'artifact-manifest.json'].sort();
+const acceptanceName = 'authentication-acceptance.json';
+const acceptancePath = join(directory, acceptanceName);
+if (requireAcceptance) {
+  assert.ok(existsSync(acceptancePath), `${acceptanceName} is required before promotion`);
+}
+if (existsSync(acceptancePath)) {
+  execFileSync(
+    process.execPath,
+    [
+      resolve('scripts/validate-authentication-acceptance.mjs'),
+      acceptancePath,
+      '--manifest',
+      join(directory, 'artifact-manifest.json'),
+    ],
+    { stdio: 'inherit' }
+  );
+}
+const completeNames = [
+  ...expectedNames,
+  'SHA256SUMS',
+  'artifact-manifest.json',
+  ...(existsSync(acceptancePath) ? [acceptanceName] : []),
+].sort();
 assert.deepEqual(actualNames, completeNames, 'release directory contains unintended assets');
 assert.equal(basename(directory).length > 0, true);
 

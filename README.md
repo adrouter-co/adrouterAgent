@@ -10,9 +10,9 @@ selection and settlement use a separate display channel; sponsor data is never
 added to model prompts, tool arguments, commands, patches, or compacted agent
 context.
 
-> **Public beta:** AdRouter Agent 0.1.0-beta.7 supports macOS 12+ on Apple Silicon
-> and Intel, Ubuntu Desktop 24.04 LTS x64, and Windows 11 x64. One agent task can
-> run at a time, and updates are installed manually.
+> **Public beta:** AdRouter Agent 0.1.0-beta.8 supports macOS 12+ on Apple Silicon and Intel, Ubuntu
+> Desktop 24.04 LTS x64, and Windows 11 x64. One agent task can run at a time, and updates are
+> installed manually.
 
 ## Install from npm
 
@@ -36,12 +36,13 @@ and authentication steps.
 This beta is not Developer ID signed or notarized. If macOS blocks the first
 launch, open **System Settings → Privacy & Security** and choose **Open Anyway**.
 The launcher never removes quarantine metadata or changes Gatekeeper settings.
-After launch, the app is prefilled with `https://api-staging.adrouter.co`.
-Enter a staging AdRouter bearer token, select **Test connection**, and save.
+After launch, the app is prefilled with `https://api-staging.adrouter.co`. Select **Connect this
+Agent**, compare the displayed code with the AdRouter WebUI, and explicitly approve the installation.
 
 Remote routers must use HTTPS. Plain HTTP is accepted only for `localhost`,
-`127.0.0.1`, and `::1` development servers. The token is encrypted with the
-operating-system credential store and is never exposed to the renderer.
+`127.0.0.1`, and `::1` development servers. Official origins use an OS-encrypted Ed25519
+installation. Bearer tokens remain available only in the advanced local/custom-router path and can
+never override official hosted authentication.
 
 The installed app includes its runtime dependencies. After installation it can
 be opened directly without the CLI. AdRouterCLI, the
@@ -79,15 +80,16 @@ If `nvm` is not installed, use any Node version manager that can provide
 Node.js `25.9.0`. Node 24 is not supported by this repository's `engines`
 field. The sibling backend supports Node.js `22.13` or newer.
 
-### Start the local backend
+### Start an explicit local demo backend
 
-The desktop needs an independently running AdRouter backend. From the usual
-sibling checkout:
+The default backend profile is the database-backed service. Follow its service setup guide for that
+mode; do not run its destructive local database reset merely to start the desktop. For isolated
+protocol/UI work, explicitly choose the demo profile from the usual sibling checkout:
 
 ```bash
 cd /path/to/router/backend
-npm install
-cp .env.example .env.local
+npm ci
+# configure ignored .env.local from .env.example without committing secrets
 ```
 
 Set a local bearer token and, for live DeepSeek inference, a separate
@@ -114,31 +116,29 @@ intentionally local-only.
 Start and verify the backend:
 
 ```bash
-npm run dev
+npm run dev:demo
 curl -fsS http://localhost:8787/health
 ```
 
-For live inference, the health response should report `status: "ok"`,
-`mode: "live"`, `llm.configured: true`, and `profile.configured: true`.
-Without a valid DeepSeek key, the backend can run in mock mode for protocol
-and UI testing.
+The public health response confirms only `status: "ok"`; use authenticated profile/operator
+diagnostics to determine provider readiness. Without a valid DeepSeek key, an explicitly configured
+local demo backend can still support protocol and UI testing.
 
 ### Complete first-run onboarding
 
 After `npm run dev` opens the desktop app:
 
-1. Keep `https://api-staging.adrouter.co`, or enter `http://localhost:8787` for
-   a local backend.
-2. Enter the exact local `ADROUTER_API_KEY` from the backend `.env.local`.
-3. Choose whether to enable sponsored compute.
-4. Select **Test connection** and confirm health, authentication, and model
-   discovery succeed.
-5. Select **Save securely**.
+1. For the official staging service, keep `https://api-staging.adrouter.co`, choose whether to enable
+   sponsored compute, and select **Connect this Agent**.
+2. Compare the code shown by the Agent with the authenticated AdRouter WebUI and explicitly approve
+   it. The Agent resumes an unexpired approval after restart.
+3. For `http://localhost:8787` or another explicit custom router, open the advanced section, enter
+   that router's bearer token, test the connection, and save it.
 
-The token is encrypted by Electron `safeStorage` using Keychain, DPAPI, or a
-supported Linux secret store. It
-is not exposed to the renderer or written to the event journal. Remote servers
-must use HTTPS; plain HTTP is accepted only for loopback development URLs.
+Private keys and rotating refresh credentials are encrypted by Electron `safeStorage` using
+Keychain, DPAPI, or a supported Linux secret store. Access tokens remain memory-only. No key, token,
+device code, nonce, or proof is exposed to the renderer or written to the event journal. Remote
+servers must use HTTPS; plain HTTP is accepted only for loopback development URLs.
 
 Select **Choose folder**, open a project directory, and start a chat. A new
 chat can inspect files immediately. File mutations and general commands pause
@@ -160,8 +160,8 @@ agent-authored diffs only; it never stages, commits, or pushes changes.
 - Read-only agent-authored diffs that exclude pre-existing user changes.
 - Tier A/B/C/NONE sponsor placement and settlement/economics summaries.
 - Stop, permanent chat deletion, and local project instructions.
-- Device-local sign out for replacing the OS-encrypted AdRouter API credential without removing
-  projects, chats, or preferences.
+- Privileged installation revocation and local sign out without removing projects, chats, or
+  preferences.
 
 ### Current desktop interaction surface
 
@@ -186,9 +186,12 @@ The desktop app uses only these routes on the configured AdRouter origin:
 
 ```text
 GET  /health
-GET  /v1/profile       Authorization: Bearer <token>
-GET  /v1/models        Authorization: Bearer <token>
-POST /v1/agent/turn    Authorization: Bearer <token>
+POST /v1/device/authorizations  DPoP proof after nonce challenge
+POST /v1/oauth/token            DPoP-bound device redemption and refresh
+GET  /v1/profile                DPoP access token + bodyless proof
+GET  /v1/models                 public model discovery
+POST /v1/agent/turn             DPoP access token + proof + exact-body digest
+POST /v1/installation/revoke    signed privileged revocation
 ```
 
 `POST /v1/agent/turn` streams newline-delimited JSON containing sponsor, text,
@@ -199,8 +202,9 @@ model availability.
 ## Data and security
 
 Application state is stored under the normal operating-system user-data
-directory in SQLite and a small configuration file. The configuration contains
-only OS-encrypted token ciphertext. Deleting a chat removes application
+directory in SQLite and a small configuration file. The configuration contains only OS-encrypted
+installation/pending-enrollment ciphertext, or custom-router token ciphertext. Access tokens are not
+persisted. Deleting a chat removes application
 history and review metadata but never deletes project files.
 
 The renderer is sandboxed and context-isolated, with no Node.js or raw
@@ -242,19 +246,19 @@ The available scripts are:
 | `npm run test:integration` | Run integration tests. |
 | `npm run check` | Run lint, typecheck, unit tests, and integration tests. |
 | `npm run test:e2e` | Package and run the deterministic Electron E2E suite. |
-| `npm run smoke:live` | Send a bounded no-tools request to a real router. |
+| `npm run smoke:live` | Ask an exact packaged, already-approved installation for a redacted authentication diagnostic. |
 | `npm run make:mac` | Build a local universal macOS ZIP. |
 | `npm run verify:dist` | Verify the generated macOS artifacts. |
 | `npm run make:linux` | Build an Ubuntu/Linux x64 portable ZIP. |
 | `npm run make:windows` | Build a Windows x64 portable ZIP. |
 
-The deterministic E2E suite packages an inspector-enabled test build and uses
-an in-process fixture router. It does not need live credentials. To exercise a
-real router without printing its token:
+The deterministic E2E suite packages an inspector-enabled test build and uses an in-process fixture
+router. It does not need live credentials. To check an exact installed candidate after WebUI
+approval, point the manual utility at its executable; it rejects bearer-credential environment
+variables and prints only a redacted result:
 
 ```bash
-ADROUTER_API_KEY="$ADROUTER_API_KEY" \
-npm run smoke:live
+ADROUTER_AGENT_EXECUTABLE=/absolute/path/to/AdRouter-Agent npm run smoke:live
 ```
 
 The smoke test discovers a model, sends a no-tools `READY` request, requires a
@@ -280,9 +284,9 @@ Check the backend process and the configured URL:
 curl -fsS http://localhost:8787/health
 ```
 
-Health is a public endpoint and does not validate the bearer token. If health
-works but onboarding authentication fails, compare the desktop token with the
-backend's `ADROUTER_API_KEY` and restart the backend after editing `.env.local`.
+Health is public and does not validate authentication. For an official origin, reconnect the
+installation and compare its approval code in the WebUI. For an advanced local/custom router,
+compare its bearer token with the backend configuration and restart the backend after changes.
 
 ### The router is healthy but reports mock mode
 
@@ -292,9 +296,9 @@ and sponsor presentation.
 
 ### No models appear
 
-The desktop discovers models through authenticated `GET /v1/models`. Refresh
-the Agent status panel in **Settings**, check the bearer token, and inspect the
-backend model configuration. A cached model catalog may remain visible while a
+The desktop discovers models through public `GET /v1/models` and verifies authentication separately
+through signed `GET /v1/profile`. Refresh the Agent status panel in **Settings**, reconnect if
+required, and inspect the backend model configuration. A cached model catalog may remain visible while a
 temporary router check is unavailable.
 
 ### A command or file operation is blocked

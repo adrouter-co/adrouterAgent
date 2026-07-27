@@ -14,7 +14,11 @@ import { buildLauncherPackage } from './build-launcher-package.mjs';
 
 const version = process.argv[2];
 const packageJson = JSON.parse(readFileSync(resolve('package.json'), 'utf8'));
-if (!version || version !== packageJson.version || !/^\d+\.\d+\.\d+-beta\.\d+$/.test(version)) {
+if (
+  !version ||
+  version !== packageJson.version ||
+  !/^\d+\.\d+\.\d+(?:-beta\.\d+)?$/.test(version)
+) {
   throw new Error(
     `Release version must be semantic and match package.json (${packageJson.version}).`
   );
@@ -113,7 +117,7 @@ writeFileSync(
       releaseVersion: version,
       releaseTag: `v${version}`,
       bundleShortVersion: '0.1.0',
-      bundleVersion: '10007',
+      bundleVersion: '10008',
       launcherManifest: launcher.manifest,
       files: records,
     },

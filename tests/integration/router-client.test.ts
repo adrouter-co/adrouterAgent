@@ -51,7 +51,7 @@ describe('AdRouterClient', () => {
     });
     const client = new AdRouterClient({
       serverUrl: 'https://router.example',
-      token: 'never-log-me',
+      authentication: { mode: 'custom_bearer', token: 'never-log-me' },
       fetchFn,
     });
 
@@ -94,7 +94,7 @@ describe('AdRouterClient', () => {
     );
     const client = new AdRouterClient({
       serverUrl: 'https://router.example',
-      token: 'never-log-me',
+      authentication: { mode: 'custom_bearer', token: 'never-log-me' },
       fetchFn,
     });
 
@@ -116,7 +116,7 @@ describe('AdRouterClient', () => {
       .mockResolvedValueOnce(new Response('{"type":"done"}\n', { status: 200 }));
     const transientClient = new AdRouterClient({
       serverUrl: 'https://router.example',
-      token: 'never-log-me',
+      authentication: { mode: 'custom_bearer', token: 'never-log-me' },
       fetchFn: transientFetch,
     });
 
@@ -132,7 +132,7 @@ describe('AdRouterClient', () => {
 
     const unauthorizedClient = new AdRouterClient({
       serverUrl: 'https://router.example',
-      token: 'never-log-me',
+      authentication: { mode: 'custom_bearer', token: 'never-log-me' },
       fetchFn: vi.fn(async () => new Response('unauthorized', { status: 401 })),
     });
     await expect(collect(unauthorizedClient.turn(turnInput))).rejects.toBeInstanceOf(
@@ -157,7 +157,7 @@ describe('AdRouterClient', () => {
     );
     const client = new AdRouterClient({
       serverUrl: 'https://router.example',
-      token: 'never-log-me',
+      authentication: { mode: 'custom_bearer', token: 'never-log-me' },
       fetchFn,
     });
     const controller = new AbortController();
@@ -167,5 +167,112 @@ describe('AdRouterClient', () => {
 
     await expect(pending).rejects.toThrow('aborted');
     expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses exact bytes for one bounded installation nonce retry', async () => {
+    const signed: Array<{ nonce?: string; body: string }> = [];
+    const transmitted: string[] = [];
+    const fetchFn: typeof fetch = vi.fn(async (_input: URL | RequestInfo, init?: RequestInit) => {
+      transmitted.push(String(init?.body));
+      if (transmitted.length === 1) {
+        return new Response('', { status: 401, headers: { 'DPoP-Nonce': 'fresh-nonce' } });
+      }
+      return new Response('{"type":"done"}\n', { status: 200 });
+    });
+    const client = new AdRouterClient({
+      serverUrl: 'https://api-staging.adrouter.co',
+      authentication: {
+        mode: 'installation',
+        authorize: async (request) => {
+          if (!request.body) throw new Error('Expected exact turn bytes.');
+          signed.push({
+            nonce: request.nonce,
+            body: Buffer.from(request.body).toString('utf8'),
+          });
+          return {
+            Authorization: 'DPoP access-fixture',
+            DPoP: `proof-${signed.length}`,
+            'Content-Digest': 'sha-256=:fixture:',
+          };
+        },
+      },
+      fetchFn,
+    });
+
+    await expect(collect(client.turn(turnInput))).resolves.toEqual([{ type: 'done', usage: {} }]);
+    expect(signed).toHaveLength(2);
+    expect(signed[0]?.nonce).toBeUndefined();
+    expect(signed[1]?.nonce).toBe('fresh-nonce');
+    expect(signed[0]?.body).toBe(signed[1]?.body);
+    expect(transmitted[0]).toBe(transmitted[1]);
+  });
+
+  it('sends a bodyless profile proof without a content digest or body bytes', async () => {
+    const authorized: Array<{ body?: Uint8Array; nonce?: string }> = [];
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchFn: typeof fetch = vi.fn(async (input, init) => {
+      const url = String(input);
+      calls.push({ url, init });
+      if (url.endsWith('/health')) return new Response('{}', { status: 200 });
+      if (url.endsWith('/v1/models')) return new Response('{"models":["opaque-model"]}');
+      return new Response('{}', { status: 200 });
+    });
+    const client = new AdRouterClient({
+      serverUrl: 'https://api-staging.adrouter.co',
+      authentication: {
+        mode: 'installation',
+        authorize: async (request) => {
+          authorized.push({ body: request.body, nonce: request.nonce });
+          return { Authorization: 'DPoP access-fixture', DPoP: 'proof-fixture' };
+        },
+      },
+      fetchFn,
+    });
+
+    await expect(client.diagnostics()).resolves.toMatchObject({ authenticated: true });
+    expect(authorized).toEqual([{ body: undefined, nonce: undefined }]);
+    const profile = calls.find((call) => call.url.endsWith('/v1/profile'));
+    expect(profile?.init?.body).toBeUndefined();
+    expect(profile?.init?.headers).not.toHaveProperty('Content-Digest');
+  });
+
+  it('rejects authenticated redirects without following them', async () => {
+    const fetchFn: typeof fetch = vi.fn(
+      async () =>
+        new Response('', { status: 307, headers: { location: 'https://attacker.example' } })
+    );
+    const client = new AdRouterClient({
+      serverUrl: 'https://api-staging.adrouter.co',
+      authentication: {
+        mode: 'installation',
+        authorize: async () => ({
+          Authorization: 'DPoP access-fixture',
+          DPoP: 'proof-fixture',
+          'Content-Digest': 'sha-256=:fixture:',
+        }),
+      },
+      fetchFn,
+    });
+
+    await expect(collect(client.turn(turnInput))).rejects.toThrow(/redirects are not allowed/);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a malformed proof nonce without asking main to sign it', async () => {
+    const authorize = vi.fn(async () => ({
+      Authorization: 'DPoP access-fixture',
+      DPoP: 'proof-fixture',
+      'Content-Digest': 'sha-256=:fixture:',
+    }));
+    const client = new AdRouterClient({
+      serverUrl: 'https://api-staging.adrouter.co',
+      authentication: { mode: 'installation', authorize },
+      fetchFn: vi.fn(
+        async () => new Response('', { status: 401, headers: { 'DPoP-Nonce': 'not printable' } })
+      ),
+    });
+
+    await expect(collect(client.turn(turnInput))).rejects.toThrow(/invalid proof nonce/);
+    expect(authorize).toHaveBeenCalledTimes(1);
   });
 });

@@ -2,6 +2,29 @@
 
 All notable changes to AdRouter Agent are documented here.
 
+## [0.1.0-beta.8] - 2026-07-27
+
+### Added
+
+- User-approved Desktop installations with OS-encrypted Ed25519 keys, resumable WebUI approval,
+  rotating refresh credentials, signed profile/turn requests, and privileged revocation.
+- Redacted installation diagnostics, exact-candidate authentication acceptance validation, and a
+  packaged manual smoke mode that never accepts bearer credentials.
+
+### Changed
+
+- Official hosted origins now use installation-bound authentication. Explicit local and custom
+  routers retain an isolated advanced bearer-token path.
+- Release and promotion workflows are credential-free; manual exact-artifact cohorts provide hosted
+  authentication evidence before channel promotion.
+
+### Security
+
+- Private keys, refresh credentials, device codes, access tokens, nonces, and proofs remain outside
+  renderer IPC, local journals, model/tool context, workflow secrets, and diagnostic output.
+- The utility process can request protected headers only for bounded exact-byte profile and agent
+  turn requests through a dedicated allowlisted main-process broker.
+
 ## [0.1.0-beta.7] - 2026-07-26
 
 ### Added
@@ -117,6 +140,7 @@ All notable changes to AdRouter Agent are documented here.
 - Updates are downloaded and installed manually.
 - A reachable AdRouter server and valid bearer token are required.
 
+[0.1.0-beta.8]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.8
 [0.1.0-beta.7]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.7
 [0.1.0-beta.6]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.6
 [0.1.0-beta.5]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.5

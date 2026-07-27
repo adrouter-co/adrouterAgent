@@ -14,7 +14,11 @@ import { containsSponsorKey, now, removeSponsorData, safeRecord } from '../share
 import { SandboxedCommandRunner } from './command-runner';
 import { createAdRouterPiProvider } from './pi-provider';
 import { sandboxReadiness } from './platform';
-import { AdRouterClient } from './router-client';
+import {
+  AdRouterClient,
+  type ProtectedRouterHeaders,
+  type ProtectedRouterRequest,
+} from './router-client';
 import { createDesktopTools, type ToolApproval } from './tools';
 
 type RuntimeStart = typeof RuntimeStartSchema._output;
@@ -232,7 +236,10 @@ export class DesktopAgentSession {
 
   public constructor(
     private readonly start: RuntimeStart,
-    private readonly emit: (event: RuntimeEvent) => void
+    private readonly emit: (event: RuntimeEvent) => void,
+    private readonly authorize?: (
+      request: ProtectedRouterRequest
+    ) => Promise<ProtectedRouterHeaders>
   ) {
     this.compactionAnchors = historyAnchors(start.history);
   }
@@ -240,7 +247,16 @@ export class DesktopAgentSession {
   public async run(): Promise<void> {
     const router = new AdRouterClient({
       serverUrl: this.start.router.serverUrl,
-      token: this.start.router.token,
+      authentication:
+        this.start.router.authMode === 'installation'
+          ? {
+              mode: 'installation',
+              authorize:
+                this.authorize ??
+                (() =>
+                  Promise.reject(new Error('The installation signing broker is unavailable.'))),
+            }
+          : { mode: 'custom_bearer', token: this.start.router.token },
     });
     const provider = createAdRouterPiProvider({
       client: router,

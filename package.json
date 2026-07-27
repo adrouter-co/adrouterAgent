@@ -1,7 +1,7 @@
 {
   "name": "adrouter-agent",
   "productName": "AdRouter Agent",
-  "version": "0.1.0-beta.7",
+  "version": "0.1.0-beta.8",
   "description": "A secure, local-first desktop coding agent routed through AdRouter.",
   "license": "Apache-2.0",
   "private": true,
@@ -32,7 +32,6 @@
     "test:e2e": "node scripts/run-e2e.mjs",
     "test:launcher": "node --test packages/agent-launcher/test/*.test.mjs scripts/*.test.mjs",
     "smoke:live": "node scripts/live-router-smoke.mjs",
-    "test:staging-canary": "node scripts/live-router-smoke.mjs",
     "verify:dist": "node scripts/verify-dist.mjs",
     "verify:dist:linux": "node scripts/verify-portable-dist.mjs linux x64",
     "verify:dist:windows": "node scripts/verify-portable-dist.mjs win32 x64",
@@ -40,6 +39,7 @@
     "build:launcher": "node scripts/build-launcher-package.mjs",
     "check:launcher-package": "node scripts/check-launcher-package.mjs",
     "check:public": "node scripts/verify-source-parity.mjs && node scripts/check-dependency-overrides.mjs && node scripts/check-public-boundary.mjs && node scripts/check-docs.mjs && node scripts/check-workflows.mjs",
+    "update:source-parity": "node scripts/update-source-parity.mjs",
     "verify:release-readiness": "npm run check:public && npm run test:launcher && npm run check:launcher-package",
     "check": "npm run lint && npm run typecheck && npm run test && npm run test:integration && npm run check:public && npm run test:launcher"
   },

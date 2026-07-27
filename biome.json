@@ -8,7 +8,8 @@
       "!out",
       "!output",
       "!playwright-report",
-      "!test-results"
+      "!test-results",
+      "!tests/fixtures/platform-auth-v1.json"
     ]
   },
   "formatter": {

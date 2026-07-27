@@ -42,6 +42,58 @@ export const RouterModelDescriptorSchema = z.object({
 });
 export type RouterModelDescriptor = z.infer<typeof RouterModelDescriptorSchema>;
 
+export const RouterOriginClassSchema = z.enum(['official', 'loopback', 'custom']);
+export const RouterAuthenticationModeSchema = z.enum([
+  'unconfigured',
+  'installation',
+  'custom_bearer',
+  'legacy_hosted',
+]);
+export const InstallationStateSchema = z.enum([
+  'none',
+  'pending',
+  'connected',
+  'reconnect_required',
+  'upgrade_required',
+]);
+export const InstallationDiagnosticsSchema = z.object({
+  mode: RouterAuthenticationModeSchema,
+  state: InstallationStateSchema,
+  originClass: RouterOriginClassSchema,
+  storageClassification: z.enum(['os_encrypted', 'unavailable']).nullable(),
+  signedRequestSupport: z.boolean(),
+  refreshHealthy: z.boolean(),
+  pendingEnrollment: z.boolean(),
+  reconnectRequired: z.boolean(),
+  installationIdSuffix: z.string().max(12).nullable(),
+  scopes: z.array(z.enum(['agent:turn', 'profile:read'])).max(2),
+  familyExpiresAt: TimestampSchema.nullable(),
+  minimumClientVersion: z.string().max(100).nullable(),
+  policyMode: z.enum(['observe', 'warn', 'enforce']).nullable(),
+});
+export type InstallationDiagnostics = z.infer<typeof InstallationDiagnosticsSchema>;
+
+export const EnrollmentStateSchema = z.enum([
+  'idle',
+  'starting',
+  'pending',
+  'approved',
+  'denied',
+  'expired',
+  'cancelled',
+  'failed',
+]);
+export const EnrollmentStatusSchema = z.object({
+  state: EnrollmentStateSchema,
+  userCode: z.string().min(1).max(64).nullable(),
+  verificationUri: z.string().url().nullable(),
+  verificationUriComplete: z.string().url().nullable(),
+  expiresAt: TimestampSchema.nullable(),
+  nextPollAt: TimestampSchema.nullable(),
+  message: z.string().max(500).nullable(),
+});
+export type EnrollmentStatus = z.infer<typeof EnrollmentStatusSchema>;
+
 export const GitMetadataSchema = z.object({
   branch: z.string().nullable(),
   changeCount: z.number().int().nonnegative(),
@@ -199,8 +251,14 @@ export const RouterConfigurationSchema = z.object({
   selectedModel: z.string().min(1).max(300).nullable(),
   selectedThinkingLevel: ThinkingLevelSchema,
   lastCheckedAt: TimestampSchema.nullable(),
+  authentication: InstallationDiagnosticsSchema,
 });
 export type RouterConfiguration = z.infer<typeof RouterConfigurationSchema>;
+export const SignOutResultSchema = z.object({
+  configuration: RouterConfigurationSchema,
+  remoteRevocationConfirmed: z.boolean(),
+});
+export type SignOutResult = z.infer<typeof SignOutResultSchema>;
 
 export const RouterDiagnosticsSchema = z.object({
   health: z.boolean(),
@@ -210,6 +268,7 @@ export const RouterDiagnosticsSchema = z.object({
   modelsStale: z.boolean(),
   checkedAt: TimestampSchema,
   error: z.string().nullable(),
+  authentication: InstallationDiagnosticsSchema,
 });
 export type RouterDiagnostics = z.infer<typeof RouterDiagnosticsSchema>;
 
@@ -218,6 +277,22 @@ export const RouterConfigurationInputSchema = z.object({
   token: z.string().min(1).max(16_384),
   sponsoredCompute: z.boolean(),
 });
+
+export const EnrollmentStartInputSchema = z.object({
+  serverUrl: z.string().url(),
+  sponsoredCompute: z.boolean(),
+  displayName: z.string().trim().min(1).max(120).default('AdRouter Agent'),
+});
+
+export const CustomRouterConfigurationInputSchema = RouterConfigurationInputSchema.refine(
+  (input) => {
+    const url = new URL(input.serverUrl);
+    return (
+      url.origin !== 'https://api.adrouter.co' && url.origin !== 'https://api-staging.adrouter.co'
+    );
+  },
+  'Official AdRouter origins require installation authentication.'
+);
 
 export const RouterTestInputSchema = z.object({
   serverUrl: z.string().url(),
@@ -310,12 +385,19 @@ export const ThreadDetailSchema = z.object({
 export const IpcSchemas = {
   'configuration.get': { input: z.object({}), output: RouterConfigurationSchema },
   'configuration.save': {
-    input: RouterConfigurationInputSchema,
+    input: CustomRouterConfigurationInputSchema,
     output: RouterConfigurationSchema,
   },
   'configuration.testRouter': { input: RouterTestInputSchema, output: RouterDiagnosticsSchema },
   'configuration.status': { input: z.object({}), output: RouterDiagnosticsSchema },
-  'configuration.signOut': { input: z.object({}), output: RouterConfigurationSchema },
+  'configuration.signOut': { input: z.object({}), output: SignOutResultSchema },
+  'configuration.startEnrollment': {
+    input: EnrollmentStartInputSchema,
+    output: EnrollmentStatusSchema,
+  },
+  'configuration.enrollmentStatus': { input: z.object({}), output: EnrollmentStatusSchema },
+  'configuration.cancelEnrollment': { input: z.object({}), output: EnrollmentStatusSchema },
+  'configuration.openEnrollment': { input: z.object({}), output: OkSchema },
   'configuration.updatePreferences': {
     input: RouterPreferencesInputSchema,
     output: RouterConfigurationSchema,
@@ -358,7 +440,11 @@ export interface AdrouterApi {
     save(input: z.input<typeof RouterConfigurationInputSchema>): Promise<RouterConfiguration>;
     testRouter(input: z.input<typeof RouterTestInputSchema>): Promise<RouterDiagnostics>;
     status(): Promise<RouterDiagnostics>;
-    signOut(): Promise<RouterConfiguration>;
+    signOut(): Promise<SignOutResult>;
+    startEnrollment(input: z.input<typeof EnrollmentStartInputSchema>): Promise<EnrollmentStatus>;
+    enrollmentStatus(): Promise<EnrollmentStatus>;
+    cancelEnrollment(): Promise<EnrollmentStatus>;
+    openEnrollment(): Promise<{ ok: true }>;
     updatePreferences(
       input: z.input<typeof RouterPreferencesInputSchema>
     ): Promise<RouterConfiguration>;

@@ -4,6 +4,7 @@ import { isSafeExternalUrl } from '../shared/security';
 import { registerAppProtocol, rendererUrl } from './app-protocol';
 import { ConfigurationStore } from './configuration-store';
 import { AppDatabase } from './database';
+import { InstallationAuthManager } from './installation-auth';
 import { type EventSubscriptions, registerIpcHandlers } from './ipc';
 import { RepositoryService } from './repository-service';
 import { ReviewService } from './review-service';
@@ -12,6 +13,7 @@ import { RuntimeSupervisor } from './runtime-supervisor';
 app.setName('AdRouter Agent');
 
 let database: AppDatabase | undefined;
+let installationAuth: InstallationAuthManager | undefined;
 
 const createMainWindow = (): BrowserWindow => {
   const window = new BrowserWindow({
@@ -59,7 +61,7 @@ const createMainWindow = (): BrowserWindow => {
   return window;
 };
 
-const initializeApplication = (): void => {
+const initializeApplication = async (): Promise<void> => {
   session.defaultSession.setPermissionCheckHandler(() => false);
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false);
@@ -69,14 +71,38 @@ const initializeApplication = (): void => {
   registerAppProtocol(rendererRoot);
 
   const userData = app.getPath('userData');
+  const configuration = new ConfigurationStore(join(userData, 'configuration.json'));
+  installationAuth = new InstallationAuthManager(configuration, app.getVersion());
+  if (process.argv.includes('--installation-auth-smoke')) {
+    const diagnostics = await installationAuth.diagnostics();
+    process.stdout.write(
+      `${JSON.stringify({
+        schema: 1,
+        authenticated: diagnostics.authenticated,
+        modelCount: diagnostics.models.length,
+        authentication: {
+          mode: diagnostics.authentication.mode,
+          state: diagnostics.authentication.state,
+          storageClassification: diagnostics.authentication.storageClassification,
+          signedRequestSupport: diagnostics.authentication.signedRequestSupport,
+          refreshHealthy: diagnostics.authentication.refreshHealthy,
+          reconnectRequired: diagnostics.authentication.reconnectRequired,
+        },
+      })}\n`
+    );
+    app.exit(diagnostics.authenticated ? 0 : 1);
+    return;
+  }
   database = new AppDatabase(join(userData, 'adrouter.sqlite'));
   database.recoverInterruptedRuns();
-  const configuration = new ConfigurationStore(join(userData, 'configuration.json'));
   const repositories = new RepositoryService(database);
   const review = new ReviewService(database);
   let subscriptions: EventSubscriptions | undefined;
-  const supervisor = new RuntimeSupervisor(database, join(__dirname, 'runtime.js'), (event) =>
-    subscriptions?.publish(event)
+  const supervisor = new RuntimeSupervisor(
+    database,
+    join(__dirname, 'runtime.js'),
+    (event) => subscriptions?.publish(event),
+    installationAuth
   );
   subscriptions = registerIpcHandlers({
     database,
@@ -84,6 +110,7 @@ const initializeApplication = (): void => {
     repositories,
     review,
     supervisor,
+    installationAuth,
   });
 
   createMainWindow();
@@ -109,6 +136,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  installationAuth?.dispose();
   database?.close();
 });
 

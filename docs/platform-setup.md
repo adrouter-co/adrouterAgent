@@ -55,7 +55,7 @@ sudo apparmor_parser -r /etc/apparmor.d/adrouter-agent-bwrap
 Do not disable AppArmor or change the global
 `kernel.apparmor_restrict_unprivileged_userns` setting. Log in to a normal GNOME
 or KDE desktop session and unlock its keyring. The app refuses to persist a
-token if Electron reports the weak Linux `basic_text` storage backend.
+installation or custom-router token if Electron reports the weak Linux `basic_text` storage backend.
 
 ## Windows 11 prerequisite
 
@@ -69,7 +69,7 @@ The command requests one UAC approval and provisions the dedicated
 `srt-sandbox` account plus its Windows Filtering Platform rules. It is
 idempotent. AdRouter Agent never runs this command or elevates itself. Until it
 has succeeded, file tools remain available but command and Git tools are not
-offered. Tokens are encrypted with Windows DPAPI.
+offered. Installation material is encrypted with Windows DPAPI.
 
 ## Staging authentication
 
@@ -79,30 +79,31 @@ Fresh installations are prefilled with:
 https://api-staging.adrouter.co
 ```
 
-The URL is public configuration; the bearer token is secret. Request a
-revocable staging AdRouter bearer token from the staging service operator.
-There is no token-issuance flow in this desktop repository. Do not use a
-DeepSeek, OpenAI, npm, or GitHub credential as the AdRouter token.
+The URL is public configuration. Official hosted access does not use a copied bearer token. The
+Agent creates a unique Ed25519 key only after you select **Connect this Agent**, then the authenticated
+AdRouter WebUI asks you to approve the displayed comparison code.
 
 In the app:
 
-1. Leave the staging URL selected, or replace it with another HTTPS AdRouter
-   origin.
-2. Paste the issued AdRouter bearer token into **Access token**.
-3. Select **Test connection**. A successful result verifies health,
-   authentication, and model discovery.
-4. Select **Save securely**.
+1. Leave the staging URL selected and choose the sponsored-compute preference.
+2. Select **Connect this Agent**.
+3. Compare the code displayed by the Agent with the code in the AdRouter WebUI. Approval is never
+   implicit, even when the app opens the complete link.
+4. Explicitly approve. The main process redeems the approval, stores the installation, and verifies
+   a signed profile before onboarding completes.
 
-The token is encrypted by Electron `safeStorage` and is not exposed to the
-renderer, logs, release files, or event journal. `/health` is public and does
-not validate the token; authenticated `/v1/profile` and `/v1/models` checks do.
+The private key and rotating refresh credential are encrypted by Electron `safeStorage`; access
+tokens remain memory-only. They are not exposed to the renderer, logs, release files, or event
+journal. `/health` and `/v1/models` are public and do not validate the installation; signed
+`/v1/profile` does.
 
-For a protected operator canary, set only the token in the environment. The URL
-defaults to staging and can be overridden explicitly for local development:
+CI and release workflows never receive an inference credential. After approving an exact installed
+candidate, an operator may request its redacted manual diagnostic without exporting a token:
 
 ```bash
-ADROUTER_API_KEY='issued_staging_token' npm run test:staging-canary
+ADROUTER_AGENT_EXECUTABLE=/absolute/path/to/the/candidate npm run smoke:live
 ```
 
-Local development may instead use `ADROUTER_API_URL=http://localhost:8787` and
-the local backend's separate `ADROUTER_API_KEY`.
+Local development may instead enter `http://localhost:8787`, open **Advanced: connect a custom or
+local router**, and use that backend's separate `ADROUTER_API_KEY`. The advanced bearer path cannot
+be selected for an official origin.

@@ -1,9 +1,8 @@
 # Manual acceptance test
 
-This checklist validates AdRouter Agent against a live local router. It is
-designed to confirm the same user-visible behavior as the packaged functional
-test while also exercising real provider streaming, sponsored routing, and
-settlement.
+This checklist validates the custom/local compatibility path and the exact packaged hosted
+installation path. Hosted acceptance must use the immutable candidate from the draft release, not a
+local build.
 
 ## Preconditions
 
@@ -35,24 +34,12 @@ curl -fsS http://localhost:8787/health
 ../../adrouterCLI/run-adrouter-live.sh --json doctor
 ```
 
-Confirm that health reports `status: "ok"`, `mode: "live"`,
-`llm.configured: true`, and `profile.configured: true`. Confirm that doctor
-reports a reachable live router and available authentication. Health alone
-does not validate the bearer token.
+Confirm that health reports `status: "ok"`. Confirm that authenticated diagnostics report a
+reachable live router and available authentication. Health alone does not validate authentication
+or provider readiness.
 
-Optionally validate the exact agent-turn stream used by the desktop from the
-`adrouterAgent` directory:
-
-```bash
-cd ../../adrouterAgent
-ADROUTER_API_URL=http://localhost:8787 \
-ADROUTER_API_KEY='your local bearer token' \
-npm run smoke:live
-```
-
-The command must finish with `Live router smoke passed`. Avoid placing the
-token in shell history on shared machines; exporting it from a protected local
-environment is preferable.
+The standalone smoke utility is reserved for an exact packaged installation that has already been
+approved through the WebUI. It rejects bearer-token environment variables.
 
 ## 2. Launch and onboard
 
@@ -69,17 +56,24 @@ Confirm Node reports `v25.9.0`. This is the Electron desktop app; it does not
 start the `adrouter` CLI executable or the backend automatically. On first
 launch:
 
-1. Enter `http://localhost:8787` as the server URL.
-2. Enter the router's `ADROUTER_API_KEY` as the access token.
+1. Enter `http://localhost:8787` as the server URL and open **Advanced: connect a custom or local
+   router**.
+2. Enter the router's `ADROUTER_API_KEY` as the custom-router access token.
 3. Choose whether sponsored compute is enabled.
 4. Select **Test connection** and confirm health, authentication, and model
    discovery succeed.
-5. Select **Save securely**.
+5. Select **Save custom router**.
 
 Restart the app once and confirm onboarding remains complete. The token should
 never be visible again in the renderer or written to application events.
 If the app is pointed at a remote router, verify the URL uses HTTPS. HTTP is
 accepted only for loopback development URLs.
+
+For official staging acceptance, install the exact candidate artifact, keep the prefilled HTTPS
+origin, and select **Connect this Agent**. Confirm key generation does not begin before that action.
+Compare the displayed code in the authenticated WebUI, approve explicitly, restart once while the
+flow is pending to confirm it resumes, and verify the renderer never displays a device code, token,
+key, nonce, proof, or protected header.
 
 ## 3. Open a project
 
@@ -211,7 +205,14 @@ approval-waiting chats must not be deletable.
 
 The build passes manual acceptance when all of the following hold:
 
-- Onboarding authenticates and persists securely.
+- Official onboarding requires explicit approval and persists only OS-encrypted installation
+  material; the custom bearer path remains isolated to a non-official origin.
+- Signed profile and turn requests pass. Expiry refreshes once, concurrent requests share the same
+  rotation, and a nonce challenge retries only before response bytes are consumed.
+- Replayed proofs, altered bodies/methods/paths/nonces, copied tokens without the private key,
+  authenticated redirects, revoked installations, and below-minimum versions fail safely.
+- Sign out attempts signed remote revocation and always clears installation, pending, access, nonce,
+  and refresh state locally without removing project/task data.
 - Git and non-Git projects open successfully.
 - A live model streams thinking, tool activity, and a final response.
 - Reads are silent; every mutation and general command asks exactly once.
@@ -223,8 +224,9 @@ The build passes manual acceptance when all of the following hold:
 - Stop and restart produce deterministic cancelled/interrupted states.
 - Sponsor display and economics work without entering agent context.
 
-Record the app version, commit, operating-system version, Node version, router mode, model,
-thinking level, sponsored-compute setting, and any failed checklist item.
-Redact all tokens and provider credentials. Do not attach the application's
-SQLite database or configuration file without reviewing it for sensitive local
-metadata first.
+Record only the fields accepted by `scripts/authentication-acceptance.schema.json` for the primary
+operator device and a distinct second OS cohort. Validate the result with
+`node scripts/validate-authentication-acceptance.mjs authentication-acceptance.json --manifest
+artifact-manifest.json` before attaching it to the matching draft release. Never record request or
+response content, codes, account IDs, tokens, proofs, keys, nonces, or full fingerprints. Do not
+attach the application's SQLite database or configuration file.

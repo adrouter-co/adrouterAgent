@@ -37,8 +37,8 @@ Verify the backend before opening the desktop onboarding screen:
 curl -fsS http://localhost:8787/health
 ```
 
-On first launch, enter the local server URL and the backend's
-`ADROUTER_API_KEY`, select **Test connection**, then **Save securely**. Select
+On first launch, enter the local server URL, open the advanced custom-router section, enter the
+backend's `ADROUTER_API_KEY`, select **Test connection**, then **Save custom router**. Select
 **Choose folder** to open the project you want the agent to inspect. The
 complete credential setup and health-response interpretation are described in
 [Live backend setup](#6-live-backend-setup).
@@ -139,7 +139,8 @@ React renderer
   │ sandboxed window; no Node integration; validated preload bridge
   ▼
 Electron main process
-  ├─ configuration and OS-encrypted token access
+  ├─ OS-encrypted installation key, pending enrollment, refresh rotation, and access-token memory
+  ├─ narrow exact-byte signing broker for allowlisted utility requests
   ├─ SQLite projects, threads, turns, events, approvals, and baselines
   ├─ repository metadata and native folder dialogs
   ├─ review and diff service
@@ -152,21 +153,21 @@ Isolated agent utility process
   ├─ fixed desktop tool set
   ├─ approval wait/resume handling
   └─ command sandbox and policy
-       │ authenticated HTTP with NDJSON response streaming
+       │ request-scoped protected headers; authenticated HTTP with NDJSON streaming
        ▼
 Independent AdRouter backend
-  ├─ bearer authentication and profile
+  ├─ installation-bound authentication and profile
   ├─ model discovery
   ├─ provider inference
   ├─ sponsor routing
   └─ usage and settlement
 ```
 
-The renderer never receives the raw router token. It calls a narrow preload API
-whose inputs and outputs are schema-validated. The main process owns the
-credential, database, project registration, and runtime lifecycle. The utility
-process owns the active model/tool loop so a model task does not run inside the
-renderer.
+The renderer receives only redacted installation state and the approval comparison code. The main
+process owns key generation, encrypted persistence, polling, refresh, signing, revocation, database,
+and runtime lifecycle. The utility owns streaming but can request protected headers only for bounded
+exact bytes on the profile and agent-turn allowlist; it never receives a private key or refresh
+credential.
 
 ## 5. What happens during a turn
 
@@ -255,14 +256,12 @@ Verify its unauthenticated health endpoint:
 curl -fsS http://localhost:8787/health
 ```
 
-For a live provider, check for `status: "ok"`, `mode: "live"`,
-`llm.configured: true`, and `profile.configured: true`. A healthy endpoint does
-not by itself prove that the bearer token is correct.
+The public response confirms only `status: "ok"`; it does not report provider mode or validate
+authentication.
 
-The backend's `/health` endpoint is intentionally unauthenticated. The desktop
-also performs authenticated profile and model discovery checks during **Test
-connection** and **Save securely**. A successful health request therefore does
-not replace onboarding authentication.
+The desktop validates a custom router through profile plus public model discovery during **Test
+connection** and **Save custom router**. Official onboarding verifies a signed profile after WebUI
+approval. A successful health request therefore does not replace authentication.
 
 ### Desktop requirements and launch
 
@@ -278,27 +277,26 @@ npm run dev
 changes. It can rebuild Electron's native dependencies for the active Node
 version, so switch to Node `25.9.0` before running it.
 
-On first launch, enter:
+For the local/custom compatibility path, enter:
 
 1. Server URL: `http://localhost:8787`.
-2. Access token: the exact `ADROUTER_API_KEY` from the backend's
-   `.env.local`.
+2. Open **Advanced: connect a custom or local router** and enter the exact `ADROUTER_API_KEY` from
+   the backend's `.env.local`.
 3. Sponsored compute preference.
-4. Select **Test connection**, then **Save securely**.
+4. Select **Test connection**, then **Save custom router**.
 
-Testing the connection performs health, authenticated profile, and model
-discovery checks. Saving encrypts the token with Electron `safeStorage`, backed
-by Keychain, Windows DPAPI, or a supported Linux secret store. Subsequent turns retrieve the token in the main process;
-the renderer and event journal do not receive the plaintext credential.
+Official origins instead show **Connect this Agent**. Main generates an Ed25519 key only after that
+action, shows a comparison code through the renderer, polls at the server interval, encrypts the
+approved key/refresh family with `safeStorage`, and verifies a signed profile. Access tokens remain
+memory-only. Restart resumes an unexpired pending approval.
 
 For a remote backend, use HTTPS. Plain HTTP is accepted only for
 `localhost`, `127.0.0.1`, and `::1`; URLs with embedded credentials or URL
 fragments are rejected.
 
-The app stores the server URL, model catalog, selected model, thinking level,
-and sponsored-compute preference locally. It stores only encrypted token
-ciphertext in its configuration file. Re-entering a token is required if the
-configuration is removed or the operating-system credential store is unavailable.
+The app stores the server URL, model catalog, selected model, thinking level, and sponsored-compute
+preference locally. Its configuration contains only encrypted installation/pending records or
+custom-router ciphertext. Unsafe or unavailable OS storage blocks official enrollment and reconnect.
 
 ### Live versus mock mode
 
@@ -467,7 +465,8 @@ endpoints must use HTTPS.
 
 ### Health works, but authentication fails
 
-Health is public. Confirm that the desktop token exactly matches the backend's
+Health is public. For official service access, reconnect the installation and confirm the approval
+code in the WebUI. For a local/custom router, confirm that its token exactly matches the backend's
 `ADROUTER_API_KEY`, then restart the backend after editing `.env.local`.
 The sibling CLI can perform a credential-safe diagnostic without printing the
 token:
@@ -484,8 +483,8 @@ useful for testing the desktop protocol and sponsor presentation.
 
 ### No models appear
 
-The desktop discovers models through authenticated `GET /v1/models`. Check
-that the backend is healthy, the bearer token is valid, and the configured
+The desktop discovers models through public `GET /v1/models` and validates access separately with
+signed `/v1/profile`. Check that the backend is healthy, authentication is connected, and the configured
 provider exposes at least one model. The app may show a cached catalog while a
 temporary router check is unavailable.
 
@@ -537,17 +536,15 @@ npm run test:integration
 npm run check
 ```
 
-The optional live smoke test uses the same nested agent-turn contract as the
-desktop and makes a bounded no-tools request:
+The optional manual smoke asks an exact packaged, already-approved Agent for a redacted installation
+diagnostic. It does not accept a router credential:
 
 ```bash
-ADROUTER_API_URL=http://localhost:8787 \
-ADROUTER_API_KEY="$ADROUTER_API_KEY" \
-npm run smoke:live
+ADROUTER_AGENT_EXECUTABLE=/absolute/path/to/the/candidate npm run smoke:live
 ```
 
-Use a protected environment for the token rather than putting a credential in
-shell history. The smoke test is read-only and requires a live router token.
+Do not run this in CI. Exact hosted authentication is a manual acceptance gate because user-approved
+installation credentials never belong in workflow secrets.
 
 The packaged end-to-end suite uses a deterministic fixture router and does not
 require live provider credentials:
@@ -573,8 +570,10 @@ The main code paths are:
 
 - `src/main/index.ts` — Electron window and application initialization.
 - `src/main/ipc.ts` — validated renderer-to-main operations.
-- `src/main/configuration-store.ts` — router diagnostics and encrypted token
+- `src/main/configuration-store.ts` — versioned encrypted installation, pending, and custom-router
   storage.
+- `src/main/installation-auth.ts` and `platform-auth-crypto.ts` — enrollment, refresh, proof,
+  revocation, diagnostics, and exact-byte signing.
 - `src/main/database.ts` — SQLite persistence and interrupted-run recovery.
 - `src/main/runtime-supervisor.ts` — utility-process lifecycle, approvals, and
   event journaling.

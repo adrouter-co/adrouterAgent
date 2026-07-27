@@ -14,19 +14,26 @@ for (const workflow of workflows) {
   }
 }
 const release = readFileSync(join(workflowDirectory, 'release-tag.yml'), 'utf8');
+const retiredStagingCredential = ['ADROUTER', 'STAGING', 'API', 'KEY'].join('_');
 for (const required of [
-  'adrouter-staging',
   'macos-release',
   'attestations: write',
   'id-token: write',
   'credential-free portable release',
   'linux-x64',
   'win32-x64',
-  'https://api-staging.adrouter.co',
 ]) {
   assert.ok(release.includes(required), `release workflow is missing ${required}`);
 }
 assert.ok(!release.includes('ADROUTER_STAGING_URL'), 'staging URL must not be a secret');
+assert.ok(
+  !release.includes(retiredStagingCredential),
+  'release workflow must not use an inference credential'
+);
+assert.ok(
+  !release.includes('staging-canary'),
+  'release workflow must be authentication-credential-free'
+);
 for (const forbidden of [
   'APPLE_DEVELOPER_ID',
   'APPLE_API_KEY',
@@ -37,20 +44,66 @@ for (const forbidden of [
 }
 const promotion = readFileSync(join(workflowDirectory, 'promote-release.yml'), 'utf8');
 const packageVersion = JSON.parse(readFileSync('package.json', 'utf8')).version;
+const retiredBootstrapToken = ['NPM', 'BOOTSTRAP', 'TOKEN'].join('_');
 for (const required of [
   'npm-publish',
-  'NPM_BOOTSTRAP_TOKEN',
   'NPM_DIST_TAG_TOKEN',
+  'phase:',
+  'publish-candidate',
+  'finalize-release',
+  "if: inputs.phase == 'publish-candidate'",
+  "if: inputs.phase == 'finalize-release'",
+  'id-token: write',
   '--tag candidate',
   'dist-tag add',
   'linux-x64',
   'win32-x64',
+  '--require-acceptance',
+  'authentication acceptance',
+  'CHANNEL',
+  'expected_prerelease',
+  '--latest',
 ]) {
   assert.ok(promotion.includes(required), `promotion workflow is missing ${required}`);
 }
 assert.ok(
+  !promotion.includes(retiredBootstrapToken),
+  'promotion workflow must not retain bootstrap-token publication'
+);
+assert.equal(
+  promotion.match(/NPM_DIST_TAG_TOKEN/g)?.length,
+  2,
+  'the dist-tag token may appear only in finalization and its cleanup notice'
+);
+assert.equal(
+  promotion.match(/id-token: write/g)?.length,
+  1,
+  'OIDC permission must be scoped only to candidate publication'
+);
+assert.match(
+  promotion,
+  /finalize-release:\n[\s\S]*?needs: \[verify-finalization, final-public-smoke\]/,
+  'finalization must resume independently of candidate publication jobs'
+);
+assert.ok(
+  !/npm publish[^\n]*--tag (?:latest|beta)/.test(promotion),
+  'npm publication must use only the temporary candidate tag'
+);
+assert.ok(
   promotion.includes(`default: v${packageVersion}`),
   'promotion workflow default must match the immutable package version'
+);
+assert.ok(
+  !promotion.includes(retiredStagingCredential) && !promotion.includes('smoke:live'),
+  'promotion workflow must not use a hosted inference credential'
+);
+assert.ok(
+  promotion.includes('tags.beta !== process.env.VERSION'),
+  'stable channel policy must preserve the beta dist-tag'
+);
+assert.ok(
+  release.includes('version#*-') && promotion.includes('version#*-'),
+  'release workflows must distinguish stable versions from beta prereleases'
 );
 
 console.log(`Workflow pinning and release-policy checks passed for ${workflows.length} workflows.`);

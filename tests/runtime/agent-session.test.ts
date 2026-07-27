@@ -44,7 +44,11 @@ describe('durable agent context', () => {
         thinkingLevel: 'medium',
         runtimeMode: 'mock',
         sponsoredCompute: true,
-        router: { serverUrl: 'http://localhost:8787', token: 'fixture-token' },
+        router: {
+          authMode: 'custom_bearer',
+          serverUrl: 'http://localhost:8787',
+          token: 'fixture-token',
+        },
         input: 'Finish the task.',
         history: [],
         allowedCommands: [],

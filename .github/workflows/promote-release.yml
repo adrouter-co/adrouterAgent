@@ -6,8 +6,23 @@ on:
       tag:
         description: Immutable release tag
         required: true
-        default: v0.1.0-beta.7
+        default: v0.1.0-beta.8
         type: string
+      phase:
+        description: Explicit pausable promotion phase
+        required: true
+        type: choice
+        options:
+          - publish-candidate
+          - finalize-release
+      channel:
+        description: Distribution policy for this immutable version
+        required: true
+        default: beta
+        type: choice
+        options:
+          - beta
+          - stable
 
 permissions:
   contents: read
@@ -19,6 +34,7 @@ concurrency:
 jobs:
   publish-candidate:
     name: publish GitHub then npm candidate
+    if: inputs.phase == 'publish-candidate'
     runs-on: macos-14
     timeout-minutes: 20
     environment: npm-publish
@@ -45,9 +61,16 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           test "${{ inputs.tag }}" = "v$version"
+          if test "${{ inputs.channel }}" = "beta"; then
+            test "${version#*-}" != "$version"
+            expected_prerelease=true
+          else
+            test "${version#*-}" = "$version"
+            expected_prerelease=false
+          fi
           test "$GITHUB_REF" = "refs/tags/v$version"
           test "$(git rev-list -n 1 "${{ inputs.tag }}")" = "$(git rev-parse HEAD)"
-          test "$(gh release view "${{ inputs.tag }}" --json isPrerelease --jq .isPrerelease)" = "true"
+          test "$(gh release view "${{ inputs.tag }}" --json isPrerelease --jq .isPrerelease)" = "$expected_prerelease"
           was_draft="$(gh release view "${{ inputs.tag }}" --json isDraft --jq .isDraft)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "was_draft=$was_draft" >> "$GITHUB_OUTPUT"
@@ -58,11 +81,16 @@ jobs:
           mkdir "$RUNNER_TEMP/release"
           gh release download "${{ inputs.tag }}" --dir "$RUNNER_TEMP/release"
           node scripts/verify-release-assets.mjs "$RUNNER_TEMP/release"
-      - name: Publish GitHub prerelease before npm
+      - name: Publish GitHub release before npm
         if: steps.identity.outputs.was_draft == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "${{ inputs.tag }}" --draft=false --prerelease
+        run: |
+          if test "${{ inputs.channel }}" = "beta"; then
+            gh release edit "${{ inputs.tag }}" --draft=false --prerelease
+          else
+            gh release edit "${{ inputs.tag }}" --draft=false --latest
+          fi
       - name: Verify public ZIP is anonymously downloadable
         run: |
           version="${{ steps.identity.outputs.version }}"
@@ -74,32 +102,29 @@ jobs:
             expected="$(awk -v name="$name" '$2 == name { print $1 }' "$RUNNER_TEMP/release/SHA256SUMS")"
             test "$(shasum -a 256 "$RUNNER_TEMP/$name" | awk '{ print $1 }')" = "$expected"
           done
-      - name: Bootstrap new npm package under candidate
+      - name: Publish exact npm candidate through trusted publishing
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
           VERSION: ${{ steps.identity.outputs.version }}
         run: |
+          tarball="$RUNNER_TEMP/release/adrouter-agent-$VERSION.tgz"
+          local_integrity="sha512-$(openssl dgst -sha512 -binary "$tarball" | openssl base64 -A)"
           if published="$(npm view "@adrouter/agent@$VERSION" version 2>/dev/null)"; then
             test "$published" = "$VERSION"
+            test "$(npm view "@adrouter/agent@$VERSION" dist.integrity)" = "$local_integrity"
             test "$(npm view @adrouter/agent dist-tags.candidate)" = "$VERSION"
-          elif npm view @adrouter/agent name >/dev/null 2>&1; then
-            env -u NODE_AUTH_TOKEN npm publish "$RUNNER_TEMP/release/adrouter-agent-$VERSION.tgz" \
-              --access public \
-              --tag candidate \
-              --provenance \
-              --ignore-scripts
           else
-            test -n "$NODE_AUTH_TOKEN"
-            npm publish "$RUNNER_TEMP/release/adrouter-agent-$VERSION.tgz" \
+            npm view @adrouter/agent name >/dev/null
+            npm publish "$tarball" \
               --access public \
               --tag candidate \
               --provenance \
               --ignore-scripts
           fi
 
-  public-smoke:
+  candidate-public-smoke:
     name: anonymous public smoke (${{ matrix.architecture }})
     needs: publish-candidate
+    if: inputs.phase == 'publish-candidate'
     strategy:
       fail-fast: false
       matrix:
@@ -118,7 +143,6 @@ jobs:
             asset: win32-x64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
-    environment: adrouter-staging
     defaults:
       run:
         shell: bash
@@ -158,20 +182,120 @@ jobs:
           "$cli" doctor --json | tee "$RUNNER_TEMP/doctor.json"
           node -e "const r=require(process.env.RUNNER_TEMP + '/doctor.json'); const signature=r.platform==='darwin'?'adhoc':'unsigned-portable'; if (r.schema!==3 || !r.installed || !r.receiptMatches || !r.bundleIntegrity || r.signatureType!==signature) process.exit(1)"
           "$cli" launch
-      - run: npm ci
-      - name: Run staging-router terminal stream smoke
-        env:
-          ADROUTER_API_URL: https://api-staging.adrouter.co
-          ADROUTER_API_KEY: ${{ secrets.ADROUTER_STAGING_API_KEY }}
-        run: npm run smoke:live
 
-  finalize:
-    name: promote beta and latest
-    needs: [publish-candidate, public-smoke]
+  verify-finalization:
+    name: verify public candidate and acceptance
+    if: inputs.phase == 'finalize-release'
+    runs-on: macos-14
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 25.9.0
+      - id: identity
+        name: Verify exact public candidate identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          test "${{ inputs.tag }}" = "v$version"
+          if test "${{ inputs.channel }}" = "beta"; then
+            test "${version#*-}" != "$version"
+            expected_prerelease=true
+          else
+            test "${version#*-}" = "$version"
+            expected_prerelease=false
+          fi
+          test "$GITHUB_REF" = "refs/tags/v$version"
+          test "$(git rev-list -n 1 "${{ inputs.tag }}")" = "$(git rev-parse HEAD)"
+          test "$(gh release view "${{ inputs.tag }}" --json isDraft --jq .isDraft)" = false
+          test "$(gh release view "${{ inputs.tag }}" --json isPrerelease --jq .isPrerelease)" = "$expected_prerelease"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Require exact immutable assets and sanitized authentication acceptance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.identity.outputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          mkdir "$RUNNER_TEMP/release"
+          gh release download "${{ inputs.tag }}" --dir "$RUNNER_TEMP/release"
+          node scripts/verify-release-assets.mjs "$RUNNER_TEMP/release" --require-acceptance
+          tarball="$RUNNER_TEMP/release/adrouter-agent-$VERSION.tgz"
+          local_integrity="sha512-$(openssl dgst -sha512 -binary "$tarball" | openssl base64 -A)"
+          test "$(npm view "@adrouter/agent@$VERSION" version)" = "$VERSION"
+          test "$(npm view "@adrouter/agent@$VERSION" dist.integrity)" = "$local_integrity"
+          tags_json="$(npm view @adrouter/agent dist-tags --json)"
+          TAGS_JSON="$tags_json" VERSION="$VERSION" node -e '
+            const tags = JSON.parse(process.env.TAGS_JSON);
+            const alreadyFinal = process.env.CHANNEL === "beta"
+              ? tags.beta === process.env.VERSION && tags.latest === process.env.VERSION && !Object.hasOwn(tags, "candidate")
+              : tags.latest === process.env.VERSION && tags.beta !== process.env.VERSION && !Object.hasOwn(tags, "candidate");
+            process.exit(tags.candidate === process.env.VERSION || alreadyFinal ? 0 : 1);
+          '
+  final-public-smoke:
+    name: final anonymous public smoke (${{ matrix.architecture }})
+    needs: verify-finalization
+    if: inputs.phase == 'finalize-release'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: arm64
+            runner: macos-15
+          - architecture: x64
+            runner: macos-15-intel
+          - architecture: x64
+            runner: ubuntu-24.04
+          - architecture: x64
+            runner: windows-2025
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 25.9.0
+      - name: Reinstall exact public candidate anonymously
+        run: |
+          : > "$RUNNER_TEMP/empty.npmrc"
+          npm install --global "@adrouter/agent@${{ needs.verify-finalization.outputs.version }}" \
+            --prefix "$RUNNER_TEMP/npm-prefix" \
+            --userconfig "$RUNNER_TEMP/empty.npmrc" \
+            --ignore-scripts
+          if test "$RUNNER_OS" = "Windows"; then
+            export PATH="$RUNNER_TEMP/npm-prefix:$PATH"
+            cli=adrouter-agent.cmd
+          else
+            export PATH="$RUNNER_TEMP/npm-prefix/bin:$PATH"
+            cli=adrouter-agent
+          fi
+          test "$("$cli" --version | tr -d '\r')" = "${{ needs.verify-finalization.outputs.version }}"
+          "$cli" install
+          "$cli" doctor --json | tee "$RUNNER_TEMP/doctor.json"
+          node -e "const r=require(process.env.RUNNER_TEMP + '/doctor.json'); const signature=r.platform==='darwin'?'adhoc':'unsigned-portable'; if (r.schema!==3 || !r.installed || !r.receiptMatches || !r.bundleIntegrity || r.signatureType!==signature) process.exit(1)"
+          "$cli" launch
+
+  finalize-release:
+    name: validate acceptance and promote channels
+    needs: [verify-finalization, final-public-smoke]
+    if: inputs.phase == 'finalize-release'
     runs-on: macos-14
     timeout-minutes: 10
     environment: npm-publish
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 25.9.0
@@ -179,12 +303,30 @@ jobs:
       - name: Move public distribution tags and verify registry integrity
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_DIST_TAG_TOKEN }}
-          VERSION: ${{ needs.publish-candidate.outputs.version }}
+          VERSION: ${{ needs.verify-finalization.outputs.version }}
+          CHANNEL: ${{ inputs.channel }}
         run: |
-          test -n "$NODE_AUTH_TOKEN"
           test "$(npm view "@adrouter/agent@$VERSION" version)" = "$VERSION"
-          npm dist-tag add "@adrouter/agent@$VERSION" beta
-          npm dist-tag add "@adrouter/agent@$VERSION" latest
+          tags_json="$(npm view @adrouter/agent dist-tags --json)"
+          if TAGS_JSON="$tags_json" VERSION="$VERSION" node -e '
+            const tags = JSON.parse(process.env.TAGS_JSON);
+            const expected = process.env.CHANNEL === "beta"
+              ? tags.beta === process.env.VERSION && tags.latest === process.env.VERSION
+              : tags.latest === process.env.VERSION && tags.beta !== process.env.VERSION;
+            process.exit(expected && !Object.hasOwn(tags, "candidate") ? 0 : 1);
+          '; then
+            exit 0
+          fi
+          test -n "$NODE_AUTH_TOKEN"
+          test "$(npm view @adrouter/agent dist-tags.candidate)" = "$VERSION"
+          if test "$CHANNEL" = "beta"; then
+            test "${VERSION#*-}" != "$VERSION"
+            npm dist-tag add "@adrouter/agent@$VERSION" beta
+            npm dist-tag add "@adrouter/agent@$VERSION" latest
+          else
+            test "${VERSION#*-}" = "$VERSION"
+            npm dist-tag add "@adrouter/agent@$VERSION" latest
+          fi
           candidate="$(npm view @adrouter/agent dist-tags.candidate)"
           if test "$candidate" = "$VERSION"; then
             npm dist-tag rm @adrouter/agent candidate
@@ -195,8 +337,10 @@ jobs:
             tags_json="$(npm view @adrouter/agent dist-tags --json)"
             if TAGS_JSON="$tags_json" VERSION="$VERSION" node -e '
               const tags = JSON.parse(process.env.TAGS_JSON);
-              process.exit(tags.beta === process.env.VERSION &&
-                tags.latest === process.env.VERSION &&
+              const expected = process.env.CHANNEL === "beta"
+                ? tags.beta === process.env.VERSION && tags.latest === process.env.VERSION
+                : tags.latest === process.env.VERSION && tags.beta !== process.env.VERSION;
+              process.exit(expected &&
                 !Object.hasOwn(tags, "candidate") ? 0 : 1);
             '; then
               break
@@ -205,7 +349,6 @@ jobs:
             sleep 5
           done
           npm view "@adrouter/agent@$VERSION" dist.integrity repository --json
-      - name: Require post-bootstrap credential migration
+      - name: Remind operator to revoke temporary dist-tag access
         run: |
-          echo "::notice::Configure npm trusted publishing for adrouter/adrouterAgent, promote-release.yml, environment npm-publish."
-          echo "::notice::After this release, delete NPM_BOOTSTRAP_TOKEN and revoke the bootstrap token. OIDC covers npm publish; future dist-tag changes still require a fresh short-lived NPM_DIST_TAG_TOKEN."
+          echo "::notice::Delete NPM_DIST_TAG_TOKEN from npm-publish and revoke the short-lived granular npm token after verification."

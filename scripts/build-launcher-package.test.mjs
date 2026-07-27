@@ -30,6 +30,11 @@ test('embeds all exact platform ZIP digests in the generated npm package', () =>
     assert.equal(result.manifest.schema, 3);
     assert.equal(result.manifest.distributionMode, 'credential-free-portable');
     assert.equal(result.manifest.bundleIdentifier, 'com.adrouter.agent');
+    assert.deepEqual(result.manifest.authentication, {
+      fixture: 'tests/fixtures/platform-auth-v1.json',
+      fixtureSha256: '93a8ec8d4eba38f9165179aa0cdfe3316f8134a882bd0426bd83339af55d17f8',
+      acceptanceAsset: 'authentication-acceptance.json',
+    });
     assert.equal(
       result.manifest.artifacts[0].assetUrl,
       `https://github.com/adrouter/adrouterAgent/releases/download/v${version}/` +

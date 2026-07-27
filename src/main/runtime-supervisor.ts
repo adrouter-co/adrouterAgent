@@ -1,4 +1,5 @@
 import { type UtilityProcess, utilityProcess } from 'electron';
+import { INSTALLATION_AUTH_PROTOCOL_VERSION, MAX_SIGNED_REQUEST_BYTES } from '../shared/constants';
 import {
   type ApprovalDecision,
   ApprovalSchema,
@@ -8,13 +9,16 @@ import {
   type TurnStatus,
 } from '../shared/contracts';
 import {
+  type RuntimeAuthRequest,
   type RuntimeEvent,
   type RuntimePortMessage,
   RuntimePortMessageSchema,
   type RuntimeRequest,
 } from '../shared/runtime-protocol';
 import { now, safeRecord } from '../shared/security';
+import type { RuntimeRouterConfiguration } from './configuration-store';
 import type { AppDatabase } from './database';
+import type { InstallationAuthManager } from './installation-auth';
 
 const terminalStatuses = new Set<TurnStatus>(['completed', 'failed', 'cancelled', 'interrupted']);
 
@@ -25,6 +29,8 @@ interface ActiveRuntime {
   closing: boolean;
   ready: Promise<void>;
   markReady: () => void;
+  authMode: RuntimeRouterConfiguration['authMode'];
+  authControllers: Map<string, AbortController>;
 }
 
 export interface StartRuntimeInput {
@@ -48,17 +54,15 @@ export class RuntimeSupervisor {
   public constructor(
     private readonly database: AppDatabase,
     private readonly runtimePath: string,
-    private readonly emitJournalEvent: (event: JournalEvent) => void
+    private readonly emitJournalEvent: (event: JournalEvent) => void,
+    private readonly installationAuth?: InstallationAuthManager
   ) {}
 
   public get activeThreadId(): string | undefined {
     return this.active?.threadId;
   }
 
-  public async start(
-    input: StartRuntimeInput,
-    router: { serverUrl: string; token: string; sponsoredCompute: boolean }
-  ): Promise<void> {
+  public async start(input: StartRuntimeInput, router: RuntimeRouterConfiguration): Promise<void> {
     if (this.active) {
       throw new Error('Another AdRouter Agent task is already running.');
     }
@@ -86,6 +90,8 @@ export class RuntimeSupervisor {
       closing: false,
       ready,
       markReady,
+      authMode: router.authMode,
+      authControllers: new Map(),
     };
     this.active = active;
 
@@ -128,7 +134,14 @@ export class RuntimeSupervisor {
         thinkingLevel: input.thinkingLevel,
         runtimeMode: input.runtimeMode,
         sponsoredCompute: router.sponsoredCompute,
-        router: { serverUrl: router.serverUrl, token: router.token },
+        router:
+          router.authMode === 'installation'
+            ? { authMode: 'installation', serverUrl: router.serverUrl }
+            : {
+                authMode: 'custom_bearer',
+                serverUrl: router.serverUrl,
+                token: router.token,
+              },
         input: input.input,
         history: input.history,
         allowedCommands: [],
@@ -198,10 +211,84 @@ export class RuntimeSupervisor {
       active.markReady();
       return;
     }
+    if (message.kind === 'auth-request') {
+      await this.handleAuthRequest(active, message);
+      return;
+    }
+    if (message.kind === 'auth-cancel') {
+      active.authControllers.get(message.requestId)?.abort();
+      active.authControllers.delete(message.requestId);
+      return;
+    }
     if (message.kind !== 'event') {
       return;
     }
     await this.handleRuntimeEvent(active, message.event);
+  }
+
+  private async handleAuthRequest(
+    active: ActiveRuntime,
+    request: RuntimeAuthRequest
+  ): Promise<void> {
+    if (
+      this.active !== active ||
+      active.closing ||
+      active.authMode !== 'installation' ||
+      !this.installationAuth
+    ) {
+      this.sendAuthFailure(active, request.requestId, 'Installation signing is unavailable.');
+      return;
+    }
+    const body =
+      request.bodyBase64 === undefined ? undefined : Buffer.from(request.bodyBase64, 'base64');
+    if (
+      (body?.byteLength ?? 0) > MAX_SIGNED_REQUEST_BYTES ||
+      (body !== undefined && body.toString('base64') !== request.bodyBase64)
+    ) {
+      this.sendAuthFailure(active, request.requestId, 'The signing request body is invalid.');
+      return;
+    }
+    const controller = new AbortController();
+    active.authControllers.set(request.requestId, controller);
+    try {
+      const headers = await this.installationAuth.authorize({
+        method: request.method,
+        path: request.path,
+        body,
+        nonce: request.nonce,
+        signal: controller.signal,
+      });
+      if (this.active === active && !active.closing && !controller.signal.aborted) {
+        active.child.postMessage({
+          kind: 'auth-response',
+          protocolVersion: INSTALLATION_AUTH_PROTOCOL_VERSION,
+          requestId: request.requestId,
+          ok: true,
+          headers,
+        } satisfies RuntimePortMessage);
+      }
+    } catch {
+      if (!controller.signal.aborted) {
+        this.sendAuthFailure(
+          active,
+          request.requestId,
+          'The protected router request was not authorized.'
+        );
+      }
+    } finally {
+      active.authControllers.delete(request.requestId);
+    }
+  }
+
+  private sendAuthFailure(active: ActiveRuntime, requestId: string, error: string): void {
+    if (this.active !== active || active.closing) return;
+    active.child.postMessage({
+      kind: 'auth-response',
+      protocolVersion: INSTALLATION_AUTH_PROTOCOL_VERSION,
+      requestId,
+      ok: false,
+      error,
+    } satisfies RuntimePortMessage);
   }
 
   private async handleRuntimeEvent(
@@ -298,6 +385,8 @@ export class RuntimeSupervisor {
     );
     this.emitJournalEvent(evidence);
     active.closing = true;
+    for (const controller of active.authControllers.values()) controller.abort();
+    active.authControllers.clear();
     active.child.kill();
     this.active = undefined;
   }

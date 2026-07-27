@@ -39,30 +39,9 @@ jobs:
       - run: npm run check:launcher-package
       - run: npm run test:e2e
 
-  canary:
-    name: protected live AdRouter canary
-    needs: validate
-    runs-on: macos-14
-    timeout-minutes: 15
-    environment: adrouter-staging
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 25.9.0
-          cache: npm
-      - run: npm ci
-      - name: Verify authentication, model discovery, and terminal stream
-        env:
-          ADROUTER_API_URL: https://api-staging.adrouter.co
-          ADROUTER_API_KEY: ${{ secrets.ADROUTER_STAGING_API_KEY }}
-        run: npm run test:staging-canary
-
   package:
     name: build ${{ matrix.key }} portable artifact
-    needs: [validate, canary]
+    needs: validate
     strategy:
       fail-fast: true
       matrix:
@@ -139,7 +118,7 @@ jobs:
           path: out/release/*
           if-no-files-found: error
           retention-days: 14
-      - name: Create immutable draft prerelease
+      - name: Create immutable draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -147,10 +126,13 @@ jobs:
             echo "Release $GITHUB_REF_NAME already exists; refusing to replace assets." >&2
             exit 1
           fi
-          gh release create "$GITHUB_REF_NAME" out/release/* \
-            --verify-tag \
-            --target "$GITHUB_SHA" \
-            --draft \
-            --prerelease \
-            --title "AdRouter Agent $GITHUB_REF_NAME public beta" \
-            --notes-file CHANGELOG.md
+          version="$(node -p "require('./package.json').version")"
+          if test "${version#*-}" = "$version"; then
+            gh release create "$GITHUB_REF_NAME" out/release/* \
+              --verify-tag --target "$GITHUB_SHA" --draft \
+              --title "AdRouter Agent $GITHUB_REF_NAME" --notes-file CHANGELOG.md
+          else
+            gh release create "$GITHUB_REF_NAME" out/release/* \
+              --verify-tag --target "$GITHUB_SHA" --draft --prerelease \
+              --title "AdRouter Agent $GITHUB_REF_NAME public beta" --notes-file CHANGELOG.md
+          fi

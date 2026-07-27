@@ -7,7 +7,8 @@ should manually install the latest release before reporting a problem.
 
 | Version | Supported |
 | --- | --- |
-| 0.1.0-beta.7 | Yes |
+| 0.1.0-beta.8 | Yes |
+| 0.1.0-beta.7 | No |
 | 0.1.0-beta.6 | No |
 | 0.1.0-beta.5 | No |
 | 0.1.0-beta.4 | No |
@@ -38,3 +39,13 @@ checks the exact target ZIP digest, rejects unsafe archive layouts and escaping
 symlinks, and applies target-specific executable/signature checks. Linux and
 Windows portable beta artifacts are unsigned; checksums prove artifact
 integrity, not publisher identity.
+
+Official hosted authentication uses a user-approved Ed25519 installation. The main process is the
+only process that generates, decrypts, rotates, signs with, or revokes installation material.
+`safeStorage` must use Keychain, DPAPI, or a supported Linux secret store; enrollment and reconnect
+fail closed when that protection is unavailable. The renderer receives only the comparison code and
+redacted state. The utility process receives only request-scoped protected headers for allowlisted
+exact bytes and cannot request arbitrary signatures.
+
+Loopback and explicit non-official custom routers may use the advanced bearer path. A bearer token
+cannot override installation authentication for an official AdRouter origin.

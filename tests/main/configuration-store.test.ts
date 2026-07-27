@@ -50,7 +50,33 @@ describe('ConfigurationStore', () => {
     ).resolves.toMatchObject({ selectedModel: 'model-flash', selectedThinkingLevel: 'high' });
 
     const persisted = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
-    expect(persisted).toMatchObject({ version: 3, encryptedToken: 'preserve-ciphertext' });
+    expect(persisted).toMatchObject({ version: 4, encryptedToken: 'preserve-ciphertext' });
+  });
+
+  it('migrates a previously signed-out configuration without treating it as corrupted', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'adrouter-config-'));
+    directories.push(directory);
+    const path = join(directory, 'configuration.json');
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 3,
+        serverUrl: 'https://api-staging.adrouter.co',
+        sponsoredCompute: true,
+        encryptedToken: null,
+        models: [],
+        selectedModel: null,
+        selectedThinkingLevel: 'medium',
+        lastCheckedAt: null,
+      })
+    );
+
+    const store = new ConfigurationStore(path);
+    await expect(store.get()).resolves.toMatchObject({
+      configured: false,
+      tokenStored: false,
+      authentication: { mode: 'unconfigured', state: 'none' },
+    });
   });
 
   it('signs out locally while preserving non-secret settings and cached preferences', async () => {
@@ -82,7 +108,7 @@ describe('ConfigurationStore', () => {
     );
 
     const store = new ConfigurationStore(path);
-    await expect(store.signOut()).resolves.toMatchObject({
+    await expect(store.signOutLocal()).resolves.toMatchObject({
       serverUrl: 'https://router.example',
       sponsoredCompute: false,
       tokenStored: false,
@@ -96,7 +122,7 @@ describe('ConfigurationStore', () => {
 
     const persisted = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
     expect(persisted).toMatchObject({
-      version: 3,
+      version: 4,
       serverUrl: 'https://router.example',
       sponsoredCompute: false,
       encryptedToken: null,

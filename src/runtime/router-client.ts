@@ -1,6 +1,7 @@
 import type { Context, Tool } from '@earendil-works/pi-ai';
 import { z } from 'zod';
 import type {
+  InstallationDiagnostics,
   RouterDiagnostics,
   RouterModelDescriptor,
   RuntimeMode,
@@ -57,7 +58,8 @@ const modelDescriptor = (
 export class RouterHttpError extends Error {
   public constructor(
     public readonly status: number,
-    message: string
+    message: string,
+    public readonly minimumClientVersion: string | null = null
   ) {
     super(message);
     this.name = 'RouterHttpError';
@@ -66,8 +68,27 @@ export class RouterHttpError extends Error {
 
 export interface RouterClientOptions {
   serverUrl: string;
-  token: string;
+  authentication:
+    | { mode: 'custom_bearer'; token: string }
+    | {
+        mode: 'installation';
+        authorize: (request: ProtectedRouterRequest) => Promise<ProtectedRouterHeaders>;
+      };
   fetchFn?: typeof fetch;
+}
+
+export interface ProtectedRouterHeaders {
+  Authorization: string;
+  DPoP: string;
+  'Content-Digest'?: string;
+}
+
+export interface ProtectedRouterRequest {
+  method: 'GET' | 'POST';
+  path: '/v1/profile' | '/v1/agent/turn';
+  body?: Uint8Array;
+  nonce?: string;
+  signal?: AbortSignal;
 }
 
 export interface RouterTurnInput {
@@ -83,6 +104,16 @@ export interface RouterTurnInput {
 }
 
 const normalizeServerUrl = (input: string): string => input.replace(/\/+$/, '');
+
+const minimumClientVersion = (response: Response): string | null => {
+  const value = response.headers.get('AdRouter-Minimum-Version');
+  if (!value || value.length > 100) return null;
+  return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(
+    value
+  )
+    ? value
+    : null;
+};
 
 const getMessageText = (context: Context): unknown[] =>
   context.messages.map((message) => {
@@ -113,9 +144,91 @@ export class AdRouterClient {
     this.serverUrl = normalizeServerUrl(options.serverUrl);
   }
 
+  private authenticationDiagnostics(
+    authenticated: boolean,
+    requiredVersion: string | null = null
+  ): InstallationDiagnostics {
+    const installation = this.options.authentication.mode === 'installation';
+    return {
+      mode: installation ? 'installation' : 'custom_bearer',
+      state: authenticated && installation ? 'connected' : 'none',
+      originClass: installation ? 'official' : 'custom',
+      storageClassification: installation ? 'os_encrypted' : null,
+      signedRequestSupport: installation,
+      refreshHealthy: authenticated && installation,
+      pendingEnrollment: false,
+      reconnectRequired: installation && !authenticated,
+      installationIdSuffix: null,
+      scopes: installation ? ['agent:turn', 'profile:read'] : [],
+      familyExpiresAt: null,
+      minimumClientVersion: requiredVersion,
+      policyMode: null,
+    };
+  }
+
+  private async protectedFetch(
+    path: ProtectedRouterRequest['path'],
+    method: ProtectedRouterRequest['method'],
+    body: Uint8Array | undefined,
+    headers: Record<string, string>,
+    signal?: AbortSignal
+  ): Promise<Response> {
+    if ((method === 'POST' && !body) || (method === 'GET' && body)) {
+      throw new Error('The protected router request has an invalid body binding.');
+    }
+    const authentication = this.options.authentication;
+    let authorizationHeaders: ProtectedRouterHeaders | { Authorization: string };
+    if (authentication.mode === 'custom_bearer') {
+      authorizationHeaders = { Authorization: `Bearer ${authentication.token}` };
+    } else {
+      const protectedHeaders = await authentication.authorize({ method, path, body, signal });
+      if (
+        (method === 'GET' && protectedHeaders['Content-Digest'] !== undefined) ||
+        (method === 'POST' && protectedHeaders['Content-Digest'] === undefined)
+      ) {
+        throw new Error('The installation signer returned an invalid body binding.');
+      }
+      authorizationHeaders = protectedHeaders;
+    }
+    const request = (
+      protectedHeaders: ProtectedRouterHeaders | { Authorization: string }
+    ): Promise<Response> =>
+      this.fetchFn(`${this.serverUrl}${path}`, {
+        method,
+        headers: { ...headers, ...protectedHeaders },
+        ...(body ? { body: Buffer.from(body) } : {}),
+        redirect: 'manual',
+        signal,
+      });
+    let response = await request(authorizationHeaders);
+    if (response.status >= 300 && response.status < 400) {
+      throw new RouterHttpError(response.status, 'Authenticated router redirects are not allowed.');
+    }
+    const nonce = response.headers.get('DPoP-Nonce');
+    if (nonce && (nonce.length > 1_024 || /[^\x21-\x7E]/.test(nonce))) {
+      throw new RouterHttpError(401, 'AdRouter returned an invalid proof nonce.');
+    }
+    if (authentication.mode === 'installation' && response.status === 401 && nonce) {
+      const retryHeaders = await authentication.authorize({ method, path, body, nonce, signal });
+      if (
+        (method === 'GET' && retryHeaders['Content-Digest'] !== undefined) ||
+        (method === 'POST' && retryHeaders['Content-Digest'] === undefined)
+      ) {
+        throw new Error('The installation signer returned an invalid body binding.');
+      }
+      response = await request(retryHeaders);
+      if (response.status >= 300 && response.status < 400) {
+        throw new RouterHttpError(
+          response.status,
+          'Authenticated router redirects are not allowed.'
+        );
+      }
+    }
+    return response;
+  }
+
   public async diagnostics(signal?: AbortSignal): Promise<RouterDiagnostics> {
     const checkedAt = new Date().toISOString();
-    const headers = { Authorization: `Bearer ${this.options.token}` };
     let health: Response;
     try {
       health = await this.fetchFn(`${this.serverUrl}/health`, { signal });
@@ -128,6 +241,7 @@ export class AdRouterClient {
         modelsStale: false,
         checkedAt,
         error: error instanceof Error ? error.message : 'AdRouter is unreachable.',
+        authentication: this.authenticationDiagnostics(false),
       };
     }
     if (!health.ok) {
@@ -139,13 +253,17 @@ export class AdRouterClient {
         modelsStale: false,
         checkedAt,
         error: `AdRouter health check failed (${health.status}).`,
+        authentication: this.authenticationDiagnostics(false),
       };
     }
     const healthPayload = HealthSchema.parse(await health.json());
 
     let models: RouterModelDescriptor[] = [];
     try {
-      const modelsResponse = await this.fetchFn(`${this.serverUrl}/v1/models`, { headers, signal });
+      const modelsResponse = await this.fetchFn(`${this.serverUrl}/v1/models`, {
+        redirect: 'manual',
+        signal,
+      });
       if (modelsResponse.ok) {
         const modelsPayload = ModelsSchema.parse(await modelsResponse.json());
         const rawModels = Array.isArray(modelsPayload) ? modelsPayload : modelsPayload.models;
@@ -156,7 +274,7 @@ export class AdRouterClient {
     }
 
     try {
-      const profile = await this.fetchFn(`${this.serverUrl}/v1/profile`, { headers, signal });
+      const profile = await this.protectedFetch('/v1/profile', 'GET', undefined, {}, signal);
       if (!profile.ok) {
         return {
           health: true,
@@ -166,6 +284,10 @@ export class AdRouterClient {
           modelsStale: false,
           checkedAt,
           error: `AdRouter authentication failed (${profile.status}).`,
+          authentication: this.authenticationDiagnostics(
+            false,
+            profile.status === 426 ? minimumClientVersion(profile) : null
+          ),
         };
       }
       ProfileSchema.parse(await profile.json());
@@ -178,6 +300,7 @@ export class AdRouterClient {
         modelsStale: false,
         checkedAt,
         error: error instanceof Error ? error.message : 'AdRouter authentication failed.',
+        authentication: this.authenticationDiagnostics(false),
       };
     }
 
@@ -189,6 +312,7 @@ export class AdRouterClient {
       modelsStale: false,
       checkedAt,
       error: models.length > 0 ? null : 'AdRouter returned no models.',
+      authentication: this.authenticationDiagnostics(true),
     };
   }
 
@@ -216,29 +340,32 @@ export class AdRouterClient {
       throw new Error('Sponsor data was rejected before reaching the router model context.');
     }
 
+    const requestBytes = Buffer.from(JSON.stringify(requestBody), 'utf8');
     let response: Response | undefined;
     let lastError: unknown;
     for (let attempt = 0; attempt <= 2; attempt += 1) {
       try {
-        response = await this.fetchFn(`${this.serverUrl}/v1/agent/turn`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${this.options.token}`,
+        response = await this.protectedFetch(
+          '/v1/agent/turn',
+          'POST',
+          requestBytes,
+          {
             'Content-Type': 'application/json',
             Accept: 'application/x-ndjson, application/json',
           },
-          body: JSON.stringify(requestBody),
-          signal,
-        });
+          signal
+        );
         if (response.ok) {
           break;
         }
         const retryable = response.status === 409 || response.status === 502;
-        const message = await response.text();
         if (!retryable || attempt === 2) {
           throw new RouterHttpError(
             response.status,
-            message || `AdRouter returned ${response.status}.`
+            response.status === 426
+              ? 'This AdRouter Agent version must be upgraded before reconnecting.'
+              : `AdRouter returned ${response.status}.`,
+            response.status === 426 ? minimumClientVersion(response) : null
           );
         }
         input.onRetry?.(attempt + 1, `AdRouter returned ${response.status}.`);

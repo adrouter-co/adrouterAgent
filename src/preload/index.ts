@@ -3,6 +3,8 @@ import { z } from 'zod';
 import {
   type AdrouterApi,
   ApprovalResolveInputSchema,
+  EnrollmentStartInputSchema,
+  EnrollmentStatusSchema,
   EventSchema,
   EventsSubscribeInputSchema,
   EventsUnsubscribeInputSchema,
@@ -64,7 +66,20 @@ const api: AdrouterApi = {
         await invoke('configuration.testRouter', RouterTestInputSchema.parse(input))
       ),
     status: async () => RouterDiagnosticsSchema.parse(await invoke('configuration.status', {})),
-    signOut: async () => RouterConfigurationSchema.parse(await invoke('configuration.signOut', {})),
+    signOut: async () =>
+      IpcSchemas['configuration.signOut'].output.parse(await invoke('configuration.signOut', {})),
+    startEnrollment: async (input) =>
+      EnrollmentStatusSchema.parse(
+        await invoke('configuration.startEnrollment', EnrollmentStartInputSchema.parse(input))
+      ),
+    enrollmentStatus: async () =>
+      EnrollmentStatusSchema.parse(await invoke('configuration.enrollmentStatus', {})),
+    cancelEnrollment: async () =>
+      EnrollmentStatusSchema.parse(await invoke('configuration.cancelEnrollment', {})),
+    openEnrollment: async () =>
+      IpcSchemas['configuration.openEnrollment'].output.parse(
+        await invoke('configuration.openEnrollment', {})
+      ),
     updatePreferences: async (input) =>
       RouterConfigurationSchema.parse(
         await invoke('configuration.updatePreferences', RouterPreferencesInputSchema.parse(input))

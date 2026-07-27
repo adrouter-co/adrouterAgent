@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://adrouter.co/schemas/authentication-acceptance-v1.json",
+  "title": "AdRouter exact-client authentication acceptance",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "clientKind",
+    "repository",
+    "package",
+    "candidateVersion",
+    "releaseTag",
+    "sourceCommit",
+    "artifacts",
+    "cohorts",
+    "redactionAttestation"
+  ],
+  "properties": {
+    "schema": { "const": 1 },
+    "clientKind": { "const": "desktop" },
+    "repository": { "const": "adrouter/adrouterAgent" },
+    "package": { "const": "@adrouter/agent" },
+    "candidateVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-beta\\.[0-9]+)?$"
+    },
+    "releaseTag": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+(-beta\\.[0-9]+)?$" },
+    "sourceCommit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "artifacts": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "sha256"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 240 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "cohorts": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environmentClass",
+          "os",
+          "architecture",
+          "runtimeVersion",
+          "storageClassification",
+          "testedAt",
+          "recorder",
+          "results"
+        ],
+        "properties": {
+          "environmentClass": { "enum": ["primary-operator", "second-os"] },
+          "os": { "enum": ["macos", "ubuntu", "windows"] },
+          "architecture": { "enum": ["arm64", "x64"] },
+          "runtimeVersion": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "storageClassification": { "const": "os_encrypted" },
+          "testedAt": { "type": "string", "format": "date-time" },
+          "recorder": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "results": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "enrollment",
+              "profile",
+              "turn",
+              "streamCompletion",
+              "tokenRotation",
+              "replayRejected",
+              "tamperRejected",
+              "tokenWithoutKeyRejected",
+              "revocation",
+              "upgradePolicy",
+              "localSecretCleanup"
+            ],
+            "properties": {
+              "enrollment": { "const": true },
+              "profile": { "const": true },
+              "turn": { "const": true },
+              "streamCompletion": { "const": true },
+              "tokenRotation": { "const": true },
+              "replayRejected": { "const": true },
+              "tamperRejected": { "const": true },
+              "tokenWithoutKeyRejected": { "const": true },
+              "revocation": { "const": true },
+              "upgradePolicy": { "const": true },
+              "localSecretCleanup": { "const": true }
+            }
+          }
+        }
+      }
+    },
+    "redactionAttestation": { "const": true }
+  }
+}

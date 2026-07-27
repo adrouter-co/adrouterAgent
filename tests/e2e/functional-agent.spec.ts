@@ -137,8 +137,9 @@ test.describe('packaged functional agent', () => {
     try {
       const page = await app.firstWindow();
       await page.getByLabel('AdRouter server URL').fill(`http://127.0.0.1:${address.port}`);
-      await page.getByLabel('Access token').fill('fixture-token');
-      await page.getByRole('button', { name: 'Save securely' }).click();
+      await page.getByText('Advanced: connect a custom or local router').click();
+      await page.getByLabel('Custom router access token').fill('fixture-token');
+      await page.getByRole('button', { name: 'Save custom router' }).click();
       await expect(page.getByRole('button', { name: 'Choose folder' })).toBeVisible();
       await page.getByRole('button', { name: 'Choose folder' }).click();
       await expect(page.getByLabel('Current project')).toHaveValue(/.+/);
@@ -184,13 +185,13 @@ test.describe('packaged functional agent', () => {
       await expect(page.getByRole('button', { name: 'Send' })).toBeVisible({ timeout: 15_000 });
       await page.getByRole('button', { name: 'Settings' }).click();
       await page.getByRole('button', { name: 'Sign out' }).click();
-      await expect(page.getByRole('dialog')).toContainText('does not revoke the key');
-      await page.getByRole('button', { name: 'Sign out locally' }).click();
+      await expect(page.getByRole('dialog')).toContainText('try to revoke this installation');
+      await page.getByRole('button', { name: 'Sign out and remove' }).click();
       await expect(page.getByRole('heading', { name: 'Connect AdRouter' })).toBeVisible();
       await expect(page.getByLabel('AdRouter server URL')).toHaveValue(
         `http://127.0.0.1:${address.port}`
       );
-      await expect(page.getByLabel('Access token')).toHaveValue('');
+      await expect(page.getByLabel('Custom router access token')).toHaveValue('');
     } finally {
       await app.close();
       server.closeAllConnections();

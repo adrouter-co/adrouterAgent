@@ -462,6 +462,14 @@ export async function inspectInstallation(manifest, options = {}) {
     signatureType: 'missing',
     gatekeeperAssessment: platform === 'darwin' ? 'unavailable' : 'not-applicable',
     sandbox: sandboxReport(platform, options.sandbox),
+    authenticationInspection: 'application-only',
+    authenticationState: 'unknown',
+    storageClassification: 'unknown',
+    signedRequestSupport: false,
+    refreshHealth: 'unknown',
+    pendingEnrollment: 'unknown',
+    originClass: 'unknown',
+    reconnectNeed: 'unknown',
     warning: platform === 'darwin' ? MAC_WARNING : PORTABLE_WARNING,
   };
   try {
@@ -487,6 +495,7 @@ export async function inspectInstallation(manifest, options = {}) {
   try {
     await verifyApp(paths.appPath, manifest, artifact, options.executeImpl);
     report.bundleIntegrity = true;
+    report.signedRequestSupport = true;
     report.signatureType = platform === 'darwin' ? 'adhoc' : 'unsigned-portable';
   } catch (error) {
     report.signatureType = 'invalid';

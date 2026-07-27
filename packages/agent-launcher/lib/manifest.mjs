@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
-const VERSION_PATTERN = /^\d+\.\d+\.\d+-beta\.\d+$/;
+const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-beta\.\d+)?$/;
 const ARTIFACTS = Object.freeze({
   'darwin-universal': {
     platform: 'darwin',
@@ -67,7 +67,7 @@ export function validateManifest(value) {
     throw new Error('The embedded release distribution mode is not supported.');
   }
   if (!VERSION_PATTERN.test(value.releaseVersion)) {
-    throw new Error('The embedded release version is not a beta SemVer.');
+    throw new Error('The embedded release version is not a supported SemVer.');
   }
   if (value.releaseTag !== `v${value.releaseVersion}`) {
     throw new Error('The embedded release tag does not match the version.');
@@ -83,6 +83,14 @@ export function validateManifest(value) {
   }
   if (!/^\d+(?:\.\d+){0,2}$/.test(value.bundleVersion)) {
     throw new Error('The embedded numeric bundle version is invalid.');
+  }
+  if (
+    value.authentication?.fixture !== 'tests/fixtures/platform-auth-v1.json' ||
+    value.authentication?.fixtureSha256 !==
+      '93a8ec8d4eba38f9165179aa0cdfe3316f8134a882bd0426bd83339af55d17f8' ||
+    value.authentication?.acceptanceAsset !== 'authentication-acceptance.json'
+  ) {
+    throw new Error('The embedded platform authentication metadata is not canonical.');
   }
   if (!Array.isArray(value.artifacts) || value.artifacts.length !== 3) {
     throw new Error('The embedded release manifest must contain exactly three artifacts.');
@@ -134,6 +142,7 @@ export function validateManifest(value) {
   }
   return Object.freeze({
     ...value,
+    authentication: Object.freeze({ ...value.authentication }),
     artifacts: Object.freeze(value.artifacts.map((artifact) => Object.freeze({ ...artifact }))),
   });
 }
