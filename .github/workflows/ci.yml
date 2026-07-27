@@ -30,6 +30,8 @@ jobs:
       - run: npm run check
       - run: npm run check:launcher-package
       - run: npm run test:e2e
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - run: git diff --check
 
   cross-platform:
@@ -62,5 +64,7 @@ jobs:
       - run: npm test
       - run: npm run test:launcher
       - run: npm run ${{ matrix.make }}
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - run: npm run ${{ matrix.verify }}
       - run: git diff --check

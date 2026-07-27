@@ -2,6 +2,20 @@
 
 All notable changes to AdRouter Agent are documented here.
 
+## [0.1.0-beta.9] - 2026-07-28
+
+### Fixed
+
+- Changes now render from the bundled Monaco editor under the desktop app's strict offline content
+  security policy instead of remaining indefinitely on a loading state.
+- Switching projects or starting a new chat now clears the previous thread and diff state
+  immediately, preventing stale workspace content from remaining visible.
+
+### Changed
+
+- Packaged Electron acceptance now verifies a rendered Monaco diff and an empty transcript after
+  starting a new chat, protecting both functional fixes at the release boundary.
+
 ## [0.1.0-beta.8] - 2026-07-27
 
 ### Added
@@ -140,6 +154,7 @@ All notable changes to AdRouter Agent are documented here.
 - Updates are downloaded and installed manually.
 - A reachable AdRouter server and valid bearer token are required.
 
+[0.1.0-beta.9]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.9
 [0.1.0-beta.8]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.8
 [0.1.0-beta.7]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.7
 [0.1.0-beta.6]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.6

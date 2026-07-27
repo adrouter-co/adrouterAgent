@@ -38,7 +38,7 @@ describe('platform authentication crypto', () => {
       method: 'POST',
       url: 'https://api-staging.adrouter.co/v1/agent/turn?ignored=true#ignored',
       body,
-      clientVersion: '0.1.0-beta.8',
+      clientVersion: '0.1.0-beta.9',
       accessToken: 'fixture-access-token',
       nonce: 'fixture-nonce',
       now: 1_800_000_000_000,
@@ -58,7 +58,7 @@ describe('platform authentication crypto', () => {
       ath: sha256Base64Url('fixture-access-token'),
       bht: sha256Base64Url(body),
       client_kind: 'desktop',
-      client_version: '0.1.0-beta.8',
+      client_version: '0.1.0-beta.9',
     });
     expect(
       verify(
@@ -133,7 +133,7 @@ describe('platform authentication crypto', () => {
       privateJwk: keyPair.privateJwk,
       method: 'GET',
       url: 'https://api-staging.adrouter.co/v1/profile',
-      clientVersion: '0.1.0-beta.8',
+      clientVersion: '0.1.0-beta.9',
       accessToken: 'fixture-access-token',
     });
     const encodedPayload = proof.split('.')[1];

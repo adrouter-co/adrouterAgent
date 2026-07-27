@@ -10,7 +10,7 @@ selection and settlement use a separate display channel; sponsor data is never
 added to model prompts, tool arguments, commands, patches, or compacted agent
 context.
 
-> **Public beta:** AdRouter Agent 0.1.0-beta.8 supports macOS 12+ on Apple Silicon and Intel, Ubuntu
+> **Public beta:** AdRouter Agent 0.1.0-beta.9 supports macOS 12+ on Apple Silicon and Intel, Ubuntu
 > Desktop 24.04 LTS x64, and Windows 11 x64. One agent task can run at a time, and updates are
 > installed manually.
 

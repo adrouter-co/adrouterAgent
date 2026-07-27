@@ -102,6 +102,21 @@ const normalizeModels = (value: unknown): RouterModelDescriptor[] =>
       })
     : [];
 
+const diffLanguage = (path: string): string => {
+  const extension = path.split('.').at(-1)?.toLowerCase();
+  if (extension === 'ts' || extension === 'tsx') return 'typescript';
+  if (extension === 'js' || extension === 'jsx' || extension === 'mjs' || extension === 'cjs') {
+    return 'javascript';
+  }
+  if (extension === 'json') return 'json';
+  if (extension === 'css' || extension === 'scss' || extension === 'less') return extension;
+  if (extension === 'html' || extension === 'htm') return 'html';
+  if (extension === 'md' || extension === 'mdx') return 'markdown';
+  if (extension === 'py') return 'python';
+  if (extension === 'sh' || extension === 'bash' || extension === 'zsh') return 'shell';
+  return 'plaintext';
+};
+
 export function App(): JSX.Element {
   const [configured, setConfigured] = useState<boolean | undefined>();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -139,7 +154,10 @@ export function App(): JSX.Element {
   const followTimeline = useRef(true);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
-  const selectedThread = threads.find((thread) => thread.id === selectedThreadId) ?? detail?.thread;
+  const selectedThread = selectedThreadId
+    ? (threads.find((thread) => thread.id === selectedThreadId) ??
+      (detail?.thread.id === selectedThreadId ? detail.thread : undefined))
+    : undefined;
   const isRunning = selectedThread ? !isTerminal(selectedThread.status) : false;
   const hasActiveTask = isRunning || threads.some((thread) => !isTerminal(thread.status));
   const runningTurnId = isRunning ? detail?.turns.at(-1)?.id : undefined;
@@ -218,7 +236,9 @@ export function App(): JSX.Element {
     }
     const next = await window.adrouter.threads.list({ projectId });
     setThreads(next);
-    setSelectedThreadId((current) => current ?? next[0]?.id);
+    setSelectedThreadId((current) =>
+      current && next.some((thread) => thread.id === current) ? current : next[0]?.id
+    );
   }, []);
 
   const refreshDetail = useCallback(async (threadId?: string): Promise<void> => {
@@ -324,9 +344,12 @@ export function App(): JSX.Element {
   }, [model, selectableModels, thinkingLevel]);
 
   useEffect(() => {
-    void refreshThreads(selectedProjectId);
     setSelectedThreadId(undefined);
     setDetail(undefined);
+    setThreads([]);
+    setDiffs([]);
+    setSelectedDiffPath(undefined);
+    void refreshThreads(selectedProjectId);
   }, [selectedProjectId, refreshThreads]);
 
   useEffect(() => {
@@ -566,6 +589,9 @@ export function App(): JSX.Element {
             disabled={!selectedProject}
             onClick={() => {
               setSelectedThreadId(undefined);
+              setDetail(undefined);
+              setDiffs([]);
+              setSelectedDiffPath(undefined);
               setDrawer(null);
             }}
           >
@@ -1780,7 +1806,7 @@ function ChangesPanel({
             <div className="diff-view">
               <DiffEditor
                 height="280px"
-                language="typescript"
+                language={diffLanguage(selected.path)}
                 original={selected.original}
                 modified={selected.current}
                 options={{

@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import type { AdrouterApi } from '../shared/contracts';
 
 declare global {
