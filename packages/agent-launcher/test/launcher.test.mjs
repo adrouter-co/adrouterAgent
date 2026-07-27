@@ -29,12 +29,12 @@ import { artifactKey, selectArtifact, validateManifest } from '../lib/manifest.m
 const manifest = {
   schema: 3,
   distributionMode: 'credential-free-portable',
-  releaseVersion: '0.1.0-beta.8',
-  releaseTag: 'v0.1.0-beta.8',
+  releaseVersion: '0.1.0-beta.9',
+  releaseTag: 'v0.1.0-beta.9',
   repository: 'adrouter/adrouterAgent',
   bundleIdentifier: 'com.adrouter.agent',
   bundleShortVersion: '0.1.0',
-  bundleVersion: '10008',
+  bundleVersion: '10009',
   authentication: {
     fixture: 'tests/fixtures/platform-auth-v1.json',
     fixtureSha256: '93a8ec8d4eba38f9165179aa0cdfe3316f8134a882bd0426bd83339af55d17f8',
@@ -45,9 +45,9 @@ const manifest = {
       key: 'darwin-universal',
       platform: 'darwin',
       architectures: ['arm64', 'x64'],
-      assetName: 'AdRouter-Agent-0.1.0-beta.8-darwin-universal.zip',
+      assetName: 'AdRouter-Agent-0.1.0-beta.9-darwin-universal.zip',
       assetUrl:
-        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.8/AdRouter-Agent-0.1.0-beta.8-darwin-universal.zip',
+        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.9/AdRouter-Agent-0.1.0-beta.9-darwin-universal.zip',
       sha256: 'a'.repeat(64),
       archiveRoot: 'AdRouter Agent.app',
       executablePath: 'Contents/MacOS/AdRouter Agent',
@@ -57,9 +57,9 @@ const manifest = {
       key: 'linux-x64',
       platform: 'linux',
       architectures: ['x64'],
-      assetName: 'AdRouter-Agent-0.1.0-beta.8-linux-x64.zip',
+      assetName: 'AdRouter-Agent-0.1.0-beta.9-linux-x64.zip',
       assetUrl:
-        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.8/AdRouter-Agent-0.1.0-beta.8-linux-x64.zip',
+        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.9/AdRouter-Agent-0.1.0-beta.9-linux-x64.zip',
       sha256: 'b'.repeat(64),
       archiveRoot: 'AdRouter Agent-linux-x64',
       executablePath: 'AdRouter Agent',
@@ -69,9 +69,9 @@ const manifest = {
       key: 'win32-x64',
       platform: 'win32',
       architectures: ['x64'],
-      assetName: 'AdRouter-Agent-0.1.0-beta.8-win32-x64.zip',
+      assetName: 'AdRouter-Agent-0.1.0-beta.9-win32-x64.zip',
       assetUrl:
-        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.8/AdRouter-Agent-0.1.0-beta.8-win32-x64.zip',
+        'https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.9/AdRouter-Agent-0.1.0-beta.9-win32-x64.zip',
       sha256: 'c'.repeat(64),
       archiveRoot: '.',
       executablePath: 'AdRouter Agent.exe',
@@ -81,8 +81,8 @@ const manifest = {
 };
 
 test('validates the exact credential-free release manifest', () => {
-  assert.equal(validateManifest(manifest).releaseVersion, '0.1.0-beta.8');
-  const stableManifest = JSON.parse(JSON.stringify(manifest).replaceAll('0.1.0-beta.8', '0.1.0'));
+  assert.equal(validateManifest(manifest).releaseVersion, '0.1.0-beta.9');
+  const stableManifest = JSON.parse(JSON.stringify(manifest).replaceAll('0.1.0-beta.9', '0.1.0'));
   assert.equal(validateManifest(stableManifest).releaseVersion, '0.1.0');
   assert.throws(() => validateManifest({ ...manifest, schema: 1 }));
   assert.throws(() => validateManifest({ ...manifest, distributionMode: 'notarized' }));
@@ -266,7 +266,7 @@ function fixtureExecute({ gatekeeper = 'rejected', running = false, safeSymlink 
         return { stdout: 'com.adrouter.agent\n', stderr: '' };
       }
       return {
-        stdout: args[1].includes('Short') ? '0.1.0\n' : '10008\n',
+        stdout: args[1].includes('Short') ? '0.1.0\n' : '10009\n',
         stderr: '',
       };
     }

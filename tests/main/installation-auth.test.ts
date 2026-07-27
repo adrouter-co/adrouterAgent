@@ -47,7 +47,7 @@ const createRecord = (): InstallationRecord => {
     scopes: ['agent:turn', 'profile:read'],
     origin: 'https://api-staging.adrouter.co',
     clientKind: 'desktop',
-    clientVersion: '0.1.0-beta.8',
+    clientVersion: '0.1.0-beta.9',
     familyExpiresAt: '2030-01-01T00:00:00.000Z',
     displayName: 'AdRouter Agent',
     keyThumbprint: keyPair.thumbprint,
@@ -76,7 +76,7 @@ describe('InstallationAuthManager', () => {
         { status: 200, headers: { 'content-type': 'application/json' } }
       );
     });
-    const manager = new InstallationAuthManager(store, '0.1.0-beta.8', { fetchFn });
+    const manager = new InstallationAuthManager(store, '0.1.0-beta.9', { fetchFn });
 
     const status = await manager.startEnrollment({
       serverUrl: 'https://api-staging.adrouter.co',
@@ -127,7 +127,7 @@ describe('InstallationAuthManager', () => {
     const fetchFn = vi.fn<typeof fetch>();
     const manager = new InstallationAuthManager(
       new ConfigurationStore(join(directory, 'configuration.json'), unsafeCipher),
-      '0.1.0-beta.8',
+      '0.1.0-beta.9',
       { fetchFn }
     );
 
@@ -176,7 +176,7 @@ describe('InstallationAuthManager', () => {
       if (!response) throw new Error('Unexpected authentication request.');
       return response;
     });
-    const manager = new InstallationAuthManager(store, '0.1.0-beta.8', { fetchFn });
+    const manager = new InstallationAuthManager(store, '0.1.0-beta.9', { fetchFn });
     await manager.startEnrollment({
       serverUrl: 'https://api-staging.adrouter.co',
       sponsoredCompute: true,
@@ -232,7 +232,7 @@ describe('InstallationAuthManager', () => {
           { status: 200, headers: { 'content-type': 'application/json' } }
         )
     );
-    const manager = new InstallationAuthManager(store, '0.1.0-beta.8', { fetchFn });
+    const manager = new InstallationAuthManager(store, '0.1.0-beta.9', { fetchFn });
     const body = Buffer.from('{"exact":true}', 'utf8');
     const [first, second] = await Promise.all([
       manager.authorize({ method: 'POST', path: '/v1/agent/turn', body }),
@@ -264,7 +264,7 @@ describe('InstallationAuthManager', () => {
     const { store } = await createStore();
     const record = createRecord();
     await store.completeEnrollment(record, [], '2026-07-27T00:00:00.000Z');
-    const manager = new InstallationAuthManager(store, '0.1.0-beta.8', {
+    const manager = new InstallationAuthManager(store, '0.1.0-beta.9', {
       fetchFn: vi.fn(async () => {
         throw new Error('offline');
       }),
@@ -289,7 +289,7 @@ describe('InstallationAuthManager', () => {
     const record = createRecord();
     await store.completeEnrollment(record, [], '2026-07-27T00:00:00.000Z');
     vi.spyOn(store, 'rotateInstallation').mockRejectedValueOnce(new Error('disk failure'));
-    const manager = new InstallationAuthManager(store, '0.1.0-beta.8', {
+    const manager = new InstallationAuthManager(store, '0.1.0-beta.9', {
       fetchFn: vi.fn(
         async () =>
           new Response(

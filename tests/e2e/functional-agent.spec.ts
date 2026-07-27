@@ -169,9 +169,17 @@ test.describe('packaged functional agent', () => {
       ).toBeVisible();
       await page.getByRole('button', { name: /Changes/ }).click();
       await expect(page.getByRole('button', { name: 'status.txt modified' })).toBeVisible();
+      await expect(page.locator('.monaco-diff-editor')).toBeVisible();
+      await expect(page.getByText('Loading...')).toHaveCount(0);
       expect(agentTurns).toBe(4);
       await page.getByRole('button', { name: 'Close' }).click();
       await page.getByRole('button', { name: 'New Chat' }).click();
+      await expect(
+        page.getByRole('heading', { level: 1, name: 'What should we build?' })
+      ).toBeVisible();
+      await expect(
+        page.getByText('The approved edit and verification command completed.')
+      ).toHaveCount(0);
       await page.getByLabel('Task message').fill('stop this run');
       await page.getByRole('button', { name: 'Send' }).click();
       await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
