@@ -33,6 +33,22 @@ const sponsor = (tier: 'A' | 'B' | 'C' | 'NONE', routerTurnId: string) => ({
 });
 
 describe('turn timeline projection', () => {
+  it('keeps final evidence in the journal without projecting it into chat', () => {
+    const timeline = buildTimeline([
+      event(1, 'message.user', { text: 'Update the styles.' }),
+      event(2, 'message.complete', { text: 'Done.' }),
+      event(3, 'final.evidence', {
+        outcome: 'completed',
+        filesChanged: [{ path: 'styles/style.css', status: 'modified' }],
+        pass: true,
+      }),
+    ]);
+
+    expect(timeline).toHaveLength(2);
+    expect(timeline.some((item) => item.kind === 'status')).toBe(false);
+    expect(timeline.at(-1)).toMatchObject({ kind: 'assistant', text: 'Done.' });
+  });
+
   it('streams one thinking block and groups only consecutive distinct reads', () => {
     const timeline = buildTimeline(
       [

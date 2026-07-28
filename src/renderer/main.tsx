@@ -1,8 +1,10 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import './monaco';
 import { App } from './App';
 import './styles.css';
+import { applyStoredTheme } from './theme';
+
+applyStoredTheme();
 
 const root = document.getElementById('root');
 if (!root) {

@@ -1,18 +1,19 @@
-import { DiffEditor } from '@monaco-editor/react';
 import {
   ArrowRight,
   FolderOpen,
   History,
   LogOut,
   MessageSquarePlus,
+  Moon,
   PanelRight,
   Send,
   Settings,
   Square,
+  Sun,
   Trash2,
   X,
 } from 'lucide-react';
-import type { JSX, ReactNode } from 'react';
+import type { CSSProperties, JSX, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import jellyfishLogo from '../../assets/icon.svg?url';
@@ -31,6 +32,8 @@ import type {
   ThinkingLevel,
   Thread,
 } from '../shared/contracts';
+import { buildChangedLineDiff } from './line-diff';
+import { readStoredTheme, type Theme, transitionToTheme } from './theme';
 import { buildTimeline, type SponsorRound, type TimelineItem } from './timeline';
 
 type Detail = Awaited<ReturnType<Window['adrouter']['threads']['get']>>;
@@ -61,16 +64,25 @@ const asSponsor = (event?: JournalEvent): Sponsor | undefined => {
 const latestBottomSponsor = (
   events: readonly JournalEvent[]
 ): { eventId: string; sponsor: Sponsor } | undefined => {
-  let current: { eventId: string; sponsor: Sponsor } | undefined;
+  let current:
+    | { eventId: string; turnId: string | null; sponsor: Sponsor; streamingComplete: boolean }
+    | undefined;
   for (const event of events) {
     if (event.type === 'message.user') current = undefined;
     if (event.type === 'sponsor.update') {
       const sponsor = asSponsor(event);
       current =
-        sponsor?.tier === 'B' || sponsor?.tier === 'C' ? { eventId: event.id, sponsor } : undefined;
+        sponsor?.tier === 'B' || sponsor?.tier === 'C'
+          ? { eventId: event.id, turnId: event.turnId, sponsor, streamingComplete: false }
+          : undefined;
+    }
+    if (event.type === 'message.complete' && current?.turnId === event.turnId) {
+      current.streamingComplete = true;
     }
   }
-  return current;
+  return current?.streamingComplete
+    ? { eventId: current.eventId, sponsor: current.sponsor }
+    : undefined;
 };
 
 const formatCurrency = (amount: number): string =>
@@ -101,21 +113,6 @@ const normalizeModels = (value: unknown): RouterModelDescriptor[] =>
           : [];
       })
     : [];
-
-const diffLanguage = (path: string): string => {
-  const extension = path.split('.').at(-1)?.toLowerCase();
-  if (extension === 'ts' || extension === 'tsx') return 'typescript';
-  if (extension === 'js' || extension === 'jsx' || extension === 'mjs' || extension === 'cjs') {
-    return 'javascript';
-  }
-  if (extension === 'json') return 'json';
-  if (extension === 'css' || extension === 'scss' || extension === 'less') return extension;
-  if (extension === 'html' || extension === 'htm') return 'html';
-  if (extension === 'md' || extension === 'mdx') return 'markdown';
-  if (extension === 'py') return 'python';
-  if (extension === 'sh' || extension === 'bash' || extension === 'zsh') return 'shell';
-  return 'plaintext';
-};
 
 export function App(): JSX.Element {
   const [configured, setConfigured] = useState<boolean | undefined>();
@@ -150,7 +147,9 @@ export function App(): JSX.Element {
   const [confirmingSignOut, setConfirmingSignOut] = useState(false);
   const [signOutBusy, setSignOutBusy] = useState(false);
   const [signOutNotice, setSignOutNotice] = useState<string>();
+  const [composerClearance, setComposerClearance] = useState(190);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const composerStackRef = useRef<HTMLDivElement>(null);
   const followTimeline = useRef(true);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
@@ -165,7 +164,7 @@ export function App(): JSX.Element {
     () => buildTimeline(detail?.events ?? [], runningTurnId),
     [detail?.events, runningTurnId]
   );
-  const lastTimelineItemId = timeline.at(-1)?.id;
+  const lastEventId = detail?.events.at(-1)?.id;
   const sponsor = useMemo(
     () =>
       asSponsor(
@@ -204,11 +203,26 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
+    if (!configured) return undefined;
+    const stack = composerStackRef.current;
+    if (!stack || typeof ResizeObserver === 'undefined') return undefined;
+    const updateClearance = (): void => {
+      setComposerClearance(Math.ceil(stack.getBoundingClientRect().height) + 24);
+    };
+    updateClearance();
+    const observer = new ResizeObserver(updateClearance);
+    observer.observe(stack);
+    return () => observer.disconnect();
+  }, [configured]);
+
+  useEffect(() => {
     const element = timelineRef.current;
-    if (lastTimelineItemId && element && followTimeline.current) {
-      element.scrollTop = element.scrollHeight;
+    if (composerClearance > 0 && lastEventId && element && followTimeline.current) {
+      requestAnimationFrame(() => {
+        if (followTimeline.current) element.scrollTop = element.scrollHeight;
+      });
     }
-  }, [lastTimelineItemId]);
+  }, [composerClearance, lastEventId]);
 
   useEffect(() => {
     if (!selectedThreadId) return;
@@ -407,30 +421,33 @@ export function App(): JSX.Element {
   }
   if (!configured) {
     return (
-      <Onboarding
-        initialServerUrl={onboardingDefaults.serverUrl}
-        initialSponsoredCompute={onboardingDefaults.sponsoredCompute}
-        notice={signOutNotice}
-        onConfigured={async () => {
-          setConfigured(true);
-          const configuration = await window.adrouter.configuration.get();
-          setServerUrl(configuration.serverUrl);
-          const configuredModels = normalizeModels(configuration.models);
-          setModels(configuredModels);
-          setModel(configuration.selectedModel ?? configuredModels[0]?.id ?? 'auto');
-          setThinkingLevel(configuration.selectedThinkingLevel ?? 'medium');
-          void refreshRouterStatus();
-          await refreshProjects();
-        }}
-        onModels={(nextModels) => {
-          setModels(nextModels);
-          const first = nextModels[0];
-          if (first) {
-            setModel(first.id);
-            setThinkingLevel(first.defaultThinkingLevel);
-          }
-        }}
-      />
+      <>
+        <Onboarding
+          initialServerUrl={onboardingDefaults.serverUrl}
+          initialSponsoredCompute={onboardingDefaults.sponsoredCompute}
+          notice={signOutNotice}
+          onConfigured={async () => {
+            setConfigured(true);
+            const configuration = await window.adrouter.configuration.get();
+            setServerUrl(configuration.serverUrl);
+            const configuredModels = normalizeModels(configuration.models);
+            setModels(configuredModels);
+            setModel(configuration.selectedModel ?? configuredModels[0]?.id ?? 'auto');
+            setThinkingLevel(configuration.selectedThinkingLevel ?? 'medium');
+            void refreshRouterStatus();
+            await refreshProjects();
+          }}
+          onModels={(nextModels) => {
+            setModels(nextModels);
+            const first = nextModels[0];
+            if (first) {
+              setModel(first.id);
+              setThinkingLevel(first.defaultThinkingLevel);
+            }
+          }}
+        />
+        <ThemeToggle />
+      </>
     );
   }
 
@@ -553,7 +570,10 @@ export function App(): JSX.Element {
   };
 
   return (
-    <main className="app-shell">
+    <main
+      className="app-shell"
+      style={{ '--composer-clearance': `${composerClearance}px` } as CSSProperties}
+    >
       <header className="top-bar">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
@@ -670,7 +690,7 @@ export function App(): JSX.Element {
             ))}
           </div>
           <div className="composer-dock">
-            <div className="composer-stack">
+            <div className="composer-stack" ref={composerStackRef}>
               <ComposerPanel shown={Boolean(visibleBottomSponsor)} kind="sponsor">
                 {visibleBottomSponsor && (
                   <SponsorSurface
@@ -790,54 +810,63 @@ export function App(): JSX.Element {
                 agentStatus={selectedThread?.status ?? 'ready'}
                 onRefresh={() => void refreshRouterStatus()}
               />
-              <section className="project-controls" aria-label="Project instructions">
-                <label htmlFor="project-instructions">Project instructions</label>
-                <textarea
-                  id="project-instructions"
-                  value={instructionDraft}
-                  onChange={(event) => setInstructionDraft(event.target.value)}
-                  disabled={!selectedProject}
-                />
-                <button
-                  className="primary-button"
-                  type="button"
-                  disabled={!selectedProject || instructionDraft === selectedProject.instructions}
-                  onClick={() => void saveInstructions()}
-                >
-                  Save instructions
-                </button>
-                {selectedProject?.repositoryInstructionFiles.length ? (
-                  <small>
-                    Repository files loaded: {selectedProject.repositoryInstructionFiles.join(', ')}
-                  </small>
-                ) : (
-                  <small>No repository instruction files loaded.</small>
-                )}
-              </section>
-              <EconomicsPanel events={detail?.events ?? []} sponsor={sponsor} />
-              <section className="detail-panel credential-panel" aria-label="AdRouter credential">
-                <div className="detail-heading">
-                  <div>
-                    <p className="eyebrow">Authentication</p>
-                    <h2>Manage this installation</h2>
-                  </div>
+              <details
+                className="project-controls settings-disclosure"
+                aria-label="Custom instructions"
+              >
+                <summary>Custom instructions</summary>
+                <div className="settings-disclosure-content">
+                  <label htmlFor="project-instructions">Project instructions</label>
+                  <textarea
+                    id="project-instructions"
+                    value={instructionDraft}
+                    onChange={(event) => setInstructionDraft(event.target.value)}
+                    disabled={!selectedProject}
+                  />
                   <button
-                    className="danger-outline-button"
+                    className="primary-button"
                     type="button"
-                    disabled={hasActiveTask || signOutBusy}
-                    onClick={() => setConfirmingSignOut(true)}
+                    disabled={!selectedProject || instructionDraft === selectedProject.instructions}
+                    onClick={() => void saveInstructions()}
                   >
-                    <LogOut size={16} aria-hidden="true" />
-                    Sign out
+                    Save instructions
                   </button>
+                  {selectedProject?.repositoryInstructionFiles.length ? (
+                    <small>
+                      Repository files loaded:{' '}
+                      {selectedProject.repositoryInstructionFiles.join(', ')}
+                    </small>
+                  ) : (
+                    <small>No repository instruction files loaded.</small>
+                  )}
                 </div>
-                <p className="empty-copy">
-                  Sign out attempts to revoke this installation, then always removes its encrypted
-                  key and refresh credential locally. Projects, chats, and preferences stay here.
-                </p>
-                {hasActiveTask && <small>Stop the active agent task before signing out.</small>}
-              </section>
-              <AboutPanel info={applicationInfo} />
+              </details>
+              <div className="settings-primary-sections">
+                <EconomicsPanel events={detail?.events ?? []} sponsor={sponsor} />
+                <section className="detail-panel credential-panel" aria-label="AdRouter credential">
+                  <div className="detail-heading">
+                    <div>
+                      <p className="eyebrow">Authentication</p>
+                      <h2>Manage this installation</h2>
+                    </div>
+                    <button
+                      className="danger-outline-button settings-sign-out-button"
+                      type="button"
+                      disabled={hasActiveTask || signOutBusy}
+                      onClick={() => setConfirmingSignOut(true)}
+                    >
+                      <LogOut size={16} aria-hidden="true" />
+                      Sign out
+                    </button>
+                  </div>
+                  <p className="empty-copy">
+                    Sign out attempts to revoke this installation, then always removes its encrypted
+                    key and refresh credential locally. Projects, chats, and preferences stay here.
+                  </p>
+                  {hasActiveTask && <small>Stop the active agent task before signing out.</small>}
+                </section>
+                <AboutPanel info={applicationInfo} />
+              </div>
             </>
           )}
         </aside>
@@ -928,6 +957,7 @@ export function App(): JSX.Element {
           </section>
         </div>
       )}
+      <ThemeToggle />
     </main>
   );
 }
@@ -1741,27 +1771,34 @@ function AgentStatusPanel({
         </div>
       </dl>
       {status?.error && <p className="status-error">{status.error}</p>}
-      <h3>Available models</h3>
-      {status?.models.length ? (
-        <ul className="model-status-list">
-          {status.models.map((candidate) => (
-            <li key={candidate.id}>
-              <span>
-                <strong>{candidate.displayName}</strong>
-                <small>
-                  {candidate.providerLabel} · {candidate.thinkingLevels.join(', ')} thinking
-                </small>
-              </span>
-              <span className={candidate.configured ? 'model-ready' : 'model-mock'}>
-                {candidate.configured ? 'configured' : 'mock'}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="empty-copy">No router models are currently available.</p>
-      )}
-      {status?.modelsStale && <small>Showing the last known model catalog.</small>}
+      <details className="settings-disclosure model-disclosure">
+        <summary>
+          <span>Available models</span>
+          <small>{status?.models.length ?? 0}</small>
+        </summary>
+        <div className="settings-disclosure-content">
+          {status?.models.length ? (
+            <ul className="model-status-list">
+              {status.models.map((candidate) => (
+                <li key={candidate.id}>
+                  <span>
+                    <strong>{candidate.displayName}</strong>
+                    <small>
+                      {candidate.providerLabel} · {candidate.thinkingLevels.join(', ')} thinking
+                    </small>
+                  </span>
+                  <span className={candidate.configured ? 'model-ready' : 'model-mock'}>
+                    {candidate.configured ? 'configured' : 'mock'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="empty-copy">No router models are currently available.</p>
+          )}
+          {status?.modelsStale && <small>Showing the last known model catalog.</small>}
+        </div>
+      </details>
     </section>
   );
 }
@@ -1775,6 +1812,10 @@ function ChangesPanel({
   selected?: DiffFile;
   onSelect: (path: string) => void;
 }): JSX.Element {
+  const changedLines = useMemo(
+    () => (selected ? buildChangedLineDiff(selected.original, selected.current) : undefined),
+    [selected]
+  );
   return (
     <section className="detail-panel changes-panel">
       <div className="detail-heading">
@@ -1802,25 +1843,83 @@ function ChangesPanel({
               </button>
             ))}
           </div>
-          {selected && (
-            <div className="diff-view">
-              <DiffEditor
-                height="280px"
-                language={diffLanguage(selected.path)}
-                original={selected.original}
-                modified={selected.current}
-                options={{
-                  readOnly: true,
-                  renderSideBySide: false,
-                  minimap: { enabled: false },
-                  scrollBeyondLastLine: false,
-                }}
-              />
-            </div>
+          {selected && changedLines && (
+            <section className="diff-view" aria-label={`Unified changes for ${selected.path}`}>
+              {changedLines.tooLarge ? (
+                <p className="diff-notice">
+                  This file is too large for the changed-lines preview. Review it in your local Git
+                  tooling.
+                </p>
+              ) : changedLines.rows.length === 0 ? (
+                <p className="diff-notice">No changed lines remain in this file.</p>
+              ) : (
+                <table className="unified-diff" aria-label="Changed lines">
+                  <tbody>
+                    {changedLines.rows.map((row) => {
+                      if (row.kind === 'ellipsis' || row.kind === 'meta') {
+                        return (
+                          <tr
+                            className={`diff-row ${row.kind}`}
+                            key={
+                              row.kind === 'ellipsis'
+                                ? `ellipsis-${row.oldLine}-${row.newLine}`
+                                : `meta-${row.text}`
+                            }
+                          >
+                            <td className="diff-gutter" />
+                            <td className="diff-gutter" />
+                            <td className="diff-marker">{row.kind === 'ellipsis' ? '⋯' : '\\'}</td>
+                            <td className="diff-code">{row.text}</td>
+                          </tr>
+                        );
+                      }
+                      return (
+                        <tr
+                          className={`diff-row ${row.kind}`}
+                          key={`${row.kind}-${row.oldLine ?? 'x'}-${row.newLine ?? 'x'}`}
+                        >
+                          <td className="diff-gutter">{row.oldLine ?? ''}</td>
+                          <td className="diff-gutter">{row.newLine ?? ''}</td>
+                          <td className="diff-marker">{row.kind === 'removed' ? '−' : '+'}</td>
+                          <td className="diff-code">
+                            <code>{row.text || ' '}</code>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </section>
           )}
         </>
       )}
     </section>
+  );
+}
+
+function ThemeToggle(): JSX.Element {
+  const [theme, setTheme] = useState<Theme>(() => readStoredTheme());
+  const nextTheme: Theme = theme === 'light' ? 'dark' : 'light';
+  return (
+    <fieldset className="theme-control">
+      <legend className="sr-only">Color theme</legend>
+      <Sun size={15} aria-hidden="true" />
+      <button
+        className="theme-switch"
+        type="button"
+        role="switch"
+        aria-checked={theme === 'dark'}
+        aria-label={`Switch to ${nextTheme} theme`}
+        onClick={() => {
+          transitionToTheme(nextTheme);
+          setTheme(nextTheme);
+        }}
+      >
+        <span aria-hidden="true" />
+      </button>
+      <Moon size={15} aria-hidden="true" />
+    </fieldset>
   );
 }
 

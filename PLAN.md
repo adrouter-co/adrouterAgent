@@ -4,16 +4,17 @@
 
 Make the Electron desktop Agent wire-compatible with the Router's platform-bound authentication
 contract, replace self-consistent mocks with canonical contract evidence, convert release promotion
-to a safely pausable trusted-publishing flow, and publish/accept the exact `0.1.0-beta.9`
+to a safely pausable trusted-publishing flow, and publish/accept the exact `0.1.0-beta.10`
 application and launcher artifacts.
 
 ## Context
 
 - This is the independent `adrouter/adrouterAgent` repository for the Electron desktop app and
   public `@adrouter/agent` launcher.
-- Source/application/launcher metadata is `0.1.0-beta.9`; beta.8 was published only as a candidate
-  and rejected on 2026-07-28 after exact-artifact acceptance found two desktop usability defects.
-- Use beta.9 only if a fresh npm/Git/GitHub check shows the version, tag, release, draft, and
+- Source/application/launcher metadata is `0.1.0-beta.10`. Beta.8 was rejected after exact-artifact
+  acceptance found two desktop usability defects. Beta.9 was published only as a candidate and was
+  superseded before channel promotion by the approved dark-theme and UI refinement release delta.
+- Use beta.10 only if a fresh npm/Git/GitHub check shows the version, tag, release, draft, and
   workflow identity are still unused. Otherwise increment before tagging.
 - Main-process encrypted installation storage, enrollment, refresh, signing broker, sign-out,
   renderer-safe status, launcher/package tooling, credential-free workflows, and acceptance
@@ -222,7 +223,7 @@ npm run test:e2e
 
 ### Status
 
-`in_progress`
+`done`
 
 ### Objective
 
@@ -341,7 +342,7 @@ existing npm package, and retain only a short-lived dist-tag token.
       `RELEASE.md`, and notices.
 - [x] Remove the package-existence branch that falls back to a bootstrap token; `@adrouter/agent`
       already exists.
-- [ ] Configure npm trusted publisher: organization `adrouter`, repository
+- [x] Configure npm trusted publisher: organization `adrouter`, repository
       `adrouterAgent`, workflow `promote-release.yml`, environment `npm-publish`, allowed
       action `npm publish`.
 - [x] Preserve `id-token: write` only on candidate publication and preserve GitHub-hosted runners.
@@ -392,7 +393,7 @@ rg -n 'NPM_BOOTSTRAP_TOKEN|ADROUTER_STAGING_API_KEY' .github RELEASE.md docs scr
 - [x] Candidate and finalization are separate protected, resumable dispatches.
 - [x] Candidate publishes the GitHub prerelease/ZIP URLs and npm `candidate`, then stops cleanly.
 - [x] Finalization cannot start channel movement without exact four-artifact/two-cohort acceptance.
-- [ ] OIDC publishes the existing package and bootstrap-token logic is absent.
+- [x] OIDC publishes the existing package and bootstrap-token logic is absent.
 - [x] Only final dist-tag commands receive `NPM_DIST_TAG_TOKEN`.
 - [x] Beta finalization moves `beta` and `latest`, removes `candidate`, and never rebuilds.
 - [x] Workflow/release checks pass with no AdRouter inference credential.
@@ -400,9 +401,8 @@ rg -n 'NPM_BOOTSTRAP_TOKEN|ADROUTER_STAGING_API_KEY' .github RELEASE.md docs scr
 ### Validation Results
 
 - Two-phase workflow, policy tests, documentation, YAML parsing, and release-readiness gates: passed.
-- npm trusted publisher remote configuration: not run; requires an authorized npm maintainer.
-- Live OIDC publication/finalization: not run; release deployment was authorized on 2026-07-27 and
-  the candidate has not yet been published.
+- npm trusted publisher remote configuration and live OIDC candidate publication passed for
+  beta.9; final channel movement remains intentionally separate.
 - GitHub CLI is authenticated as active `adrouter` organization admin `HappyCool121`; the public
   repository grants admin access and both protected release environments exist. Neither environment
   currently has a configured secret.
@@ -418,24 +418,24 @@ rg -n 'NPM_BOOTSTRAP_TOKEN|ADROUTER_STAGING_API_KEY' .github RELEASE.md docs scr
 
 ### Status
 
-`todo`
+`in_progress`
 
 ### Objective
 
-Tag clean reviewed beta.9 source, build all supported native artifacts, and publish the exact launcher
+Tag clean reviewed beta.10 source, build all supported native artifacts, and publish the exact launcher
 under `candidate` without moving final npm channels.
 
 ### Tasks
 
 - [ ] Recheck npm version/dist-tags, Git tag, GitHub release/draft, and running workflow state for
-      beta.9 immediately before tagging; increment if occupied.
+      beta.10 immediately before tagging; increment if occupied.
 - [ ] Merge the corrected contract and two-phase workflow through reviewed main.
 - [ ] Run pinned-runtime clean-checkout source, E2E, launcher, public-boundary, parity, and release
       readiness gates.
 - [ ] In npm package settings, configure the exact trusted publisher described in Step C.
 - [ ] Create a fresh package-scoped `NPM_DIST_TAG_TOKEN` and enter it interactively in protected
       `npm-publish`; never print or pass it in command arguments.
-- [ ] Create/push the immutable annotated `v0.1.0-beta.9` tag from clean reviewed main.
+- [ ] Create/push the immutable annotated `v0.1.0-beta.10` tag from clean reviewed main.
 - [ ] Approve the expected secret-free `macos-release` environment and wait for macOS universal,
       Ubuntu x64, and Windows x64 builds.
 - [ ] Verify draft tag/commit, three ZIPs, launcher tarball, `artifact-manifest.json`,
@@ -472,7 +472,7 @@ under `candidate` without moving final npm channels.
 ~~~bash
 npm view @adrouter/agent version dist-tags --json
 gh release list --repo adrouter/adrouterAgent --limit 10
-git ls-remote --tags origin refs/tags/v0.1.0-beta.9
+git ls-remote --tags origin refs/tags/v0.1.0-beta.10
 
 nvm use 25.9.0
 npm ci
@@ -483,22 +483,22 @@ npm run verify:release-readiness
 git status --short
 
 gh secret set NPM_DIST_TAG_TOKEN --repo adrouter/adrouterAgent --env npm-publish
-git tag -a v0.1.0-beta.9 -m "AdRouter Agent 0.1.0-beta.9"
-git push origin v0.1.0-beta.9
+git tag -a v0.1.0-beta.10 -m "AdRouter Agent 0.1.0-beta.10"
+git push origin v0.1.0-beta.10
 
-gh release view v0.1.0-beta.9 --repo adrouter/adrouterAgent --json isDraft,isPrerelease,tagName,assets
-gh workflow run promote-release.yml --repo adrouter/adrouterAgent --ref v0.1.0-beta.9 -f tag=v0.1.0-beta.9 -f phase=publish-candidate -f channel=beta
-npm view @adrouter/agent@0.1.0-beta.9 version dist.integrity repository --json
+gh release view v0.1.0-beta.10 --repo adrouter/adrouterAgent --json isDraft,isPrerelease,tagName,assets
+gh workflow run promote-release.yml --repo adrouter/adrouterAgent --ref v0.1.0-beta.10 -f tag=v0.1.0-beta.10 -f phase=publish-candidate -f channel=beta
+npm view @adrouter/agent@0.1.0-beta.10 version dist.integrity repository --json
 npm view @adrouter/agent dist-tags --json
 ~~~
 
 ### Acceptance Criteria
 
-- [ ] Beta.9 is unused and tags a clean reviewed commit with the functional fixes and prior contract/workflow changes.
+- [ ] Beta.10 is unused and tags a clean reviewed commit with the functional fixes and prior contract/workflow changes.
 - [ ] All three native runner builds and launcher/artifact integrity checks pass.
 - [ ] GitHub prerelease exposes the unchanged ZIPs and npm candidate exposes the exact launcher.
 - [ ] Trusted publishing/provenance succeeds without `NPM_BOOTSTRAP_TOKEN`.
-- [ ] `beta`/`latest` remain on beta.7 and only `candidate` points to beta.9.
+- [ ] `beta`/`latest` remain on beta.7 and only `candidate` points to beta.10.
 - [ ] No secret or private installation state enters workflows/artifacts.
 
 ### Validation Results
@@ -506,14 +506,16 @@ npm view @adrouter/agent dist-tags --json
 - Beta.8 candidate publication completed, but exact-candidate acceptance rejected it on 2026-07-28:
   project/new-chat transitions displayed stale transcript state and the Changes drawer never
   rendered its Monaco diff under the offline CSP. Beta.8 must not be finalized.
+- Beta.9 candidate publication completed successfully, but its immutable tag predates the approved
+  dark-theme and UI refinement delta, so it remains unpromoted and beta.10 is the fix-forward build.
 - Clean pre-tag validation passed on 2026-07-27: `npm ci`, `npm run check`, packaged E2E,
   production dependency audit, launcher-package/release-readiness, local universal macOS make, and
   distribution verification.
-- Beta.9 source and packaged E2E gates pass locally; remote vacancy and publication remain to run.
+- Beta.10 remote version/tag/release vacancy and publication remain to run.
 
 ### Findings / Notes
 
-- The beta.9 source version does not reserve the remote immutable namespace.
+- The beta.10 source version does not reserve the remote immutable namespace until its tag is pushed.
 
 ---
 
@@ -530,7 +532,7 @@ evidence, and move beta channels without rebuilding.
 
 ### Tasks
 
-- [ ] Install exact `@adrouter/agent@0.1.0-beta.9`/`@candidate` on the primary operator system,
+- [ ] Install exact `@adrouter/agent@0.1.0-beta.10`/`@candidate` on the primary operator system,
       verify launcher integrity and downloaded ZIP checksum, then launch the packaged app.
 - [ ] Confirm `safeStorage` is supported, select “Connect this Agent,” compare the WebUI code, and
       approve the exact Desktop installation.
@@ -546,10 +548,10 @@ evidence, and move beta channels without rebuilding.
       GitHub prerelease.
 - [ ] Dispatch `phase=finalize-release`, `channel=beta`; require acceptance and anonymous
       platform smoke before dist-tag changes.
-- [ ] Verify `beta`/`latest` point to beta.9, `candidate` is absent, and npm/GitHub/
+- [ ] Verify `beta`/`latest` point to beta.10, `candidate` is absent, and npm/GitHub/
       checksums/provenance/acceptance identities agree.
 - [ ] Delete `NPM_DIST_TAG_TOKEN` and revoke the granular npm token.
-- [ ] Hand exact beta.9 identity/evidence to the Router owner for the 24-hour staging soak.
+- [ ] Hand exact beta.10 identity/evidence to the Router owner for the 24-hour staging soak.
 
 ### Relevant Files
 
@@ -574,19 +576,19 @@ evidence, and move beta channels without rebuilding.
 ### Commands
 
 ~~~bash
-npm install --global @adrouter/agent@0.1.0-beta.9
+npm install --global @adrouter/agent@0.1.0-beta.10
 adrouter-agent --version
 adrouter-agent doctor --json
 adrouter-agent
 
-gh release download v0.1.0-beta.9 --repo adrouter/adrouterAgent --pattern artifact-manifest.json
+gh release download v0.1.0-beta.10 --repo adrouter/adrouterAgent --pattern artifact-manifest.json
 node scripts/validate-authentication-acceptance.mjs authentication-acceptance.json --manifest artifact-manifest.json
-gh release upload v0.1.0-beta.9 authentication-acceptance.json --repo adrouter/adrouterAgent
-gh workflow run promote-release.yml --repo adrouter/adrouterAgent --ref v0.1.0-beta.9 -f tag=v0.1.0-beta.9 -f phase=finalize-release -f channel=beta
+gh release upload v0.1.0-beta.10 authentication-acceptance.json --repo adrouter/adrouterAgent
+gh workflow run promote-release.yml --repo adrouter/adrouterAgent --ref v0.1.0-beta.10 -f tag=v0.1.0-beta.10 -f phase=finalize-release -f channel=beta
 
 npm view @adrouter/agent dist-tags --json
-npm view @adrouter/agent@0.1.0-beta.9 version dist.integrity repository --json
-gh release view v0.1.0-beta.9 --repo adrouter/adrouterAgent --json isDraft,isPrerelease,tagName,assets
+npm view @adrouter/agent@0.1.0-beta.10 version dist.integrity repository --json
+gh release view v0.1.0-beta.10 --repo adrouter/adrouterAgent --json isDraft,isPrerelease,tagName,assets
 
 gh secret delete NPM_DIST_TAG_TOKEN --repo adrouter/adrouterAgent --env npm-publish
 ~~~
@@ -597,7 +599,7 @@ gh secret delete NPM_DIST_TAG_TOKEN --repo adrouter/adrouterAgent --env npm-publ
 - [ ] Acceptance matches the exact tag, commit, three ZIPs, launcher tarball, `os_encrypted`
       classification, and redaction policy.
 - [ ] Finalization reuses unchanged artifacts and all public smoke gates pass.
-- [ ] `beta`/`latest` point to beta.9 and `candidate` is absent.
+- [ ] `beta`/`latest` point to beta.10 and `candidate` is absent.
 - [ ] Trusted publisher remains correctly scoped and the temporary dist-tag token is revoked.
 - [ ] Router owner has exact evidence for Desktop staging enforcement.
 
@@ -678,7 +680,7 @@ npm view @adrouter/agent dist-tags --json
 ### Acceptance Criteria
 
 - [ ] All source, process-boundary, E2E, launcher, package, native, and release-policy gates pass.
-- [ ] Exact beta.8 works after Router staging enforcement.
+- [ ] Exact beta.10 works after Router staging enforcement.
 - [ ] Public source/artifact/provenance/acceptance identities agree.
 - [ ] No renderer/utility/package/workflow/log/diagnostic exposes installation material.
 - [ ] Bootstrap-token and one-shot promotion behavior are absent.
@@ -715,3 +717,4 @@ npm view @adrouter/agent dist-tags --json
 | 2026-07-27 | Use trusted publishing and retain only a dist-tag token. | The public npm package already exists and OIDC supports publish. | Stale bootstrap-token paths are removed before beta.8. |
 | 2026-07-27 | Require four-artifact, two-OS acceptance. | The launcher selects native ZIPs and storage behavior is OS-specific. | Finalization proves both distribution layers without rebuilding. |
 | 2026-07-27 | Publish beta only. | Functional staging rollout does not authorize stable. | Beta/latest move to beta.8; stable is deferred. |
+| 2026-07-28 | Fix forward from beta.9 to beta.10 for the approved UI release. | Beta.9 is already immutable and cannot absorb the newer reviewed UI delta. | Beta.10 becomes the only candidate eligible for `beta`/`latest` promotion. |

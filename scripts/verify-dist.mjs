@@ -59,7 +59,7 @@ for (const app of apps) {
   if (
     info.CFBundleIdentifier !== 'com.adrouter.agent' ||
     info.CFBundleShortVersionString !== '0.1.0' ||
-    info.CFBundleVersion !== '10009' ||
+    info.CFBundleVersion !== '10010' ||
     info.NSAppTransportSecurity?.NSAllowsArbitraryLoads !== false ||
     info.NSAppTransportSecurity?.NSAllowsLocalNetworking !== true
   ) {
@@ -104,7 +104,7 @@ for (const app of apps) {
       throw new Error(`The packaged application contains forbidden content: ${forbidden}`);
     }
   }
-  if (!packagedText.includes('0.1.0-beta.9')) {
+  if (!packagedText.includes('0.1.0-beta.10')) {
     throw new Error('The packaged About metadata does not include the public release version.');
   }
 

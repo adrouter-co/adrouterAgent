@@ -153,6 +153,12 @@ test.describe('packaged functional agent', () => {
       await page.getByText('Thinking', { exact: true }).click();
       await expect(page.getByText('Checking the requested file.')).toBeVisible();
       await expect(page.getByRole('heading', { name: 'Edit file' })).toBeVisible();
+      await page.getByRole('switch', { name: 'Switch to dark theme' }).click();
+      const approvalCard = page.locator('.approval-card');
+      await expect(approvalCard).toHaveCSS('background-color', 'rgb(37, 41, 48)');
+      await expect(approvalCard).toHaveCSS('color', 'rgb(255, 255, 255)');
+      await expect(approvalCard.locator('code')).toHaveCSS('color', 'rgb(255, 255, 255)');
+      await expect(approvalCard.locator('small')).toHaveCSS('color', 'rgb(255, 255, 255)');
       await page.getByRole('button', { name: 'Deny' }).click();
       await expect.poll(() => readFile(join(workspace, 'status.txt'), 'utf8')).toBe('status=old\n');
       await expect(page.getByRole('heading', { name: 'Edit file' })).toBeVisible();
@@ -169,8 +175,9 @@ test.describe('packaged functional agent', () => {
       ).toBeVisible();
       await page.getByRole('button', { name: /Changes/ }).click();
       await expect(page.getByRole('button', { name: 'status.txt modified' })).toBeVisible();
-      await expect(page.locator('.monaco-diff-editor')).toBeVisible();
-      await expect(page.getByText('Loading...')).toHaveCount(0);
+      await expect(page.getByLabel('Unified changes for status.txt')).toBeVisible();
+      await expect(page.getByRole('table', { name: 'Changed lines' })).toContainText('status=old');
+      await expect(page.getByRole('table', { name: 'Changed lines' })).toContainText('status=new');
       expect(agentTurns).toBe(4);
       await page.getByRole('button', { name: 'Close' }).click();
       await page.getByRole('button', { name: 'New Chat' }).click();

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '@/renderer/App';
@@ -59,6 +59,9 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  document.documentElement.removeAttribute('data-theme');
+  document.documentElement.classList.remove('theme-transitioning');
+  document.documentElement.style.colorScheme = '';
 });
 
 describe('App onboarding', () => {
@@ -81,6 +84,14 @@ describe('App onboarding', () => {
       'https://api-staging.adrouter.co'
     );
     expect(screen.queryByLabelText(/access token/i)).not.toBeInTheDocument();
+    const themeSwitch = screen.getByRole('switch', { name: 'Switch to dark theme' });
+    expect(themeSwitch).toHaveAttribute('aria-checked', 'false');
+    await userEvent.click(themeSwitch);
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(screen.getByRole('switch', { name: 'Switch to light theme' })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    );
   });
 
   it('starts explicit installation approval and exposes only the comparison code', async () => {
@@ -186,7 +197,13 @@ describe('App onboarding', () => {
     expect(await screen.findByRole('heading', { name: 'Connected' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'About AdRouter Agent' })).toBeInTheDocument();
     expect(screen.getByText('darwin · arm64')).toBeInTheDocument();
+    const modelsDisclosure = screen.getByText('Available models').closest('details');
+    expect(modelsDisclosure).not.toHaveAttribute('open');
+    await userEvent.click(screen.getByText('Available models'));
     expect(screen.getByText('DeepSeek V4 Flash')).toBeInTheDocument();
+    const instructionsDisclosure = screen.getByText('Custom instructions').closest('details');
+    expect(instructionsDisclosure).not.toHaveAttribute('open');
+    await userEvent.click(screen.getByText('Custom instructions'));
     const editor = await screen.findByRole('textbox', { name: 'Project instructions' });
     await waitFor(() => expect(editor).toHaveValue('Preserve compatibility.'));
     expect(screen.getByText('Repository files loaded: AGENTS.md')).toBeInTheDocument();
@@ -241,7 +258,9 @@ describe('App onboarding', () => {
     render(<App />);
 
     await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
+    const signOutButton = await screen.findByRole('button', { name: 'Sign out' });
+    expect(signOutButton).toHaveClass('settings-sign-out-button');
+    await userEvent.click(signOutButton);
     expect(screen.getByRole('dialog')).toHaveTextContent('try to revoke this installation');
     await userEvent.click(screen.getByRole('button', { name: 'Sign out and remove' }));
 
@@ -393,7 +412,11 @@ describe('App onboarding', () => {
     });
     api.approvals.resolve.mockResolvedValue({ ok: true });
     api.review.getDiff.mockResolvedValue([]);
-    api.events.subscribe.mockResolvedValue('subscription-id');
+    let emitEvent: ((event: (typeof events)[number]) => void) | undefined;
+    api.events.subscribe.mockImplementation(async (_input, callback) => {
+      emitEvent = callback;
+      return 'subscription-id';
+    });
     api.events.unsubscribe.mockResolvedValue({ ok: true });
     Object.defineProperty(window, 'adrouter', { configurable: true, value: api });
 
@@ -405,6 +428,18 @@ describe('App onboarding', () => {
     const tierB = screen.getByLabelText('Sponsored compute tier B');
     expect(tierB).toBeInTheDocument();
     expect(screen.getByText('Sensitive request')).toBeInTheDocument();
+    expect(screen.getAllByLabelText('Sponsored compute tier C')).toHaveLength(1);
+    const completedEvent = {
+      id: '99999999-0000-4000-8000-000000000000',
+      threadId: thread.id,
+      turnId: turnIds[3],
+      sequence: sequence + 1,
+      type: 'message.complete',
+      timestamp: '2026-07-11T12:00:01.000Z',
+      payload: { text: 'Answer C' },
+    };
+    await waitFor(() => expect(emitEvent).toBeTypeOf('function'));
+    act(() => emitEvent?.(completedEvent));
     await waitFor(() =>
       expect(screen.getAllByLabelText('Sponsored compute tier C')).toHaveLength(2)
     );

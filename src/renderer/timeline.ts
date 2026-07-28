@@ -245,7 +245,10 @@ export const buildTimeline = (
       });
       continue;
     }
-    if (event.type === 'retry' || event.type === 'compaction' || event.type === 'final.evidence') {
+    if (event.type === 'final.evidence') {
+      continue;
+    }
+    if (event.type === 'retry' || event.type === 'compaction') {
       items.push({
         id: event.id,
         kind: 'status',

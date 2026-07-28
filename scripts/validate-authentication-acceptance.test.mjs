@@ -25,8 +25,8 @@ const fixture = {
   clientKind: 'desktop',
   repository: 'adrouter/adrouterAgent',
   package: '@adrouter/agent',
-  candidateVersion: '0.1.0-beta.9',
-  releaseTag: 'v0.1.0-beta.9',
+  candidateVersion: '0.1.0-beta.10',
+  releaseTag: 'v0.1.0-beta.10',
   sourceCommit: 'a'.repeat(40),
   artifacts,
   cohorts: [
