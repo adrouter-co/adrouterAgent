@@ -2,6 +2,29 @@
 
 All notable changes to AdRouter Agent are documented here.
 
+## [0.1.0-beta.10] - 2026-07-28
+
+### Added
+
+- Added a persisted light/dark theme with an accessible bottom-left switch and smooth whole-app
+  theme transitions that respect reduced-motion preferences.
+
+### Changed
+
+- Refined the chat composer, sponsor banners, and approval surfaces into opaque flat cards, with
+  improved dark-mode colors, clearer approval actions, and extra end-of-thread clearance for the
+  post-stream banner.
+- Made drawers, composer panels, suggestions, and theme motion slower and smoother across the app.
+- Made model/custom-instruction settings collapsible and improved settings-section spacing.
+- Simplified the Changes drawer to show only changed lines in a familiar before/after diff view.
+
+### Fixed
+
+- Bottom sponsor banners now wait until model streaming finishes, and internal final-evidence
+  payloads no longer appear in the chat transcript.
+- Dark mode now keeps the main composer, settings sign-out action, and permission panel fully
+  opaque with readable contrast.
+
 ## [0.1.0-beta.9] - 2026-07-28
 
 ### Fixed
@@ -154,6 +177,7 @@ All notable changes to AdRouter Agent are documented here.
 - Updates are downloaded and installed manually.
 - A reachable AdRouter server and valid bearer token are required.
 
+[0.1.0-beta.10]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.10
 [0.1.0-beta.9]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.9
 [0.1.0-beta.8]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.8
 [0.1.0-beta.7]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.7
