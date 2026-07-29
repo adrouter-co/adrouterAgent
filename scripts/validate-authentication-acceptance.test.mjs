@@ -25,8 +25,8 @@ const fixture = {
   clientKind: 'desktop',
   repository: 'adrouter/adrouterAgent',
   package: '@adrouter/agent',
-  candidateVersion: '0.1.0-beta.10',
-  releaseTag: 'v0.1.0-beta.10',
+  candidateVersion: '0.1.0-beta.11',
+  releaseTag: 'v0.1.0-beta.11',
   sourceCommit: 'a'.repeat(40),
   artifacts,
   cohorts: [
@@ -71,4 +71,11 @@ test('acceptance validation is exact and rejects sensitive or incomplete evidenc
   const failed = structuredClone(fixture);
   failed.cohorts[1].results.turn = false;
   assert.throws(() => validateAcceptance(failed), /turn did not pass/);
+  const noWindows = structuredClone(fixture);
+  noWindows.cohorts[1].os = 'ubuntu';
+  noWindows.cohorts[1].runtimeVersion = 'Ubuntu 24.04';
+  assert.throws(() => validateAcceptance(noWindows), /physical Windows 11 x64/);
+  const wrongWindows = structuredClone(fixture);
+  wrongWindows.cohorts[1].runtimeVersion = 'Windows 10';
+  assert.throws(() => validateAcceptance(wrongWindows), /identify Windows 11/);
 });

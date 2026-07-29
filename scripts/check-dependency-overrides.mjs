@@ -8,6 +8,23 @@ const expected = new Map([
 ]);
 const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
 const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+const securityPins = new Map([
+  ['tar', '7.5.22'],
+  ['tmp', '0.2.7'],
+]);
+
+for (const [name, version] of securityPins) {
+  assert.equal(packageJson.overrides[name], version, `${name} override must remain exact`);
+  const locked = Object.entries(lock.packages).filter(
+    ([key]) => key === `node_modules/${name}` || key.endsWith(`/node_modules/${name}`)
+  );
+  assert.ok(locked.length > 0, `${name} must exist in the lockfile`);
+  for (const [key, entry] of locked) {
+    assert.equal(entry.version, version, `${key} must resolve to ${version}`);
+  }
+  const physical = JSON.parse(readFileSync(resolve('node_modules', name, 'package.json'), 'utf8'));
+  assert.equal(physical.version, version, `${name} physical resolution must be ${version}`);
+}
 
 for (const [name, replacement] of expected) {
   assert.equal(
@@ -68,4 +85,6 @@ assert.ok(
   'cross-zip still uses removed recursive fs.rmdirSync'
 );
 
-console.log('Dependency override policy, compatibility patch, and physical install passed.');
+console.log(
+  'Security pins, dependency override policy, compatibility patch, and physical install passed.'
+);

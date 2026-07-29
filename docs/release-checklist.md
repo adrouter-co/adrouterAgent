@@ -6,7 +6,8 @@ prerelease. Do not publish artifacts copied from a local `out/` directory.
 ## Automated gates
 
 - [ ] The requested version matches `package.json` and `CHANGELOG.md`.
-- [ ] Production dependency audit, lint, typecheck, unit, integration, packaged E2E, and canonical
+- [ ] Production and build-tool dependency audits, lint, typecheck, unit, integration, packaged E2E,
+      and canonical
       platform-auth compatibility checks passed without an inference credential in automation.
 - [ ] The workflow produced `darwin-universal`, `linux-x64`, and `win32-x64`
       ZIPs, the exact npm tarball, `SHA256SUMS`, per-target and launcher
@@ -49,13 +50,15 @@ prerelease. Do not publish artifacts copied from a local `out/` directory.
 - [ ] Dispatch `phase=publish-candidate`, verify the GitHub prerelease and npm `candidate`, and
       confirm `beta`/`latest` remain on the previous accepted version.
 - [ ] Generate the exact public-safe `authentication-acceptance.json` from a primary operator device
-      and distinct second OS cohort, validate it against `artifact-manifest.json`, and attach it to
+      and a distinct-OS physical Windows 11 x64 cohort, validate it against
+      `artifact-manifest.json`, and attach it to
       the matching draft/prerelease before channel promotion.
 - [ ] Install `@adrouter/agent@candidate` anonymously on every supported
       OS/CPU target; confirm it selects the correct public ZIP, validates the
       platform bundle, and creates the documented per-user installation before
       moving `beta` and `latest`.
-- [ ] Dispatch `phase=finalize-release` only after acceptance is attached; confirm it rechecks all
+- [ ] Dispatch `phase=finalize-release` only after physical Windows acceptance is attached; confirm
+      it rechecks all
       public installs, moves the intended final channels, and removes `candidate` without rebuilding.
 - [ ] Delete `NPM_DIST_TAG_TOKEN` from `npm-publish` and revoke the short-lived granular npm token
       after final verification.
