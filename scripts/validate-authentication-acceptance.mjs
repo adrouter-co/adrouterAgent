@@ -83,6 +83,14 @@ export const validateAcceptance = (value, manifest) => {
   const second = value.cohorts.find((cohort) => cohort.environmentClass === 'second-os');
   assert.ok(primary && second, 'primary-operator and second-os cohorts are required');
   assert.notEqual(primary.os, second.os, 'the second cohort must use a distinct operating system');
+  const windows = value.cohorts.find((cohort) => cohort.os === 'windows');
+  assert.ok(windows, 'a physical Windows 11 x64 acceptance cohort is required');
+  assert.equal(windows.architecture, 'x64', 'the Windows acceptance cohort must use x64');
+  assert.match(
+    windows.runtimeVersion,
+    /^Windows 11(?:[ ._+-].*)?$/,
+    'the Windows acceptance cohort must identify Windows 11'
+  );
   for (const cohort of value.cohorts) {
     exactKeys(
       cohort,

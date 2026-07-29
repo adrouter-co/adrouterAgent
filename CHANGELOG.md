@@ -2,6 +2,23 @@
 
 All notable changes to AdRouter Agent are documented here.
 
+## [0.1.0-beta.11] - 2026-07-29
+
+### Security
+
+- Pinned transitive build dependencies to `tar@7.5.22` and `tmp@0.2.7`, removing the open
+  path-traversal, archive-write, denial-of-service, and critical decompression advisory roots.
+- Replaced packaged staging-origin substring matching with parsed exact JavaScript literal checks
+  in both main and renderer bundles, backed by fresh-install packaged acceptance.
+- Added a fail-closed build audit that rejects every new high or critical advisory while narrowly
+  bounding the known dev-only Electron Forge `brace-expansion` advisory.
+
+### Changed
+
+- CI and immutable release-tag validation now run both production and build-tool dependency audits.
+- Beta.11 publishes under npm `candidate` first and cannot move `beta` or `latest` until exact
+  acceptance includes a physical Windows 11 x64 cohort.
+
 ## [0.1.0-beta.10] - 2026-07-28
 
 ### Added
@@ -177,6 +194,7 @@ All notable changes to AdRouter Agent are documented here.
 - Updates are downloaded and installed manually.
 - A reachable AdRouter server and valid bearer token are required.
 
+[0.1.0-beta.11]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.11
 [0.1.0-beta.10]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.10
 [0.1.0-beta.9]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.9
 [0.1.0-beta.8]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.8

@@ -10,9 +10,9 @@ selection and settlement use a separate display channel; sponsor data is never
 added to model prompts, tool arguments, commands, patches, or compacted agent
 context.
 
-> **Public beta:** AdRouter Agent 0.1.0-beta.10 supports macOS 12+ on Apple Silicon and Intel, Ubuntu
+> **Public beta candidate:** AdRouter Agent 0.1.0-beta.11 supports macOS 12+ on Apple Silicon and Intel, Ubuntu
 > Desktop 24.04 LTS x64, and Windows 11 x64. One agent task can run at a time, and updates are
-> installed manually.
+> installed manually. It remains on npm `candidate` until physical Windows acceptance passes.
 
 ## Install from npm
 
@@ -246,6 +246,7 @@ The available scripts are:
 | `npm run test:integration` | Run integration tests. |
 | `npm run check` | Run lint, typecheck, unit tests, and integration tests. |
 | `npm run test:e2e` | Package and run the deterministic Electron E2E suite. |
+| `npm run audit:build` | Reject new high/critical build-tool advisories outside the reviewed dev-only Forge exception. |
 | `npm run smoke:live` | Ask an exact packaged, already-approved installation for a redacted authentication diagnostic. |
 | `npm run make:mac` | Build a local universal macOS ZIP. |
 | `npm run verify:dist` | Verify the generated macOS artifacts. |

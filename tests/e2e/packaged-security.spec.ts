@@ -17,6 +17,9 @@ test.describe('packaged Electron security', () => {
     try {
       const page = await app.firstWindow();
       await expect(page).toHaveURL(/^app:\/\//);
+      await expect(page.getByLabel('AdRouter server URL')).toHaveValue(
+        'https://api-staging.adrouter.co'
+      );
       await expect(
         page.evaluate(() => typeof (window as { require?: unknown }).require)
       ).resolves.toBe('undefined');

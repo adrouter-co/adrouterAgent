@@ -1,114 +1,76 @@
-# Plan: AdRouter Agent Platform-Access Beta Rollout
+# Plan: AdRouter Agent Beta.11 Security Candidate
 
 ## Goal
 
-Make the Electron desktop Agent wire-compatible with the Router's platform-bound authentication
-contract, replace self-consistent mocks with canonical contract evidence, convert release promotion
-to a safely pausable trusted-publishing flow, and publish/accept the exact `0.1.0-beta.10`
-application and launcher artifacts.
+Resolve the current open Dependabot and CodeQL security findings, strengthen release-time dependency
+and packaged-default verification, and publish the immutable `0.1.0-beta.11` build only under npm
+`candidate` until it passes acceptance on a physical Windows 11 x64 laptop.
 
 ## Context
 
-- This is the independent `adrouter/adrouterAgent` repository for the Electron desktop app and
-  public `@adrouter/agent` launcher.
-- Source/application/launcher metadata is `0.1.0-beta.10`. Beta.8 was rejected after exact-artifact
-  acceptance found two desktop usability defects. Beta.9 was published only as a candidate and was
-  superseded before channel promotion by the approved dark-theme and UI refinement release delta.
-- Use beta.10 only if a fresh npm/Git/GitHub check shows the version, tag, release, draft, and
-  workflow identity are still unused. Otherwise increment before tagging.
-- Main-process encrypted installation storage, enrollment, refresh, signing broker, sign-out,
-  renderer-safe status, launcher/package tooling, credential-free workflows, and acceptance
-  validation are substantially implemented.
-- Pinned Node.js 25.9.0 verification on 2026-07-27 passed 18 unit files/58 tests, three
-  integration files/10 tests, and 18 launcher/release tests. Packaged E2E
-  verification also passed.
-- Those green tests are false interoperability confidence because the Desktop mocks assert the same
-  incompatible contract emitted by Desktop.
-- Router initiation requires `public_key_jwk`, `requested_scopes`, and `storage_class`.
-  Desktop currently sends `public_jwk`, `scopes`, and `storage_classification`.
-- Router device redemption requires `grant_type`, `device_code`, and `client_kind`, and rejects
-  extra fields. Desktop omits `client_kind` and may send `installation_id`.
-- Router errors are `{ error: <safe message>, code: <machine code> }`. Desktop currently treats
-  `error` as the machine-code enum, so pending, slow-down, denial, expiry, and other flows fail.
-- Router bodyless `GET /v1/profile` rejects `Content-Digest` and DPoP `bht`. Desktop currently
-  adds both for an empty body.
-- Router/CLI canonical fixture SHA-256 is
-  `93a8ec8d4eba38f9165179aa0cdfe3316f8134a882bd0426bd83339af55d17f8`;
-  Desktop has no canonical mirrored fixture.
-- The current promotion workflow performs candidate publication, anonymous smoke, and finalization
-  in one dispatch. It intentionally fails without acceptance but is not a real pause/resume
-  boundary.
-- `@adrouter/agent` already exists publicly, so `NPM_BOOTSTRAP_TOKEN` documentation and branches
-  are stale.
-- This plan ends at a beta release. Stable, production, signing/notarization, and OpenCode are out
-  of scope.
+- This is the independent `adrouter/adrouterAgent` Electron desktop repository and
+  `@adrouter/agent` launcher.
+- The source and GitHub prerelease are currently `0.1.0-beta.10`; npm `candidate` points to
+  beta.10 while `beta` and `latest` remain on the previously accepted beta.
+- Dependabot reports ten open alerts rooted in transitive build dependencies `tar@6.2.1` and
+  `tmp@0.0.33`. The same `tar` root also has an auto-dismissed critical decompression advisory.
+- CodeQL reports incomplete URL substring sanitization in the portable-distribution verifier because
+  it accepts any bundle text containing the staging origin as a substring.
+- The remaining old `brace-expansion` copies belong to the Electron Forge development toolchain.
+  The production Pi path is already patched to `5.0.8`; eliminating every Forge copy would require
+  unsupported Packager/Rebuild/Inquirer major overrides.
+- Release versions, Git tags, and npm versions are immutable. A rejected candidate must be replaced
+  by a higher beta.
+- The user requires a clean physical Windows-laptop candidate installation and acceptance pass before
+  beta.11 may move to `beta` or `latest`.
 
 ## Research Summary
 
-- Router source and OpenAPI are authoritative for request names, strict grant schemas, response
-  envelopes, proof-body rules, and client/version policy.
-- The CLI's byte-identical fixture provides a second implemented client reference; Desktop must
-  mirror the Router fixture rather than inventing a third local shape.
-- Electron `safeStorage` remains the correct privileged boundary. Main alone owns private keys,
-  refresh credentials, access memory, proof signing, and revocation; renderer sees only redacted
-  enrollment state.
-- [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) supports GitHub Actions OIDC
-  publication with npm 11.5.1+, Node 22.14+, GitHub-hosted runners, and `id-token: write`.
-  The pinned Node 25 workflow satisfies that runtime floor.
-- Trusted publishing covers `npm publish`, while current npm dist-tag operations still need a
-  narrowly scoped traditional token. Desktop therefore removes the bootstrap token and keeps only
-  a fresh `NPM_DIST_TAG_TOKEN` for finalization.
-- The launcher candidate needs publicly downloadable GitHub ZIP URLs, so candidate phase must publish
-  the GitHub prerelease before anonymous launcher smoke. It must not move npm final channels.
-- Desktop acceptance validation requires exactly four artifacts: macOS universal ZIP, Ubuntu x64
-  ZIP, Windows x64 ZIP, and launcher tarball, plus primary and distinct-second-OS cohorts.
+- `tar@7.5.22` and `tmp@0.2.7` satisfy the repository Node.js floor and remove the targeted
+  advisories. An isolated Node 25.9.0 install with exact npm overrides passed lint, typecheck, unit,
+  integration, packaging, and packaged E2E checks.
+- The full npm audit becomes actionable when normalized by advisory rather than by propagated package
+  node: all new high/critical advisories can fail closed while the single dev-only Forge
+  `GHSA-mh99-v99m-4gvg` root remains explicitly bounded.
+- The packaged staging origin currently appears as an exact string literal in the expected main and
+  renderer bundles. Parsing those bundles and comparing literal values avoids substring matching;
+  packaged E2E can independently prove the fresh-install value actually shown to users.
+- The existing two-phase release workflow already supports publishing `candidate`, pausing for
+  exact-artifact acceptance, and moving final channels without rebuilding.
 
 ## Constraints
 
-- Use repository-pinned Node.js 25.9.0, npm 10+, Electron 43, the existing lockfile, Forge, and the
-  existing process boundaries.
-- Keep key generation, encrypted persistence, refresh, proof signing, and revocation in main.
-  Renderer/preload never receives private or token material.
-- Keep the main/utility broker purpose-, origin-, method-, path-, size-, and version-allowlisted; it
-  must not become a general signing oracle.
-- `safeStorage` must fail closed on unavailable/unsafe backends; no plaintext or file-only fallback
-  is allowed for hosted Desktop auth.
-- For POST requests, sign and send exactly one serialized byte sequence. For bodyless GET requests,
-  omit body digest headers and claims entirely.
-- Preserve HTTPS/loopback policy, renderer isolation, sandbox, workspace containment, one-time
-  mutation/command approvals, stream/cancellation/no-replay behavior, and sponsor separation.
-- Do not hand-edit generated `out/`, `.vite/`, packaged ZIPs, provenance, or `UNBUILT`
-  source placeholders.
-- Versions/tags/artifacts are immutable. Any candidate defect uses a higher beta.
-- Publishing, tagging, workflow/environment configuration, release uploads, dist-tag changes, and
-  token cleanup require explicit authorization.
-- Preserve unrelated dirty/untracked work, including `AGENTS.md`.
+- Use repository-pinned Node.js 25.9.0, npm 10+, Electron 43, and exact dependency versions.
+- Preserve renderer isolation, encrypted installation storage, HTTPS/loopback policy, workspace
+  containment, one-time mutation/command approvals, fail-closed sandboxing, and sponsor separation.
+- Preserve existing public APIs, IPC contracts, persisted state, and user-facing behavior.
+- Keep changes minimal and reviewable; do not force unsupported Electron Forge dependency majors.
+- Do not hand-edit generated `out/`, `.vite/`, release artifacts, provenance, or launcher
+  `UNBUILT` placeholders.
+- Do not tag, publish, upload release assets, move npm channels, configure secrets, or approve
+  protected environments without explicit release authorization and required authentication.
+- Keep `beta` and `latest` unchanged until physical Windows acceptance succeeds.
 
 ## Out of Scope
 
-- Stable `0.1.0`, production Router rollout, automatic updates, or a stable channel.
-- Developer ID signing/notarization or changing the unsigned portable beta posture.
-- Linux/Windows arm64 desktop artifacts.
-- OpenCode compatibility/release work.
-- General UI, sandbox, task, diff, model, provider, or dependency redesign.
-- Hardware-backed/non-exportable keys or attestation.
-- Deleting hosted legacy credential records or remote AdRouter secrets.
+- Stable `0.1.0`, automatic updates, Developer ID signing, notarization, or new native targets.
+- General dependency modernization or unrelated Electron Forge migration.
+- Runtime router/authentication, UI, schema, IPC, sandbox, or sponsor-channel redesign.
+- Manual dismissal of GitHub security alerts.
+- Modification or withdrawal of immutable beta.10 artifacts absent compromise evidence.
 
 ## Reversibility
 
-- Fix wire compatibility behind the existing versioned main-process auth boundary; do not broaden
-  renderer IPC or destroy unrelated settings/tasks.
-- Keep custom/loopback bearer configuration isolated for development while staging is dual auth.
-- Candidate publication becomes an explicit phase. A rejected beta leaves `beta`/`latest`
-  unchanged and is replaced by a higher version.
-- Manual acceptance binds all four immutable artifacts and does not modify them.
-- Router Desktop policy remains observe until the accepted beta completes the 24-hour staging soak;
-  policy can return to observe independently of the public release.
-- Remove temporary npm authentication only after final public verification.
+- Dependency pins and audit policy are isolated manifest/script changes and can be reverted together.
+- The new packaged verifier replaces only the vulnerable check and is covered by focused fixtures
+  before the old behavior is removed.
+- Candidate publication does not move final channels. A failed beta.11 remains available by exact
+  version and is superseded by beta.12.
+- Final promotion reuses the accepted immutable artifacts and can run only after evidence is attached.
 
 ---
 
-## Step A: Correct the Desktop-to-Router wire contract
+## Step A: Remediate vulnerable build dependencies
 
 ### Status
 
@@ -116,110 +78,74 @@ application and launcher artifacts.
 
 ### Objective
 
-Make enrollment, token polling/refresh, profile, and turn requests match Router source/OpenAPI byte
-for byte and convert every known mismatch into a regression test.
+Remove the vulnerable `tar` and `tmp` trees and ensure future high/critical build advisories fail
+the normal CI and release validation paths.
 
 ### Tasks
 
-- [x] Change the initiation JSON to exact strict keys:
-      `client_kind`, `client_version`, `display_name`, `public_key_jwk`,
-      `requested_scopes`, and `storage_class`.
-- [x] Preserve one serialization of that object for `Content-Digest`, DPoP `bht`, and the
-      transmitted POST body.
-- [x] Change the device grant to exactly `grant_type`, `device_code`, and
-      `client_kind: "desktop"`; never send `installation_id`.
-- [x] Keep refresh grant exactly `grant_type`, `refresh_token`, and `installation_id`.
-- [x] Change OAuth/platform error parsing to accept bounded
-      `{ error: string, code: enum }`; branch on `code` and use `error` only as sanitized
-      display text.
-- [x] Cover `authorization_pending`, `slow_down`, `access_denied`, `expired_token`,
-      `invalid_request`, `invalid_access_token`, `invalid_dpop_proof`,
-      `use_dpop_nonce`, and `client_upgrade_required` as applicable.
-- [x] Make `ProtectedRouterRequest.body` and `ProtectedRouterHeaders["Content-Digest"]` optional
-      for bodyless requests.
-- [x] Update proof creation so `GET /v1/profile` has no `Content-Digest` and no `bht`, while
-      retaining `ath`, method, URL, nonce, client kind, and version.
-- [x] Require body bytes and digest/bht for `POST /v1/agent/turn` and auth POST routes.
-- [x] Keep one bounded header-only nonce retry before body consumption and reject authenticated
-      redirects.
-- [x] Validate token response `client_kind`, derive family expiry from
-      `refresh_expires_in`, and retain safe reconnect behavior on mismatch/rotation failure.
-- [x] Map `426` and minimum-version headers into existing upgrade/reconnect state without exposing
-      response bodies.
-- [x] Mirror the canonical Router fixture, pin its checksum in release metadata, and test every
-      positive/negative vector.
-- [x] Replace tests that assert `public_jwk`, `scopes`, `storage_classification`, device
-      `installation_id`, error-as-code, or GET body binding.
-- [x] Add an integration fixture that imports Router-owned request/response examples or an exact
-      mirrored file, so Desktop mocks cannot drift silently.
+- [x] Add exact npm overrides for `tar@7.5.22` and `tmp@0.2.7`; regenerate the lockfile.
+- [x] Extend dependency-override checks to assert package manifest, lockfile, and physical installed
+      versions, plus the existing production Pi `brace-expansion@5.0.8` replacement.
+- [x] Add a build audit script that parses `npm audit --json`, rejects malformed/unavailable audit
+      results, and fails for every unapproved high/critical advisory.
+- [x] Permit only `GHSA-mh99-v99m-4gvg` when every affected node is dev-only and production remains
+      patched; record a rationale and upstream-removal condition.
+- [x] Wire the build audit into local checks, CI validation, and release-tag validation while
+      retaining the production dependency audit.
 
 ### Relevant Files
 
-- `src/main/installation-auth.ts`
-- `src/main/platform-auth-crypto.ts`
-- `src/runtime/router-client.ts`
-- `src/shared/runtime-protocol.ts`
-- `src/shared/contracts.ts`
-- `tests/main/installation-auth.test.ts`
-- `tests/main/platform-auth-crypto.test.ts`
-- `tests/integration/router-client.test.ts`
-- Packaged E2E fixtures
-- `packages/agent-launcher/release-manifest.json` or the authoritative fixture metadata location
+- `package.json`
+- `package-lock.json`
+- `scripts/check-dependency-overrides.mjs`
+- `.github/workflows/ci.yml`
+- `.github/workflows/release-tag.yml`
 
 ### Expected Changes
 
-- modify: initiation/grant/error schemas, body-optional proof/header types, profile/turn transport,
-  fixture metadata, tests, and safe error mapping
-- create: mirrored canonical `platform-auth-v1` fixture if absent
+- modify: dependency overrides/lockfile, dependency assertions, audit policy, and workflow gates
+- create: focused build-audit policy script and tests if no suitable script exists
 
 ### Do Not Modify
 
-- Renderer access to Node/Electron, general IPC surface, sandbox/approvals, prompt/tool mapping,
-      stream events, or generated artifacts.
-- Make POST body bindings optional or allow caller-supplied protected headers.
-- Add OpenCode compatibility logic.
+- Electron Forge/Packager/Rebuild/Inquirer major versions.
+- Production Pi override semantics or runtime dependencies unrelated to the alerts.
 
 ### Commands
 
-~~~bash
-nvm use 25.9.0
-npm run lint
-npm run typecheck
+```bash
+npm ci
+npm run check:dependency-overrides
+npm audit --omit=dev --audit-level=moderate
+npm run audit:build
 npm run test
-npm run test:integration
-npm run test:e2e
-~~~
+```
 
 ### Acceptance Criteria
 
-- [x] Initiation and both grant types pass Router strict schemas exactly.
-- [x] Pending/slow-down/denied/expired and upgrade/reconnect behavior branches on Router `code`.
-- [x] Profile GET sends no body-binding header/claim; turn/auth POSTs bind exact bytes.
-- [x] Canonical negative vectors cover changed body bytes, method, URL, token, nonce, key, kind, and version.
-- [x] Fixture bytes/checksum match Router/CLI exactly.
-- [x] Renderer receives no key/token/code-beyond-user-code/nonce/proof/header material.
-- [x] Unit, integration, and packaged E2E tests pass with Router-derived mocks.
+- [x] Installed and locked `tar` is exactly `7.5.22`; `tmp` is exactly `0.2.7`.
+- [x] Production audit reports zero vulnerabilities.
+- [x] Full audit has no unapproved high/critical advisory and no critical advisory.
+- [x] A new high/critical advisory or an invalid dev-only exception fails closed.
+- [x] Dependency and workflow-policy tests pass.
 
 ### Validation Results
 
-- Corrected lint/typecheck/unit: passed (18 files, 58 tests).
-- Corrected integration: passed outside the Codex filesystem sandbox (three files, 10 tests); the
-  first sandboxed attempt could not create the macOS sandbox-runtime Unix socket.
-- Corrected packaged E2E: passed (functional flow and packaged renderer-security tests).
-- Canonical fixture SHA-256 matched Router and CLI byte-for-byte:
-  `93a8ec8d4eba38f9165179aa0cdfe3316f8134a882bd0426bd83339af55d17f8`.
-- Live production-shaped Router integration: not run.
+- `npm install`: passed under Node.js 25.9.0; postinstall dependency patches applied.
+- `npm run check:dependency-overrides`: passed.
+- `npm audit --omit=dev --audit-level=moderate`: passed with zero vulnerabilities.
+- `npm run audit:build`: passed; 29 high-severity propagated nodes resolve only to the reviewed GHSA.
+- `node --test scripts/build-audit-policy.test.mjs`: passed, five tests.
+- `node scripts/check-workflows.mjs`: passed.
 
 ### Findings / Notes
 
-- This step is a release blocker even though the existing suite is green.
-- Router uses strict Zod objects for initiation and grants, so extra/renamed fields are not harmless.
-- The matching Router and CLI fixture files are currently untracked in their sibling working trees;
-  exact bytes are proven, but fixture provenance is not yet tied to a committed sibling revision.
+- The bounded Forge exception is follow-up debt, not a production dependency exception.
+- npm reports no critical advisories after the exact tar/tmp overrides.
 
 ---
 
-## Step B: Revalidate process boundaries and package behavior
+## Step B: Harden packaged staging-origin verification
 
 ### Status
 
@@ -227,55 +153,250 @@ npm run test:e2e
 
 ### Objective
 
-Prove the corrected contract without weakening main/utility/renderer isolation, safe storage,
-refresh atomicity, stream behavior, or native packaging.
+Make the release verifier require the exact packaged default origin and prove the user-visible
+fresh-install value without URL substring matching.
 
 ### Tasks
 
-- [ ] Re-run safeStorage unavailable/unsafe-backend tests and confirm hosted enrollment fails before
-      key creation/persistence.
-- [ ] Re-run encrypted pending/installation migration, restart, refresh single-flight, rotation
-      persistence failure, sign-out, and unrelated-settings preservation.
-- [ ] Verify the main/utility broker accepts only the configured origin, approved methods/paths, and
-      bounded exact bytes; renderer cannot invoke it.
-- [ ] Test concurrent protected requests and refresh, header replacement attempts, cancellation,
-      timeout, authenticated redirect rejection, one nonce retry, and partial-stream no replay.
-- [ ] Test signed profile, agent turn, tools, stream ordering, usage/settlement, valid NONE, and
-      reconnect/upgrade states against a production-shaped local Router.
-- [ ] Run source parity, public-boundary, launcher package, release readiness, and local macOS
-      universal packaging/verification.
-- [ ] Let release-tag native runners provide Ubuntu x64 and Windows x64 artifact evidence; do not
-      claim those from a macOS build.
-- [ ] Review diagnostics and logs for redaction; launcher doctor must not infer authenticated app
-      state it cannot read.
-- [ ] Record the exact Router fixture/commit and all validation results.
+- [x] Add exact `acorn@8.17.0` as a direct dev dependency for deterministic bundle parsing.
+- [x] Extract a testable verifier helper that parses only expected main/renderer JavaScript bundles
+      and compares complete string literal values.
+- [x] Require the canonical origin in both main and renderer; fail on malformed or unexpected bundle
+      layouts.
+- [x] Add regression tests for exact success, hostile suffix/prefix, path/query embedding, unrelated
+      text, missing origin, and malformed JavaScript.
+- [x] Extend packaged E2E to assert a fresh installation displays exactly
+      `https://api-staging.adrouter.co`.
 
 ### Relevant Files
 
-- `src/main/`
-- `src/preload/`
-- `src/runtime/`
-- `src/renderer/`
-- `tests/`
-- `packages/agent-launcher/`
-- `scripts/`
-- `forge.config.ts`
+- `scripts/verify-portable-dist.mjs`
+- `tests/e2e/packaged-security.spec.ts`
+- focused script tests
 
 ### Expected Changes
 
-- modify: tests or implementation only when a corrected-contract gate exposes a real defect
-- no change: supported platform matrix or unsigned/not-notarized posture
+- modify: portable verifier and packaged-security E2E
+- create: reusable exact-literal helper/test if needed
 
 ### Do Not Modify
 
-- Security/process boundaries to make a test pass.
-- Generated package/output files by hand.
-- User projects, tasks, chats, or unrelated configuration.
+- Runtime URL validation, official-origin authentication policy, renderer isolation, or generated
+  bundle output.
 
 ### Commands
 
-~~~bash
-nvm use 25.9.0
+```bash
+npm run test
+npm run test:e2e
+npm run verify:dist
+```
+
+### Acceptance Criteria
+
+- [x] No staging-origin substring allowlist remains in the portable verifier.
+- [x] Exact literals in expected bundles pass and all longer/embedded/malformed cases fail.
+- [x] Fresh packaged onboarding shows exactly the canonical staging origin.
+- [x] Existing portable artifact integrity checks remain intact.
+
+### Validation Results
+
+- `npm run test`: passed, 20 files and 68 tests.
+- `node --test scripts/verify-packaged-default.test.mjs`: passed, nine tests including Windows ASAR separators.
+- `npm run test:e2e`: passed, including the fresh-install exact-origin assertion.
+- `npm run verify:dist`: passed for the beta.11 universal macOS artifact.
+
+### Findings / Notes
+
+- Static bundle verification covers native artifacts; packaged E2E proves the literal is active
+  configuration rather than dead bundle text.
+- Windows ASAR entry names use backslashes; the verifier normalizes separators for exact matching,
+  retains original extraction names, and rejects normalized-path collisions.
+
+---
+
+## Step C: Prepare beta.11 source and release policy
+
+### Status
+
+`done`
+
+### Objective
+
+Make every authoritative source, launcher, documentation, and workflow check agree on the immutable
+beta.11 candidate and its Windows-only final promotion gate.
+
+### Tasks
+
+- [x] Confirm npm version, Git tag, GitHub release, and workflow namespace for beta.11 are unused.
+- [x] Set application/launcher version to `0.1.0-beta.11` and native build number to `10011`
+      across authoritative manifests and source-parity checks.
+- [x] Update changelog, README, security supported-version table, release procedure, and checklist.
+- [x] Document that `candidate` replaces beta.10 while beta/latest remain unchanged until the
+      physical Windows 11 x64 cohort passes.
+- [x] Extend workflow-policy checks to require the production audit and new build audit before native
+      builds or publication.
+
+### Relevant Files
+
+- authoritative manifests and source-parity scripts
+- `CHANGELOG.md`
+- `README.md`
+- `SECURITY.md`
+- `RELEASE.md`
+- `docs/release-checklist.md`
+
+### Expected Changes
+
+- modify: beta.11 version/build metadata, release notes/policy, and workflow assertions
+
+### Do Not Modify
+
+- beta.10 tag/assets, launcher release-manifest hashes, stable channel policy, signing posture, or
+  unsupported platform claims.
+
+### Commands
+
+```bash
+npm run check:source-parity
+npm run check:workflows
+npm run check:launcher-package
+npm run verify:release-readiness
+git diff --check
+```
+
+### Acceptance Criteria
+
+- [x] All authoritative source/version surfaces agree on beta.11 and build 10011.
+- [x] Release policy publishes only `candidate` before Windows acceptance.
+- [x] Beta/latest promotion cannot occur without exact Windows 11 x64 acceptance evidence.
+- [x] Beta.10 remains immutable and installable by exact version.
+
+### Validation Results
+
+- Remote beta.11 namespace: npm version, GitHub release, and Git tag are unused.
+- `npm run check:public`: passed source parity, dependency, public-boundary, docs, and workflow policy.
+- `npm run check:launcher-package`: passed.
+- `npm run verify:release-readiness`: passed, including 30 launcher/release tests.
+
+### Findings / Notes
+
+- Stop and allocate a higher beta if any beta.11 namespace is occupied.
+
+---
+
+## Step D: Publish candidate and require physical Windows acceptance
+
+### Status
+
+`in_progress`
+
+### Objective
+
+Publish the exact beta.11 artifacts without moving final npm channels, then wait for the user's
+physical Windows laptop acceptance before finalization.
+
+### Tasks
+
+- [ ] After explicit release authorization, tag clean reviewed main as `v0.1.0-beta.11` and push
+      the immutable tag.
+- [ ] Approve native build workflow and verify macOS universal, Ubuntu x64, Windows x64, launcher,
+      checksums, SBOMs, attestations, and manifest.
+- [ ] Dispatch `phase=publish-candidate`; verify npm `candidate` points to beta.11 while
+      `beta`/`latest` remain unchanged.
+- [ ] On a clean physical Windows 11 x64 laptop, install `@adrouter/agent@candidate` anonymously
+      and complete launch, enrollment, signed profile/turn, refresh/revocation, project/task,
+      approval, command, sandbox, persistence, and redaction checks.
+- [ ] Generate and attach exact sanitized authentication acceptance evidence.
+- [ ] Only after the Windows cohort passes, dispatch `phase=finalize-release`, move `beta` and
+      `latest` to beta.11, and remove `candidate`.
+- [ ] If Windows acceptance fails, leave final channels unchanged and fix forward with beta.12.
+
+### Relevant Files
+
+- `.github/workflows/release-tag.yml`
+- `.github/workflows/promote-release.yml`
+- release assets and acceptance schema
+
+### Expected Changes
+
+- create: immutable GitHub prerelease and npm beta.11 candidate
+- modify later: final npm channels only after Windows acceptance
+
+### Do Not Modify
+
+- Published beta.11 bytes/tag after candidate publication.
+- Final channels before physical Windows acceptance.
+
+### Commands
+
+```bash
+git tag -a v0.1.0-beta.11 -m "AdRouter Agent 0.1.0-beta.11"
+git push origin v0.1.0-beta.11
+gh workflow run promote-release.yml --ref v0.1.0-beta.11 -f tag=v0.1.0-beta.11 -f phase=publish-candidate -f channel=beta
+npm view @adrouter/agent dist-tags --json
+```
+
+### Acceptance Criteria
+
+- [ ] Candidate artifacts are exact, public, and anonymously installable on every supported target.
+- [ ] Beta/latest remain unchanged until physical Windows acceptance passes.
+- [ ] Acceptance binds the exact tag, commit, three ZIPs, launcher, and Windows cohort.
+- [ ] Failed acceptance results in a higher immutable beta rather than replaced artifacts.
+
+### Validation Results
+
+- Candidate publication: not run; requires release authorization/protected GitHub workflow.
+- Physical Windows acceptance: not run; requires the user's Windows laptop.
+- Finalization: not run and prohibited before Windows acceptance.
+
+### Findings / Notes
+
+- npm trusted publishing handles candidate publication; a short-lived package-scoped dist-tag token
+  is needed only for finalization.
+
+---
+
+## Step E: Final verification and cleanup
+
+### Status
+
+`review`
+
+### Objective
+
+Prove the complete local source change, reconcile GitHub security results, and remove temporary
+implementation artifacts before release handoff.
+
+### Tasks
+
+- [x] Run the complete pinned-runtime validation suite, packaged E2E, launcher/package, public
+      boundary, source parity, workflow policy, release readiness, and local native verification.
+- [x] Review the final diff for unrelated changes, generated output, secrets, stale versions,
+      weakened checks, and expanded security boundaries.
+- [x] Remove temporary debug/output files and update validation results in this plan.
+- [ ] After default-branch scans, confirm all current `tar`/`tmp` alerts close, the critical
+      `tar` advisory no longer applies, and CodeQL alert 1 closes.
+- [ ] Record the remaining dev-only Forge exception and its upstream removal follow-up.
+
+### Relevant Files
+
+- `package.json` and lockfile
+- `scripts/`, `tests/`, and workflows
+- release documentation and `PLAN.md`
+
+### Expected Changes
+
+- modify: validation results and documentation only if final checks expose a discrepancy
+- delete: only temporary generated/debug files
+
+### Do Not Modify
+
+- Security/process boundaries, published artifacts, or unrelated user work merely to pass a gate.
+
+### Commands
+
+```bash
 npm ci
 npm run check
 npm run test:e2e
@@ -284,437 +405,42 @@ npm run verify:release-readiness
 npm run make:mac
 npm run verify:dist
 git diff --check
-~~~
-
-### Acceptance Criteria
-
-- [ ] Corrected authentication passes local Router integration and every process-boundary test.
-- [ ] Private/refresh material remains encrypted in main; access remains memory-only; renderer stays
-      isolated.
-- [ ] Refresh/nonce/cancellation behavior cannot replay a partial stream or falsely revoke a family.
-- [ ] Public/launcher/source-parity/release-readiness gates pass.
-- [ ] macOS universal verifies locally; Linux/Windows remain explicit native-runner gates.
-- [ ] No secret, developer path, test hook, or expanded signing capability is packaged/logged.
-
-### Validation Results
-
-- Post-correction lint, typecheck, unit, integration, public-boundary, source-parity,
-  launcher-package, workflow-policy, and release-readiness gates: passed.
-- Post-correction packaged E2E: passed for the local macOS arm64 package.
-- Full `npm run check` components passed; integration required a host-permitted rerun because the
-  outer Codex sandbox denied the sandbox-runtime Unix socket.
-- Local macOS universal make/verify: passed on 2026-07-27; distribution verification confirmed the
-  credential-free ad-hoc app and ZIP.
-- Production-shaped local Router and native Linux/Windows runner gates: not run; exact-candidate
-  hosted acceptance and release-tag native runners remain the authoritative gates.
-
-### Findings / Notes
-
-- A local macOS package cannot satisfy Ubuntu/Windows release evidence.
-
----
-
-## Step C: Convert Desktop promotion to two-phase trusted publishing
-
-### Status
-
-`in_progress`
-
-### Objective
-
-Create an explicit pause between candidate publication and final channel movement, use OIDC for the
-existing npm package, and retain only a short-lived dist-tag token.
-
-### Tasks
-
-- [x] Add required `phase` input with values `publish-candidate` and
-      `finalize-release`; retain `channel` for beta/stable policy but use beta in this rollout.
-- [x] Make candidate phase idempotently verify the exact tag/draft/assets, publish the GitHub
-      prerelease if still draft, verify all public ZIP downloads, publish the launcher tarball under
-      `candidate` through npm OIDC/provenance, and run anonymous platform smoke.
-- [x] End candidate phase successfully without requiring acceptance or moving `beta`/`latest`.
-- [x] Make finalization verify the already-public exact release/candidate, require
-      `authentication-acceptance.json`, rerun public smoke as needed, and then move final tags and
-      remove `candidate`.
-- [x] Ensure rerunning either phase is a no-op only when exact tag, version, commit, checksums,
-      registry integrity, and channel state match; conflicting state fails closed.
-- [x] Remove the obsolete npm bootstrap token from workflow source, repository settings scripts/docs,
-      `RELEASE.md`, and notices.
-- [x] Remove the package-existence branch that falls back to a bootstrap token; `@adrouter/agent`
-      already exists.
-- [x] Configure npm trusted publisher: organization `adrouter`, repository
-      `adrouterAgent`, workflow `promote-release.yml`, environment `npm-publish`, allowed
-      action `npm publish`.
-- [x] Preserve `id-token: write` only on candidate publication and preserve GitHub-hosted runners.
-- [x] Keep `NPM_DIST_TAG_TOKEN` only on finalization. Require a package-scoped read/write granular
-      token, bypass-2FA for automation, one-to-seven-day expiry, and revocation after verification.
-- [x] Keep acceptance validation at exactly four artifacts and two distinct OS cohorts.
-- [x] Extend workflow-policy tests to reject missing phase guards, one-shot dependencies,
-      bootstrap-token names, direct latest publication, absent acceptance, and missing candidate
-      cleanup.
-- [x] Update release docs/checklists with the exact two dispatch commands and recovery path.
-
-### Relevant Files
-
-- `.github/workflows/promote-release.yml`
-- `.github/workflows/release-tag.yml`
-- `scripts/check-workflows.mjs`
-- `scripts/validate-authentication-acceptance.mjs`
-- `scripts/verify-release-assets.mjs`
-- `scripts/configure-github-repository.mjs`
-- `RELEASE.md`
-- `docs/release-checklist.md`
-
-### Expected Changes
-
-- modify: promotion phases/guards, npm auth, workflow-policy tests, settings/release documentation
-- delete: bootstrap-token branches/references
-
-### Do Not Modify
-
-- Native release-tag build inventory, launcher integrity, provenance/SBOM/checksum requirements,
-      supported targets, or accepted artifacts.
-- Remote configuration before explicit release authorization.
-- Add an AdRouter inference credential to any workflow.
-
-### Commands
-
-~~~bash
-nvm use 25.9.0
-npm run check
-npm run test:e2e
-npm run check:launcher-package
-npm run verify:release-readiness
-rg -n 'NPM_BOOTSTRAP_TOKEN|ADROUTER_STAGING_API_KEY' .github RELEASE.md docs scripts
-~~~
-
-### Acceptance Criteria
-
-- [x] Candidate and finalization are separate protected, resumable dispatches.
-- [x] Candidate publishes the GitHub prerelease/ZIP URLs and npm `candidate`, then stops cleanly.
-- [x] Finalization cannot start channel movement without exact four-artifact/two-cohort acceptance.
-- [x] OIDC publishes the existing package and bootstrap-token logic is absent.
-- [x] Only final dist-tag commands receive `NPM_DIST_TAG_TOKEN`.
-- [x] Beta finalization moves `beta` and `latest`, removes `candidate`, and never rebuilds.
-- [x] Workflow/release checks pass with no AdRouter inference credential.
-
-### Validation Results
-
-- Two-phase workflow, policy tests, documentation, YAML parsing, and release-readiness gates: passed.
-- npm trusted publisher remote configuration and live OIDC candidate publication passed for
-  beta.9; final channel movement remains intentionally separate.
-- GitHub CLI is authenticated as active `adrouter` organization admin `HappyCool121`; the public
-  repository grants admin access and both protected release environments exist. Neither environment
-  currently has a configured secret.
-
-### Findings / Notes
-
-- The GitHub prerelease must be public during candidate testing because the launcher downloads ZIPs
-  from public release URLs.
-
----
-
-## Step D: Build and publish the immutable Desktop candidate
-
-### Status
-
-`in_progress`
-
-### Objective
-
-Tag clean reviewed beta.10 source, build all supported native artifacts, and publish the exact launcher
-under `candidate` without moving final npm channels.
-
-### Tasks
-
-- [ ] Recheck npm version/dist-tags, Git tag, GitHub release/draft, and running workflow state for
-      beta.10 immediately before tagging; increment if occupied.
-- [ ] Merge the corrected contract and two-phase workflow through reviewed main.
-- [ ] Run pinned-runtime clean-checkout source, E2E, launcher, public-boundary, parity, and release
-      readiness gates.
-- [ ] In npm package settings, configure the exact trusted publisher described in Step C.
-- [ ] Create a fresh package-scoped `NPM_DIST_TAG_TOKEN` and enter it interactively in protected
-      `npm-publish`; never print or pass it in command arguments.
-- [ ] Create/push the immutable annotated `v0.1.0-beta.10` tag from clean reviewed main.
-- [ ] Approve the expected secret-free `macos-release` environment and wait for macOS universal,
-      Ubuntu x64, and Windows x64 builds.
-- [ ] Verify draft tag/commit, three ZIPs, launcher tarball, `artifact-manifest.json`,
-      `SHA256SUMS`, SBOMs, attestations, target integrity, and absence of secrets/developer paths.
-- [ ] Dispatch `phase=publish-candidate`, `channel=beta`.
-- [ ] Verify the GitHub prerelease is public, each ZIP is anonymously downloadable, npm
-      `candidate` matches the exact launcher, and `beta`/`latest` still point to beta.7.
-- [ ] Stop on any identity/integrity mismatch; allocate a higher beta rather than replacing assets.
-
-### Relevant Files
-
-- `package.json`
-- `package-lock.json`
-- `CHANGELOG.md`
-- `packages/agent-launcher/package.json`
-- `packages/agent-launcher/release-manifest.json`
-- `.github/workflows/release-tag.yml`
-- `.github/workflows/promote-release.yml`
-
-### Expected Changes
-
-- create: immutable beta tag, three native ZIPs, launcher tarball, manifests/SBOMs/checksums/
-  attestations, public GitHub prerelease, and npm candidate
-- retain: npm `beta`/`latest` on beta.7 before finalization
-
-### Do Not Modify
-
-- `UNBUILT` source placeholders by hand, used tags/versions, generated local artifacts as public
-      assets, unsupported target claims, or another repository.
-- Remote state without exact release authorization.
-
-### Commands
-
-~~~bash
-npm view @adrouter/agent version dist-tags --json
-gh release list --repo adrouter/adrouterAgent --limit 10
-git ls-remote --tags origin refs/tags/v0.1.0-beta.10
-
-nvm use 25.9.0
-npm ci
-npm run check
-npm run test:e2e
-npm run check:launcher-package
-npm run verify:release-readiness
 git status --short
-
-gh secret set NPM_DIST_TAG_TOKEN --repo adrouter/adrouterAgent --env npm-publish
-git tag -a v0.1.0-beta.10 -m "AdRouter Agent 0.1.0-beta.10"
-git push origin v0.1.0-beta.10
-
-gh release view v0.1.0-beta.10 --repo adrouter/adrouterAgent --json isDraft,isPrerelease,tagName,assets
-gh workflow run promote-release.yml --repo adrouter/adrouterAgent --ref v0.1.0-beta.10 -f tag=v0.1.0-beta.10 -f phase=publish-candidate -f channel=beta
-npm view @adrouter/agent@0.1.0-beta.10 version dist.integrity repository --json
-npm view @adrouter/agent dist-tags --json
-~~~
+```
 
 ### Acceptance Criteria
 
-- [ ] Beta.10 is unused and tags a clean reviewed commit with the functional fixes and prior contract/workflow changes.
-- [ ] All three native runner builds and launcher/artifact integrity checks pass.
-- [ ] GitHub prerelease exposes the unchanged ZIPs and npm candidate exposes the exact launcher.
-- [ ] Trusted publishing/provenance succeeds without `NPM_BOOTSTRAP_TOKEN`.
-- [ ] `beta`/`latest` remain on beta.7 and only `candidate` points to beta.10.
-- [ ] No secret or private installation state enters workflows/artifacts.
+- [ ] Every applicable local source/package/release gate passes.
+- [ ] No open targeted Dependabot or CodeQL finding remains after default-branch scans.
+- [ ] Only the explicitly documented dev-only Forge advisory remains.
+- [ ] No credential, developer path, test hook, or unintended generated file is committed.
+- [ ] The repository is ready for protected beta.11 candidate publication.
 
 ### Validation Results
 
-- Beta.8 candidate publication completed, but exact-candidate acceptance rejected it on 2026-07-28:
-  project/new-chat transitions displayed stale transcript state and the Changes drawer never
-  rendered its Monaco diff under the offline CSP. Beta.8 must not be finalized.
-- Beta.9 candidate publication completed successfully, but its immutable tag predates the approved
-  dark-theme and UI refinement delta, so it remains unpromoted and beta.10 is the fix-forward build.
-- Clean pre-tag validation passed on 2026-07-27: `npm ci`, `npm run check`, packaged E2E,
-  production dependency audit, launcher-package/release-readiness, local universal macOS make, and
-  distribution verification.
-- Beta.10 remote version/tag/release vacancy and publication remain to run.
+- Full local validation: passed; integration required a host-permitted rerun for the sandbox socket.
+- Native macOS universal package/verification: passed.
+- GitHub post-merge security scans: not run
 
 ### Findings / Notes
 
-- The beta.10 source version does not reserve the remote immutable namespace until its tag is pushed.
-
----
-
-## Step E: Accept the exact Desktop artifacts and finalize beta
-
-### Status
-
-`todo`
-
-### Objective
-
-Test the exact launcher/native candidate on two operating systems, attach sanitized four-artifact
-evidence, and move beta channels without rebuilding.
-
-### Tasks
-
-- [ ] Install exact `@adrouter/agent@0.1.0-beta.10`/`@candidate` on the primary operator system,
-      verify launcher integrity and downloaded ZIP checksum, then launch the packaged app.
-- [ ] Confirm `safeStorage` is supported, select “Connect this Agent,” compare the WebUI code, and
-      approve the exact Desktop installation.
-- [ ] Complete signed profile/turn, stream completion, token rotation, replay/tamper/token-without-key
-      rejection, revocation, minimum-version handling, diagnostics redaction, and local cleanup.
-- [ ] Verify renderer isolation, sandbox, workspace containment, mutation/command approvals,
-      cancellation/no replay, and valid NONE behavior in the packaged app.
-- [ ] Repeat the core auth/storage/launch matrix on a distinct second OS cohort.
-- [ ] Record `os_encrypted` on both cohorts; unsafe storage must fail closed.
-- [ ] Download `artifact-manifest.json`; create acceptance JSON containing all three ZIP SHA-256
-      values plus launcher tarball SHA-256 and the two exact cohort results.
-- [ ] Validate locally, manually inspect for sensitive/high-entropy values, and upload to the matching
-      GitHub prerelease.
-- [ ] Dispatch `phase=finalize-release`, `channel=beta`; require acceptance and anonymous
-      platform smoke before dist-tag changes.
-- [ ] Verify `beta`/`latest` point to beta.10, `candidate` is absent, and npm/GitHub/
-      checksums/provenance/acceptance identities agree.
-- [ ] Delete `NPM_DIST_TAG_TOKEN` and revoke the granular npm token.
-- [ ] Hand exact beta.10 identity/evidence to the Router owner for the 24-hour staging soak.
-
-### Relevant Files
-
-- `scripts/authentication-acceptance.schema.json`
-- `scripts/validate-authentication-acceptance.mjs`
-- `docs/manual-testing.md`
-- `docs/release-checklist.md`
-- GitHub release assets and npm registry state
-
-### Expected Changes
-
-- create: sanitized exact four-artifact acceptance asset
-- modify: npm `beta`/`latest` and `candidate` through protected finalization
-- retain: identical public GitHub prerelease assets
-
-### Do Not Modify
-
-- Candidate ZIPs/tarball, tag, commit, acceptance evidence after validation, stable metadata, or
-      local user projects/history beyond intentional auth cleanup.
-- OpenCode or Router production state.
-
-### Commands
-
-~~~bash
-npm install --global @adrouter/agent@0.1.0-beta.10
-adrouter-agent --version
-adrouter-agent doctor --json
-adrouter-agent
-
-gh release download v0.1.0-beta.10 --repo adrouter/adrouterAgent --pattern artifact-manifest.json
-node scripts/validate-authentication-acceptance.mjs authentication-acceptance.json --manifest artifact-manifest.json
-gh release upload v0.1.0-beta.10 authentication-acceptance.json --repo adrouter/adrouterAgent
-gh workflow run promote-release.yml --repo adrouter/adrouterAgent --ref v0.1.0-beta.10 -f tag=v0.1.0-beta.10 -f phase=finalize-release -f channel=beta
-
-npm view @adrouter/agent dist-tags --json
-npm view @adrouter/agent@0.1.0-beta.10 version dist.integrity repository --json
-gh release view v0.1.0-beta.10 --repo adrouter/adrouterAgent --json isDraft,isPrerelease,tagName,assets
-
-gh secret delete NPM_DIST_TAG_TOKEN --repo adrouter/adrouterAgent --env npm-publish
-~~~
-
-### Acceptance Criteria
-
-- [ ] Primary and distinct-second-OS cohorts pass the complete packaged auth/storage/security matrix.
-- [ ] Acceptance matches the exact tag, commit, three ZIPs, launcher tarball, `os_encrypted`
-      classification, and redaction policy.
-- [ ] Finalization reuses unchanged artifacts and all public smoke gates pass.
-- [ ] `beta`/`latest` point to beta.10 and `candidate` is absent.
-- [ ] Trusted publisher remains correctly scoped and the temporary dist-tag token is revoked.
-- [ ] Router owner has exact evidence for Desktop staging enforcement.
-
-### Validation Results
-
-- Exact-candidate cohorts: not run.
-- Acceptance validation/upload: not run; upload requires explicit authorization.
-- Finalization/public verification/token cleanup: not run.
-
-### Findings / Notes
-
-- The acceptance asset is post-candidate evidence and must not be baked into the source tag or
-  launcher tarball.
-
----
-
-## Step F: Final verification and cleanup
-
-### Status
-
-`todo`
-
-### Objective
-
-Reconcile the corrected source, four public artifacts, acceptance evidence, and post-enforcement
-staging behavior while preserving every Desktop security boundary.
-
-### Tasks
-
-- [ ] Re-run pinned clean-checkout source, integration, packaged E2E, launcher, parity,
-      public-boundary, and release-readiness gates at the public tag commit.
-- [ ] Re-run the canonical fixture and known mismatch regressions.
-- [ ] Re-run exact beta enrollment/profile/turn/refresh/negative/revocation/upgrade after Router
-      staging enforcement.
-- [ ] Compare npm version/dist-tags/integrity, Git tag/commit, GitHub assets, checksums, manifest,
-      attestations, acceptance JSON, and trusted publisher identity.
-- [ ] Review source/diff/package contents for unrelated files, generated output, expanded IPC,
-      generic signing capability, secret material, stale field names, bootstrap token, one-shot
-      promotion, or authenticated inference jobs.
-- [ ] Remove only temporary debug/release files created for this rollout.
-- [ ] Update documentation if implemented workflow inputs or manual commands differ.
-- [ ] Record remaining platform limitations and Router rollback readiness.
-
-### Relevant Files
-
-- `src/`
-- `tests/`
-- `packages/agent-launcher/`
-- `scripts/`
-- `.github/workflows/`
-- `docs/`
-- `PLAN.md`
-
-### Expected Changes
-
-- modify: tests/docs only if final verification exposes a required correction
-- delete: only temporary implementation/release files
-
-### Do Not Modify
-
-- Accepted artifacts/evidence, unrelated user work, task/project data, stable metadata, or security
-      boundaries merely to pass tests.
-
-### Commands
-
-~~~bash
-nvm use 25.9.0
-npm ci
-npm run check
-npm run test:e2e
-npm run check:launcher-package
-npm run verify:release-readiness
-git diff --check
-git status --short
-npm view @adrouter/agent dist-tags --json
-~~~
-
-### Acceptance Criteria
-
-- [ ] All source, process-boundary, E2E, launcher, package, native, and release-policy gates pass.
-- [ ] Exact beta.10 works after Router staging enforcement.
-- [ ] Public source/artifact/provenance/acceptance identities agree.
-- [ ] No renderer/utility/package/workflow/log/diagnostic exposes installation material.
-- [ ] Bootstrap-token and one-shot promotion behavior are absent.
-- [ ] Temporary auth is revoked and Router owner has tested rollback evidence.
-
-### Validation Results
-
-- Final clean suite: not run.
-- Post-enforcement exact beta acceptance: not run.
-- Final public reconciliation/security review: not run.
-
-### Findings / Notes
-
-- Do not mark done until the release-coordination and Router plans accept the Desktop handoff.
+- Native GitHub runners and physical Windows acceptance remain authoritative for non-macOS artifacts.
 
 ---
 
 ## Follow-up Work
 
-- Stable `0.1.0` and its separate soak.
-- Developer ID signing/notarization and broader publisher identity.
-- Production Router rollout and irreversible legacy cleanup.
-- Hardware-backed/non-exportable key research.
-- Additional native targets only with matching build, sandbox, and integrity evidence.
+- Remove the bounded Forge `brace-expansion` exception after an upstream-compatible toolchain
+  update.
+- Finalize beta.11 only after physical Windows acceptance and exact evidence attachment.
+- Stable release, signing/notarization, and automatic updates remain separate work.
 
 ## Decision Log
 
 | Date | Decision | Rationale | Impact |
 | --- | --- | --- | --- |
-| 2026-07-27 | Treat current green Desktop tests as non-conformance. | Mocks assert the same wrong wire shape as implementation. | Beta release is blocked until Router-derived regression tests pass. |
-| 2026-07-27 | Use the Router/CLI fixture checksum as canonical. | It is the implemented server contract and already matches CLI byte-for-byte. | Desktop imports/mirrors one shared protocol identity. |
-| 2026-07-27 | Omit body binding for bodyless profile GET. | Router explicitly rejects digest/bht when `bodyRequired=false`. | Header/proof types become body-optional while POST stays exact-byte bound. |
-| 2026-07-27 | Add explicit candidate/finalize phases. | Manual packaged acceptance must pause safely before channel movement. | Workflow reruns become idempotent checkpoints instead of expected failure. |
-| 2026-07-27 | Use trusted publishing and retain only a dist-tag token. | The public npm package already exists and OIDC supports publish. | Stale bootstrap-token paths are removed before beta.8. |
-| 2026-07-27 | Require four-artifact, two-OS acceptance. | The launcher selects native ZIPs and storage behavior is OS-specific. | Finalization proves both distribution layers without rebuilding. |
-| 2026-07-27 | Publish beta only. | Functional staging rollout does not authorize stable. | Beta/latest move to beta.8; stable is deferred. |
-| 2026-07-28 | Fix forward from beta.9 to beta.10 for the approved UI release. | Beta.9 is already immutable and cannot absorb the newer reviewed UI delta. | Beta.10 becomes the only candidate eligible for `beta`/`latest` promotion. |
+| 2026-07-29 | Pin `tar@7.5.22` and `tmp@0.2.7`. | Exact overrides remove the open and critical advisory roots without a risky Forge migration. | Targeted alerts close while packaging behavior remains compatible. |
+| 2026-07-29 | Allow only the dev-only Forge `brace-expansion` GHSA. | The production path is already patched and upstream Forge still pins incompatible legacy dependencies. | Any other high/critical advisory fails CI; upstream migration remains tracked. |
+| 2026-07-29 | Parse packaged bundle literals instead of substring matching. | Exact value comparison addresses CodeQL while preserving cross-platform static verification. | Hostile prefix/suffix and dead-text matches no longer satisfy the release gate. |
+| 2026-07-29 | Publish beta.11 under `candidate` first. | Candidate evaluation must not change accepted channels. | Beta/latest remain unchanged through candidate testing. |
+| 2026-07-29 | Require physical Windows acceptance before finalization. | The user must validate the Windows install and security flow on real hardware. | Final promotion is blocked until the Windows cohort passes. |

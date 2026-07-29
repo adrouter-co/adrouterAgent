@@ -14,6 +14,20 @@ for (const workflow of workflows) {
   }
 }
 const release = readFileSync(join(workflowDirectory, 'release-tag.yml'), 'utf8');
+const ci = readFileSync(join(workflowDirectory, 'ci.yml'), 'utf8');
+for (const [name, workflow] of [
+  ['CI', ci],
+  ['release', release],
+]) {
+  assert.ok(
+    workflow.includes('npm audit --omit=dev --audit-level=moderate'),
+    `${name} workflow must retain the production dependency audit`
+  );
+  assert.ok(
+    workflow.includes('npm run audit:build'),
+    `${name} workflow must enforce the high/critical build audit policy`
+  );
+}
 const retiredStagingCredential = ['ADROUTER', 'STAGING', 'API', 'KEY'].join('_');
 for (const required of [
   'macos-release',

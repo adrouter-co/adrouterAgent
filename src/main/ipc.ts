@@ -15,7 +15,7 @@ import type { RepositoryService } from './repository-service';
 import type { ReviewService } from './review-service';
 import type { RuntimeSupervisor } from './runtime-supervisor';
 
-const PUBLIC_RELEASE_VERSION = '0.1.0-beta.10';
+const PUBLIC_RELEASE_VERSION = '0.1.0-beta.11';
 
 interface Subscription {
   id: string;

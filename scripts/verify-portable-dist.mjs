@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { verifyPackagedStagingDefault } from './verify-packaged-default.mjs';
 
 const platform = process.argv[2];
 const arch = process.argv[3] ?? 'x64';
@@ -50,8 +51,8 @@ const text = packagedFiles
 for (const forbidden of ['ADROUTER_E2E_BUILD', ['BEGIN', 'PRIVATE', 'KEY'].join(' ')]) {
   if (text.includes(forbidden)) throw new Error(`Packaged application contains ${forbidden}.`);
 }
-if (!text.includes('https://api-staging.adrouter.co')) {
-  throw new Error('Packaged application does not contain the canonical staging default.');
-}
+verifyPackagedStagingDefault(packagedFiles, (filename) =>
+  asar.extractFile(archive, filename.slice(1)).toString('utf8')
+);
 
 console.log(`Verified ${platform}-${arch} portable package and ZIP.`);

@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { verifyPackagedStagingDefault } from './verify-packaged-default.mjs';
 
 const require = createRequire(import.meta.url);
 const asar = require('@electron/asar');
@@ -59,7 +60,7 @@ for (const app of apps) {
   if (
     info.CFBundleIdentifier !== 'com.adrouter.agent' ||
     info.CFBundleShortVersionString !== '0.1.0' ||
-    info.CFBundleVersion !== '10010' ||
+    info.CFBundleVersion !== '10011' ||
     info.NSAppTransportSecurity?.NSAllowsArbitraryLoads !== false ||
     info.NSAppTransportSecurity?.NSAllowsLocalNetworking !== true
   ) {
@@ -104,9 +105,12 @@ for (const app of apps) {
       throw new Error(`The packaged application contains forbidden content: ${forbidden}`);
     }
   }
-  if (!packagedText.includes('0.1.0-beta.10')) {
+  if (!packagedText.includes('0.1.0-beta.11')) {
     throw new Error('The packaged About metadata does not include the public release version.');
   }
+  verifyPackagedStagingDefault(packagedFiles, (filename) =>
+    asar.extractFile(asarPath, filename.slice(1)).toString('utf8')
+  );
 
   const fuseOutput = execFileSync(
     resolve('node_modules', '.bin', 'electron-fuses'),

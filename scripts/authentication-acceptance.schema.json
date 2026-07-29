@@ -45,6 +45,16 @@
       "type": "array",
       "minItems": 2,
       "maxItems": 2,
+      "contains": {
+        "type": "object",
+        "required": ["os", "architecture", "runtimeVersion"],
+        "properties": {
+          "os": { "const": "windows" },
+          "architecture": { "const": "x64" },
+          "runtimeVersion": { "type": "string", "pattern": "^Windows 11(?:[ ._+-].*)?$" }
+        }
+      },
+      "minContains": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
