@@ -36,21 +36,30 @@ function stringLiterals(source, filename) {
 }
 
 export function verifyPackagedStagingDefault(packagedFiles, readText) {
-  if (!packagedFiles.includes(MAIN_BUNDLE)) {
+  const entries = packagedFiles.map((original) => ({
+    normalized: original.replaceAll('\\', '/'),
+    original,
+  }));
+  const normalizedPaths = new Set(entries.map(({ normalized }) => normalized));
+  if (normalizedPaths.size !== entries.length) {
+    throw new Error('Packaged application contains ambiguous normalized bundle paths.');
+  }
+  const mainBundle = entries.find(({ normalized }) => normalized === MAIN_BUNDLE);
+  if (!mainBundle) {
     throw new Error(`Packaged application is missing expected main bundle ${MAIN_BUNDLE}.`);
   }
-  const rendererBundles = packagedFiles.filter((filename) => RENDERER_BUNDLE.test(filename));
+  const rendererBundles = entries.filter(({ normalized }) => RENDERER_BUNDLE.test(normalized));
   if (rendererBundles.length === 0) {
     throw new Error('Packaged application is missing expected renderer JavaScript bundles.');
   }
 
-  const mainValues = stringLiterals(readText(MAIN_BUNDLE), MAIN_BUNDLE);
+  const mainValues = stringLiterals(readText(mainBundle.original), mainBundle.normalized);
   if (!mainValues.has(CANONICAL_STAGING_ORIGIN)) {
     throw new Error('Packaged main bundle does not contain the exact canonical staging default.');
   }
 
-  const rendererHasDefault = rendererBundles.some((filename) =>
-    stringLiterals(readText(filename), filename).has(CANONICAL_STAGING_ORIGIN)
+  const rendererHasDefault = rendererBundles.some(({ normalized, original }) =>
+    stringLiterals(readText(original), normalized).has(CANONICAL_STAGING_ORIGIN)
   );
   if (!rendererHasDefault) {
     throw new Error(
@@ -58,5 +67,8 @@ export function verifyPackagedStagingDefault(packagedFiles, readText) {
     );
   }
 
-  return { mainBundle: MAIN_BUNDLE, rendererBundles };
+  return {
+    mainBundle: MAIN_BUNDLE,
+    rendererBundles: rendererBundles.map(({ normalized }) => normalized),
+  };
 }

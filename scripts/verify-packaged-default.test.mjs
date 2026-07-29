@@ -25,6 +25,26 @@ test('accepts the exact canonical origin in main and renderer bundles', () => {
   });
 });
 
+test('normalizes Windows ASAR separators without changing extraction paths', () => {
+  const windowsMain = '\\.vite\\build\\main.js';
+  const windowsRenderer = '\\.vite\\renderer\\main_window\\assets\\index-reviewed.js';
+  const sources = {
+    [windowsMain]: `export const defaultOrigin = ${JSON.stringify(CANONICAL_STAGING_ORIGIN)};`,
+    [windowsRenderer]: `const defaultOrigin = ${JSON.stringify(CANONICAL_STAGING_ORIGIN)};`,
+  };
+  assert.deepEqual(
+    verifyPackagedStagingDefault([windowsMain, windowsRenderer], (filename) => sources[filename]),
+    { mainBundle: main, rendererBundles: [renderer] }
+  );
+});
+
+test('rejects paths that collide after separator normalization', () => {
+  assert.throws(
+    () => verifyPackagedStagingDefault([main, '\\.vite\\build\\main.js', renderer], () => ''),
+    /ambiguous normalized bundle paths/
+  );
+});
+
 for (const [name, value] of [
   ['host suffix', `${CANONICAL_STAGING_ORIGIN}.evil`],
   ['prefix', `prefix-${CANONICAL_STAGING_ORIGIN}`],

@@ -202,7 +202,7 @@ npm run verify:dist
 ### Validation Results
 
 - `npm run test`: passed, 20 files and 68 tests.
-- `node --test scripts/verify-packaged-default.test.mjs`: passed, seven tests.
+- `node --test scripts/verify-packaged-default.test.mjs`: passed, nine tests including Windows ASAR separators.
 - `npm run test:e2e`: passed, including the fresh-install exact-origin assertion.
 - `npm run verify:dist`: passed for the beta.11 universal macOS artifact.
 
@@ -210,6 +210,8 @@ npm run verify:dist
 
 - Static bundle verification covers native artifacts; packaged E2E proves the literal is active
   configuration rather than dead bundle text.
+- Windows ASAR entry names use backslashes; the verifier normalizes separators for exact matching,
+  retains original extraction names, and rejects normalized-path collisions.
 
 ---
 
