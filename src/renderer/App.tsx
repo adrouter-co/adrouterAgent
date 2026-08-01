@@ -1027,6 +1027,10 @@ function Onboarding({
     }
   }, [serverUrl]);
   const official = originClass === 'official';
+  const enrollmentActive =
+    enrollment?.state === 'awaiting_sign_in' ||
+    enrollment?.state === 'starting' ||
+    enrollment?.state === 'pending';
 
   useEffect(() => {
     if (typeof window.adrouter.configuration.enrollmentStatus !== 'function') return undefined;
@@ -1103,6 +1107,34 @@ function Onboarding({
       setBusy(false);
     }
   };
+  const continueEnrollment = async (): Promise<void> => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      setEnrollment(await window.adrouter.configuration.continueEnrollment());
+    } catch (caught) {
+      setError(errorMessage(caught));
+      setEnrollment(await window.adrouter.configuration.enrollmentStatus().catch(() => enrollment));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const openEnrollment = (): void => {
+    void window.adrouter.configuration
+      .openEnrollment()
+      .catch((caught) => setError(errorMessage(caught)));
+  };
+  const copyEnrollmentLink = (): void => {
+    void window.adrouter.configuration
+      .copyEnrollmentLink()
+      .catch((caught) => setError(errorMessage(caught)));
+  };
+  const cancelEnrollment = (): void => {
+    void window.adrouter.configuration
+      .cancelEnrollment()
+      .then(setEnrollment)
+      .catch((caught) => setError(errorMessage(caught)));
+  };
   return (
     <main className="onboarding-shell">
       <section className="onboarding-card" aria-labelledby="onboarding-title">
@@ -1122,6 +1154,7 @@ function Onboarding({
           value={serverUrl}
           onChange={(event) => setServerUrl(event.target.value)}
           autoComplete="url"
+          disabled={enrollmentActive}
         />
         <label className="toggle-row" htmlFor="sponsored-compute">
           <input
@@ -1129,6 +1162,7 @@ function Onboarding({
             checked={sponsoredCompute}
             onChange={(event) => setSponsoredCompute(event.target.checked)}
             type="checkbox"
+            disabled={enrollmentActive}
           />
           <span>Enable sponsored compute</span>
         </label>
@@ -1152,6 +1186,7 @@ function Onboarding({
         {official &&
           enrollment &&
           enrollment.state !== 'idle' &&
+          enrollment.state !== 'awaiting_sign_in' &&
           enrollment.state !== 'pending' &&
           enrollment.message && (
             <div
@@ -1162,51 +1197,49 @@ function Onboarding({
             </div>
           )}
         {official ? (
-          enrollment?.state === 'pending' ? (
+          enrollment?.state === 'awaiting_sign_in' ? (
+            <section className="enrollment-panel" aria-live="polite">
+              <p className="eyebrow">Sign in before creating the installation</p>
+              <strong>Finish signing in to AdRouter in your browser.</strong>
+              <p>{enrollment.message}</p>
+              <div className="onboarding-actions">
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={() => void continueEnrollment()}
+                  disabled={busy}
+                >
+                  {busy ? 'Continuing…' : 'Continue'}
+                </button>
+                <button className="secondary-button" type="button" onClick={openEnrollment}>
+                  Open sign-in page
+                </button>
+                <button className="secondary-button" type="button" onClick={copyEnrollmentLink}>
+                  Copy sign-in link
+                </button>
+                <button className="danger-outline-button" type="button" onClick={cancelEnrollment}>
+                  Cancel
+                </button>
+              </div>
+              <small>The sign-in link stays in the protected Electron main process.</small>
+            </section>
+          ) : enrollment?.state === 'pending' ? (
             <section className="enrollment-panel" aria-live="polite">
               <p className="eyebrow">Compare this code in the AdRouter WebUI</p>
               <strong className="user-code">{enrollment.userCode}</strong>
               <p>{enrollment.message ?? 'Waiting for your approval…'}</p>
               <div className="onboarding-actions">
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={() => {
-                    void window.adrouter.configuration
-                      .openEnrollment()
-                      .catch((caught) => setError(errorMessage(caught)));
-                  }}
-                >
+                <button className="secondary-button" type="button" onClick={openEnrollment}>
                   Open approval page
                 </button>
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={() => {
-                    void navigator.clipboard
-                      .writeText(enrollment.userCode ?? '')
-                      .catch((caught) => setError(errorMessage(caught)));
-                  }}
-                >
-                  Copy code
+                <button className="secondary-button" type="button" onClick={copyEnrollmentLink}>
+                  Copy approval link
                 </button>
-                <button
-                  className="danger-outline-button"
-                  type="button"
-                  onClick={() => {
-                    void window.adrouter.configuration
-                      .cancelEnrollment()
-                      .then(setEnrollment)
-                      .catch((caught) => setError(errorMessage(caught)));
-                  }}
-                >
+                <button className="danger-outline-button" type="button" onClick={cancelEnrollment}>
                   Cancel
                 </button>
               </div>
-              <small>
-                If the page does not open, visit {enrollment.verificationUri} and enter the code
-                manually.
-              </small>
+              <small>If the page does not open, copy the approval link and open it manually.</small>
             </section>
           ) : (
             <div className="onboarding-actions">

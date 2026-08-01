@@ -70,10 +70,13 @@ If the app is pointed at a remote router, verify the URL uses HTTPS. HTTP is
 accepted only for loopback development URLs.
 
 For official staging acceptance, install the exact candidate artifact, keep the prefilled HTTPS
-origin, and select **Connect this Agent**. Confirm key generation does not begin before that action.
-Compare the displayed code in the authenticated WebUI, approve explicitly, restart once while the
-flow is pending to confirm it resumes, and verify the renderer never displays a device code, token,
-key, nonce, proof, or protected header.
+origin, and select **Connect this Agent**. Confirm the browser opens the Agent-specific sign-in page,
+the renderer never displays its handoff identifier, and key generation does not begin yet. Sign in,
+return to the Agent, select **Continue**, compare the displayed code in the authenticated WebUI, and
+approve explicitly. Restart before **Continue** to confirm the memory-only preparation is discarded;
+restart once while the code is pending to confirm the encrypted approval resumes. Cancel another
+pending attempt and confirm the WebUI cannot later approve it. Verify the renderer never displays a
+device code, token, key, nonce, proof, protected header, or direct handoff link.
 
 ## 3. Open a project
 
@@ -206,7 +209,9 @@ approval-waiting chats must not be deletable.
 The build passes manual acceptance when all of the following hold:
 
 - Official onboarding requires explicit approval and persists only OS-encrypted installation
-  material; the custom bearer path remains isolated to a non-official origin.
+  material; sign-in happens before authorization creation, cancelled authorizations receive signed
+  cleanup, a previous installation remains usable until replacement, and the custom bearer path
+  remains isolated to a non-official origin.
 - Signed profile and turn requests pass. Expiry refreshes once, concurrent requests share the same
   rotation, and a nonce challenge retries only before response bytes are consumed.
 - Replayed proofs, altered bodies/methods/paths/nonces, copied tokens without the private key,

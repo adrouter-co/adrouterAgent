@@ -75,6 +75,7 @@ export type InstallationDiagnostics = z.infer<typeof InstallationDiagnosticsSche
 
 export const EnrollmentStateSchema = z.enum([
   'idle',
+  'awaiting_sign_in',
   'starting',
   'pending',
   'approved',
@@ -395,9 +396,11 @@ export const IpcSchemas = {
     input: EnrollmentStartInputSchema,
     output: EnrollmentStatusSchema,
   },
+  'configuration.continueEnrollment': { input: z.object({}), output: EnrollmentStatusSchema },
   'configuration.enrollmentStatus': { input: z.object({}), output: EnrollmentStatusSchema },
   'configuration.cancelEnrollment': { input: z.object({}), output: EnrollmentStatusSchema },
   'configuration.openEnrollment': { input: z.object({}), output: OkSchema },
+  'configuration.copyEnrollmentLink': { input: z.object({}), output: OkSchema },
   'configuration.updatePreferences': {
     input: RouterPreferencesInputSchema,
     output: RouterConfigurationSchema,
@@ -442,9 +445,11 @@ export interface AdrouterApi {
     status(): Promise<RouterDiagnostics>;
     signOut(): Promise<SignOutResult>;
     startEnrollment(input: z.input<typeof EnrollmentStartInputSchema>): Promise<EnrollmentStatus>;
+    continueEnrollment(): Promise<EnrollmentStatus>;
     enrollmentStatus(): Promise<EnrollmentStatus>;
     cancelEnrollment(): Promise<EnrollmentStatus>;
     openEnrollment(): Promise<{ ok: true }>;
+    copyEnrollmentLink(): Promise<{ ok: true }>;
     updatePreferences(
       input: z.input<typeof RouterPreferencesInputSchema>
     ): Promise<RouterConfiguration>;

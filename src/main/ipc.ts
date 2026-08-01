@@ -1,4 +1,11 @@
-import { app, type IpcMainInvokeEvent, ipcMain, shell, type WebContents } from 'electron';
+import {
+  app,
+  clipboard,
+  type IpcMainInvokeEvent,
+  ipcMain,
+  shell,
+  type WebContents,
+} from 'electron';
 import { sandboxReadiness } from '../runtime/platform';
 import {
   ApprovalSchema,
@@ -15,7 +22,7 @@ import type { RepositoryService } from './repository-service';
 import type { ReviewService } from './review-service';
 import type { RuntimeSupervisor } from './runtime-supervisor';
 
-const PUBLIC_RELEASE_VERSION = '0.1.0-beta.11';
+const PUBLIC_RELEASE_VERSION = '0.1.0-beta.12';
 
 interface Subscription {
   id: string;
@@ -119,14 +126,34 @@ export const registerIpcHandlers = (dependencies: IpcDependencies): EventSubscri
     }
     return installationAuth.signOut();
   });
-  register('configuration.startEnrollment', (raw) =>
-    installationAuth.startEnrollment(IpcSchemas['configuration.startEnrollment'].input.parse(raw))
-  );
+  register('configuration.startEnrollment', async (raw) => {
+    const status = await installationAuth.startEnrollment(
+      IpcSchemas['configuration.startEnrollment'].input.parse(raw)
+    );
+    try {
+      await shell.openExternal(await installationAuth.enrollmentUrl());
+      return status;
+    } catch {
+      return installationAuth.noteBrowserOpenFailure();
+    }
+  });
+  register('configuration.continueEnrollment', () => installationAuth.continueEnrollment());
   register('configuration.enrollmentStatus', () => installationAuth.enrollmentStatus());
   register('configuration.cancelEnrollment', () => installationAuth.cancelEnrollment());
   register('configuration.openEnrollment', async () => {
-    const url = await installationAuth.approvalUrl();
-    await shell.openExternal(url);
+    try {
+      await shell.openExternal(await installationAuth.enrollmentUrl());
+    } catch {
+      throw new Error('The browser could not be opened. Copy the link and open it manually.');
+    }
+    return { ok: true };
+  });
+  register('configuration.copyEnrollmentLink', async () => {
+    try {
+      clipboard.writeText(await installationAuth.enrollmentUrl());
+    } catch {
+      throw new Error('The enrollment link could not be copied.');
+    }
     return { ok: true };
   });
   register('configuration.updatePreferences', (raw) =>

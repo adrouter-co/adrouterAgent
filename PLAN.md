@@ -1,76 +1,73 @@
-# Plan: AdRouter Agent Beta.11 Security Candidate
+# Plan: AdRouter Agent Beta.12 Sign-In-First Release
 
 ## Goal
 
-Resolve the current open Dependabot and CodeQL security findings, strengthen release-time dependency
-and packaged-default verification, and publish the immutable `0.1.0-beta.11` build only under npm
-`candidate` until it passes acceptance on a physical Windows 11 x64 laptop.
+Release the completed sign-in-first Desktop Agent enrollment flow as immutable
+`0.1.0-beta.12`, deploy the matching Router WebUI support, and publish only to the npm
+`candidate` channel until the exact artifacts pass the required physical Windows acceptance gate.
 
 ## Context
 
-- This is the independent `adrouter/adrouterAgent` Electron desktop repository and
+- This is the independent `adrouter/adrouterAgent` Electron repository and
   `@adrouter/agent` launcher.
-- The source and GitHub prerelease are currently `0.1.0-beta.10`; npm `candidate` points to
-  beta.10 while `beta` and `latest` remain on the previously accepted beta.
-- Dependabot reports ten open alerts rooted in transitive build dependencies `tar@6.2.1` and
-  `tmp@0.0.33`. The same `tar` root also has an auto-dismissed critical decompression advisory.
-- CodeQL reports incomplete URL substring sanitization in the portable-distribution verifier because
-  it accepts any bundle text containing the staging origin as a substring.
-- The remaining old `brace-expansion` copies belong to the Electron Forge development toolchain.
-  The production Pi path is already patched to `5.0.8`; eliminating every Forge copy would require
-  unsupported Packager/Rebuild/Inquirer major overrides.
-- Release versions, Git tags, and npm versions are immutable. A rejected candidate must be replaced
-  by a higher beta.
-- The user requires a clean physical Windows-laptop candidate installation and acceptance pass before
-  beta.11 may move to `beta` or `latest`.
+- `v0.1.0-beta.11` is already an immutable public GitHub prerelease and npm `candidate`;
+  npm `beta` and `latest` remain on the previously accepted beta.7.
+- Beta.12 adds the AdRouterCLI-style browser sign-in handoff to Desktop Agent while keeping
+  key generation, credentials, browser opening, clipboard access, and signed cancellation in the
+  Electron main process.
+- The Router backend already contains the device authorization, handoff, polling, cancellation,
+  approval, refresh, profile, turn, and revocation contract. No backend, infrastructure, database,
+  or Supabase migration change is required.
+- Router WebUI commit `141adcc95298c364288aa8488297a1ce7dc2a898` adds Desktop Agent handoff copy
+  and was deployed to Cloudflare Pages staging as deployment `128cdcac`.
+- Pre-existing local PitchDemo work and `.playwright-cli/` output are unrelated to beta.12 and must
+  remain uncommitted and be restored after the release worktree is clean.
 
 ## Research Summary
 
-- `tar@7.5.22` and `tmp@0.2.7` satisfy the repository Node.js floor and remove the targeted
-  advisories. An isolated Node 25.9.0 install with exact npm overrides passed lint, typecheck, unit,
-  integration, packaging, and packaged E2E checks.
-- The full npm audit becomes actionable when normalized by advisory rather than by propagated package
-  node: all new high/critical advisories can fail closed while the single dev-only Forge
-  `GHSA-mh99-v99m-4gvg` root remains explicitly bounded.
-- The packaged staging origin currently appears as an exact string literal in the expected main and
-  renderer bundles. Parsing those bundles and comparing literal values avoids substring matching;
-  packaged E2E can independently prove the fresh-install value actually shown to users.
-- The existing two-phase release workflow already supports publishing `candidate`, pausing for
-  exact-artifact acceptance, and moving final channels without rebuilding.
+- GitHub authentication is valid for `HappyCool121`, npm remote state confirms beta.11 occupies
+  `candidate`, and Cloudflare OAuth has Pages write access.
+- The protected release workflow publishes a new immutable version through GitHub OIDC, verifies
+  anonymous installs on native runners, and leaves final npm channels unchanged during the
+  candidate phase.
+- Finalization requires a validated `authentication-acceptance.json` covering the exact artifact
+  manifest and two distinct operating-system cohorts, including a physical Windows 11 x64 laptop.
+- The hosted WebUI build is a direct Wrangler upload from a clean pushed commit and requires only
+  browser-safe staging configuration.
 
 ## Constraints
 
 - Use repository-pinned Node.js 25.9.0, npm 10+, Electron 43, and exact dependency versions.
-- Preserve renderer isolation, encrypted installation storage, HTTPS/loopback policy, workspace
-  containment, one-time mutation/command approvals, fail-closed sandboxing, and sponsor separation.
-- Preserve existing public APIs, IPC contracts, persisted state, and user-facing behavior.
-- Keep changes minimal and reviewable; do not force unsupported Electron Forge dependency majors.
-- Do not hand-edit generated `out/`, `.vite/`, release artifacts, provenance, or launcher
-  `UNBUILT` placeholders.
-- Do not tag, publish, upload release assets, move npm channels, configure secrets, or approve
-  protected environments without explicit release authorization and required authentication.
-- Keep `beta` and `latest` unchanged until physical Windows acceptance succeeds.
+- Preserve renderer isolation, OS-encrypted installation storage, DPoP body binding,
+  HTTPS/loopback policy, workspace containment, one-time mutation/command approvals, fail-closed
+  sandboxing, and sponsor separation.
+- Preserve existing backend routes, schema, infrastructure, traffic gates, and hosted secrets.
+- Keep the release small, reviewable, and reversible; introduce no new dependency.
+- Do not include the unrelated PitchDemo files, script, export, styles, tests, or browser logs.
+- Never retarget beta.11 or republish an existing npm version; beta.12 must use a new tag and bytes.
+- Do not move `beta` or `latest` until exact beta.12 physical Windows acceptance is attached and
+  the protected finalization workflow succeeds.
 
 ## Out of Scope
 
+- Backend, Fly.io, AWS/CDK, Supabase schema, migration, or traffic-policy changes.
 - Stable `0.1.0`, automatic updates, Developer ID signing, notarization, or new native targets.
-- General dependency modernization or unrelated Electron Forge migration.
-- Runtime router/authentication, UI, schema, IPC, sandbox, or sponsor-channel redesign.
-- Manual dismissal of GitHub security alerts.
-- Modification or withdrawal of immutable beta.10 artifacts absent compromise evidence.
+- PitchDemo publication or unrelated renderer redesign.
+- Replacing or withdrawing beta.11 absent a separate release decision.
 
 ## Reversibility
 
-- Dependency pins and audit policy are isolated manifest/script changes and can be reverted together.
-- The new packaged verifier replaces only the vulnerable check and is covered by focused fixtures
-  before the old behavior is removed.
-- Candidate publication does not move final channels. A failed beta.11 remains available by exact
-  version and is superseded by beta.12.
-- Final promotion reuses the accepted immutable artifacts and can run only after evidence is attached.
+- The WebUI deployment is an immutable Pages artifact and can be rolled back to the previous Pages
+  deployment without changing the compatible backend.
+- The Agent source change is isolated in a new beta.12 commit and tag. Before candidate publication
+  it can be corrected normally; after publication a defect requires beta.13 rather than changed
+  beta.12 bytes.
+- Candidate publication does not move accepted npm channels. A rejected beta.12 can remain available
+  only by exact version while beta.13 supersedes it.
 
 ---
 
-## Step A: Remediate vulnerable build dependencies
+## Step A: Complete and verify sign-in-first enrollment
 
 ### Status
 
@@ -78,144 +75,71 @@ and packaged-default verification, and publish the immutable `0.1.0-beta.11` bui
 
 ### Objective
 
-Remove the vulnerable `tar` and `tmp` trees and ensure future high/critical build advisories fail
-the normal CI and release validation paths.
+Implement a two-phase Desktop Agent enrollment flow matching AdRouterCLI's sign-in-first behavior
+without weakening the Electron security boundary or replacing an active installation prematurely.
 
 ### Tasks
 
-- [x] Add exact npm overrides for `tar@7.5.22` and `tmp@0.2.7`; regenerate the lockfile.
-- [x] Extend dependency-override checks to assert package manifest, lockfile, and physical installed
-      versions, plus the existing production Pi `brace-expansion@5.0.8` replacement.
-- [x] Add a build audit script that parses `npm audit --json`, rejects malformed/unavailable audit
-      results, and fails for every unapproved high/critical advisory.
-- [x] Permit only `GHSA-mh99-v99m-4gvg` when every affected node is dev-only and production remains
-      patched; record a rationale and upstream-removal condition.
-- [x] Wire the build audit into local checks, CI validation, and release-tag validation while
-      retaining the production dependency audit.
+- [x] Add memory-only sign-in preparation and explicit Continue before key/server state creation.
+- [x] Keep browser and clipboard operations in the main process and hide the handoff identifier.
+- [x] Add encrypted pending-approval restart recovery and signed best-effort cancellation.
+- [x] Preserve an existing installation until the replacement validates completely.
+- [x] Add main-process, contract, renderer, restart, cancellation, and replacement coverage.
 
 ### Relevant Files
 
-- `package.json`
-- `package-lock.json`
-- `scripts/check-dependency-overrides.mjs`
-- `.github/workflows/ci.yml`
-- `.github/workflows/release-tag.yml`
+- `src/main/installation-auth.ts`
+- `src/main/configuration-store.ts`
+- `src/main/ipc.ts`
+- `src/preload/index.ts`
+- `src/shared/contracts.ts`
+- `src/renderer/App.tsx`
+- `tests/main/installation-auth.test.ts`
+- `tests/renderer/App.test.tsx`
 
 ### Expected Changes
 
-- modify: dependency overrides/lockfile, dependency assertions, audit policy, and workflow gates
-- create: focused build-audit policy script and tests if no suitable script exists
+- modify: enrollment implementation, IPC contracts, onboarding UI, tests, and authentication docs
+- create: no production source files outside the existing architecture
 
 ### Do Not Modify
 
-- Electron Forge/Packager/Rebuild/Inquirer major versions.
-- Production Pi override semantics or runtime dependencies unrelated to the alerts.
+- Backend route/schema behavior
+- Renderer credential and raw-URL isolation
+- PitchDemo source, tests, script, export, or styles
 
 ### Commands
 
 ```bash
-npm ci
-npm run check:dependency-overrides
-npm audit --omit=dev --audit-level=moderate
-npm run audit:build
+npm run lint
+npm run typecheck
 npm run test
-```
-
-### Acceptance Criteria
-
-- [x] Installed and locked `tar` is exactly `7.5.22`; `tmp` is exactly `0.2.7`.
-- [x] Production audit reports zero vulnerabilities.
-- [x] Full audit has no unapproved high/critical advisory and no critical advisory.
-- [x] A new high/critical advisory or an invalid dev-only exception fails closed.
-- [x] Dependency and workflow-policy tests pass.
-
-### Validation Results
-
-- `npm install`: passed under Node.js 25.9.0; postinstall dependency patches applied.
-- `npm run check:dependency-overrides`: passed.
-- `npm audit --omit=dev --audit-level=moderate`: passed with zero vulnerabilities.
-- `npm run audit:build`: passed; 29 high-severity propagated nodes resolve only to the reviewed GHSA.
-- `node --test scripts/build-audit-policy.test.mjs`: passed, five tests.
-- `node scripts/check-workflows.mjs`: passed.
-
-### Findings / Notes
-
-- The bounded Forge exception is follow-up debt, not a production dependency exception.
-- npm reports no critical advisories after the exact tar/tmp overrides.
-
----
-
-## Step B: Harden packaged staging-origin verification
-
-### Status
-
-`done`
-
-### Objective
-
-Make the release verifier require the exact packaged default origin and prove the user-visible
-fresh-install value without URL substring matching.
-
-### Tasks
-
-- [x] Add exact `acorn@8.17.0` as a direct dev dependency for deterministic bundle parsing.
-- [x] Extract a testable verifier helper that parses only expected main/renderer JavaScript bundles
-      and compares complete string literal values.
-- [x] Require the canonical origin in both main and renderer; fail on malformed or unexpected bundle
-      layouts.
-- [x] Add regression tests for exact success, hostile suffix/prefix, path/query embedding, unrelated
-      text, missing origin, and malformed JavaScript.
-- [x] Extend packaged E2E to assert a fresh installation displays exactly
-      `https://api-staging.adrouter.co`.
-
-### Relevant Files
-
-- `scripts/verify-portable-dist.mjs`
-- `tests/e2e/packaged-security.spec.ts`
-- focused script tests
-
-### Expected Changes
-
-- modify: portable verifier and packaged-security E2E
-- create: reusable exact-literal helper/test if needed
-
-### Do Not Modify
-
-- Runtime URL validation, official-origin authentication policy, renderer isolation, or generated
-  bundle output.
-
-### Commands
-
-```bash
-npm run test
+npm run test:integration
 npm run test:e2e
-npm run verify:dist
 ```
 
 ### Acceptance Criteria
 
-- [x] No staging-origin substring allowlist remains in the portable verifier.
-- [x] Exact literals in expected bundles pass and all longer/embedded/malformed cases fail.
-- [x] Fresh packaged onboarding shows exactly the canonical staging origin.
-- [x] Existing portable artifact integrity checks remain intact.
+- [x] No key or authorization request exists before Continue.
+- [x] The renderer receives no handoff identifier or credential material.
+- [x] Cancellation, restart, replacement, and browser-open failures are safe and recoverable.
+- [x] Unit, integration, launcher, and packaged Electron coverage passes.
 
 ### Validation Results
 
-- `npm run test`: passed, 20 files and 68 tests.
-- `node --test scripts/verify-packaged-default.test.mjs`: passed, nine tests including Windows ASAR separators.
-- `npm run test:e2e`: passed, including the fresh-install exact-origin assertion.
-- `npm run verify:dist`: passed for the beta.11 universal macOS artifact.
+- `npm run lint`: passed
+- `npm run typecheck`: passed
+- `npm run test`: passed, 72 tests
+- `npm run test:integration`: passed, 10 tests
+- `npm run test:e2e`: passed, 2 packaged Electron tests
 
 ### Findings / Notes
 
-- Static bundle verification covers native artifacts; packaged E2E proves the literal is active
-  configuration rather than dead bundle text.
-- Windows ASAR entry names use backslashes; the verifier normalizes separators for exact matching,
-  retains original extraction names, and rejects normalized-path collisions.
+- The existing backend contract was sufficient; no service deployment or migration is needed.
 
 ---
 
-## Step C: Prepare beta.11 source and release policy
+## Step B: Deploy matching Router WebUI support
 
 ### Status
 
@@ -223,69 +147,67 @@ npm run verify:dist
 
 ### Objective
 
-Make every authoritative source, launcher, documentation, and workflow check agree on the immutable
-beta.11 candidate and its Windows-only final promotion gate.
+Allow OAuth return paths and installation approval UI to distinguish Desktop Agent from
+AdRouterCLI while retaining the shared backend handoff protocol.
 
 ### Tasks
 
-- [x] Confirm npm version, Git tag, GitHub release, and workflow namespace for beta.11 are unused.
-- [x] Set application/launcher version to `0.1.0-beta.11` and native build number to `10011`
-      across authoritative manifests and source-parity checks.
-- [x] Update changelog, README, security supported-version table, release procedure, and checklist.
-- [x] Document that `candidate` replaces beta.10 while beta/latest remain unchanged until the
-      physical Windows 11 x64 cohort passes.
-- [x] Extend workflow-policy checks to require the production audit and new build audit before native
-      builds or publication.
+- [x] Accept exact `connect=agent` OAuth return state.
+- [x] Add Desktop Agent-specific handoff, Continue, and completion copy.
+- [x] Validate the WebUI and hosted-build configuration.
+- [x] Commit and push the exact reviewed Router source.
+- [x] Direct-upload the verified artifact to Cloudflare Pages and verify custom/immutable URLs.
 
 ### Relevant Files
 
-- authoritative manifests and source-parity scripts
-- `CHANGELOG.md`
-- `README.md`
-- `SECURITY.md`
-- `RELEASE.md`
-- `docs/release-checklist.md`
+- `router/webui/src/supabase.ts`
+- `router/webui/src/installation-access.tsx`
+- `router/webui/src/supabase.test.ts`
+- `router/webui/src/account.test.tsx`
+- `router/webui/src/installation-access.test.tsx`
 
 ### Expected Changes
 
-- modify: beta.11 version/build metadata, release notes/policy, and workflow assertions
+- modify: Router WebUI source and tests only
+- create: immutable Cloudflare Pages deployment
 
 ### Do Not Modify
 
-- beta.10 tag/assets, launcher release-manifest hashes, stable channel policy, signing posture, or
-  unsupported platform claims.
+- Router backend, Supabase, infrastructure, secrets, or traffic gates
+- Git-triggered Pages deployment configuration
 
 ### Commands
 
 ```bash
-npm run check:source-parity
-npm run check:workflows
-npm run check:launcher-package
-npm run verify:release-readiness
-git diff --check
+cd router/webui
+npm run typecheck
+npm test
+npm run build:hosted
+npx wrangler pages deploy dist --project-name=adrouter-dashboard --branch=main
 ```
 
 ### Acceptance Criteria
 
-- [x] All authoritative source/version surfaces agree on beta.11 and build 10011.
-- [x] Release policy publishes only `candidate` before Windows acceptance.
-- [x] Beta/latest promotion cannot occur without exact Windows 11 x64 acceptance evidence.
-- [x] Beta.10 remains immutable and installable by exact version.
+- [x] Router commit is clean, pushed, and bound to the deployed Pages artifact.
+- [x] Hosted custom and immutable routes return the SPA successfully.
+- [x] The deployed JavaScript digest equals the verified local artifact.
+- [x] Agent-specific approval copy is present in the hosted bundle.
 
 ### Validation Results
 
-- Remote beta.11 namespace: npm version, GitHub release, and Git tag are unused.
-- `npm run check:public`: passed source parity, dependency, public-boundary, docs, and workflow policy.
-- `npm run check:launcher-package`: passed.
-- `npm run verify:release-readiness`: passed, including 30 launcher/release tests.
+- WebUI typecheck: passed
+- WebUI test suite: passed, 69 Vitest tests and 10 hosted-config tests
+- Hosted build verification: passed
+- Cloudflare deployment: passed at `https://128cdcac.adrouter-dashboard.pages.dev`
+- Post-deployment verification: passed for 14 custom/immutable route requests
 
 ### Findings / Notes
 
-- Stop and allocate a higher beta if any beta.11 namespace is occupied.
+- The release source is Router commit `141adcc95298c364288aa8488297a1ce7dc2a898`.
 
 ---
 
-## Step D: Publish candidate and require physical Windows acceptance
+## Step C: Prepare and publish beta.12 candidate
 
 ### Status
 
@@ -293,106 +215,45 @@ git diff --check
 
 ### Objective
 
-Publish the exact beta.11 artifacts without moving final npm channels, then wait for the user's
-physical Windows laptop acceptance before finalization.
+Create clean beta.12 source and publish its immutable native artifacts and launcher under npm
+`candidate` without moving final channels.
 
 ### Tasks
 
-- [ ] After explicit release authorization, tag clean reviewed main as `v0.1.0-beta.11` and push
-      the immutable tag.
-- [ ] Approve native build workflow and verify macOS universal, Ubuntu x64, Windows x64, launcher,
-      checksums, SBOMs, attestations, and manifest.
-- [ ] Dispatch `phase=publish-candidate`; verify npm `candidate` points to beta.11 while
-      `beta`/`latest` remain unchanged.
-- [ ] On a clean physical Windows 11 x64 laptop, install `@adrouter/agent@candidate` anonymously
-      and complete launch, enrollment, signed profile/turn, refresh/revocation, project/task,
-      approval, command, sandbox, persistence, and redaction checks.
-- [ ] Generate and attach exact sanitized authentication acceptance evidence.
-- [ ] Only after the Windows cohort passes, dispatch `phase=finalize-release`, move `beta` and
-      `latest` to beta.11, and remove `candidate`.
-- [ ] If Windows acceptance fails, leave final channels unchanged and fix forward with beta.12.
+- [x] Separate and preserve unrelated PitchDemo work outside the release commit.
+- [x] Update application/launcher version, native build number, changelog, release docs, and workflow
+      defaults to beta.12.
+- [x] Regenerate source parity from the reviewed beta.12 source set.
+- [x] Run all local source, launcher, audit, packaged E2E, and native macOS release gates.
+- [ ] Push the clean beta.12 commit, wait for required CI, create and push immutable tag
+      `v0.1.0-beta.12`.
+- [ ] Approve/verify the protected native release build and dispatch `publish-candidate`.
+- [ ] Verify the GitHub prerelease, npm `candidate`, attestations, and anonymous platform installs.
 
 ### Relevant Files
 
-- `.github/workflows/release-tag.yml`
+- `package.json`
+- `package-lock.json`
+- `packages/agent-launcher/package.json`
+- `packages/agent-launcher/release-manifest.json`
+- `forge.config.ts`
+- `CHANGELOG.md`
+- `README.md`
+- `SECURITY.md`
+- `RELEASE.md`
 - `.github/workflows/promote-release.yml`
-- release assets and acceptance schema
+- `provenance/source-files.sha256`
 
 ### Expected Changes
 
-- create: immutable GitHub prerelease and npm beta.11 candidate
-- modify later: final npm channels only after Windows acceptance
+- modify: reviewed login source/docs/tests and beta.12 release/version metadata
+- create: immutable tag, GitHub prerelease, native assets, attestations, and npm candidate
 
 ### Do Not Modify
 
-- Published beta.11 bytes/tag after candidate publication.
-- Final channels before physical Windows acceptance.
-
-### Commands
-
-```bash
-git tag -a v0.1.0-beta.11 -m "AdRouter Agent 0.1.0-beta.11"
-git push origin v0.1.0-beta.11
-gh workflow run promote-release.yml --ref v0.1.0-beta.11 -f tag=v0.1.0-beta.11 -f phase=publish-candidate -f channel=beta
-npm view @adrouter/agent dist-tags --json
-```
-
-### Acceptance Criteria
-
-- [ ] Candidate artifacts are exact, public, and anonymously installable on every supported target.
-- [ ] Beta/latest remain unchanged until physical Windows acceptance passes.
-- [ ] Acceptance binds the exact tag, commit, three ZIPs, launcher, and Windows cohort.
-- [ ] Failed acceptance results in a higher immutable beta rather than replaced artifacts.
-
-### Validation Results
-
-- Candidate publication: not run; requires release authorization/protected GitHub workflow.
-- Physical Windows acceptance: not run; requires the user's Windows laptop.
-- Finalization: not run and prohibited before Windows acceptance.
-
-### Findings / Notes
-
-- npm trusted publishing handles candidate publication; a short-lived package-scoped dist-tag token
-  is needed only for finalization.
-
----
-
-## Step E: Final verification and cleanup
-
-### Status
-
-`review`
-
-### Objective
-
-Prove the complete local source change, reconcile GitHub security results, and remove temporary
-implementation artifacts before release handoff.
-
-### Tasks
-
-- [x] Run the complete pinned-runtime validation suite, packaged E2E, launcher/package, public
-      boundary, source parity, workflow policy, release readiness, and local native verification.
-- [x] Review the final diff for unrelated changes, generated output, secrets, stale versions,
-      weakened checks, and expanded security boundaries.
-- [x] Remove temporary debug/output files and update validation results in this plan.
-- [ ] After default-branch scans, confirm all current `tar`/`tmp` alerts close, the critical
-      `tar` advisory no longer applies, and CodeQL alert 1 closes.
-- [ ] Record the remaining dev-only Forge exception and its upstream removal follow-up.
-
-### Relevant Files
-
-- `package.json` and lockfile
-- `scripts/`, `tests/`, and workflows
-- release documentation and `PLAN.md`
-
-### Expected Changes
-
-- modify: validation results and documentation only if final checks expose a discrepancy
-- delete: only temporary generated/debug files
-
-### Do Not Modify
-
-- Security/process boundaries, published artifacts, or unrelated user work merely to pass a gate.
+- Published beta.11 tag, release, package, or artifacts
+- npm `beta` and `latest` during candidate publication
+- Unrelated PitchDemo work
 
 ### Commands
 
@@ -400,47 +261,125 @@ implementation artifacts before release handoff.
 npm ci
 npm run check
 npm run test:e2e
+npm run audit:build
 npm run check:launcher-package
 npm run verify:release-readiness
 npm run make:mac
 npm run verify:dist
-git diff --check
-git status --short
+git tag -a v0.1.0-beta.12 -m "AdRouter Agent 0.1.0-beta.12"
+git push origin main v0.1.0-beta.12
+gh workflow run promote-release.yml --ref v0.1.0-beta.12 -f tag=v0.1.0-beta.12 -f phase=publish-candidate -f channel=beta
 ```
 
 ### Acceptance Criteria
 
-- [ ] Every applicable local source/package/release gate passes.
-- [ ] No open targeted Dependabot or CodeQL finding remains after default-branch scans.
-- [ ] Only the explicitly documented dev-only Forge advisory remains.
-- [ ] No credential, developer path, test hook, or unintended generated file is committed.
-- [ ] The repository is ready for protected beta.11 candidate publication.
+- [x] Every version/release surface agrees on beta.12 and build 10012.
+- [x] The release commit contains no PitchDemo/browser-log content or generated output.
+- [ ] All local and required GitHub release gates pass from the exact immutable commit.
+- [ ] GitHub beta.12 prerelease and npm beta.12 candidate are public and anonymously installable.
+- [ ] npm `beta` and `latest` remain on beta.7 pending physical acceptance.
 
 ### Validation Results
 
-- Full local validation: passed; integration required a host-permitted rerun for the sandbox socket.
-- Native macOS universal package/verification: passed.
-- GitHub post-merge security scans: not run
+- `npm ci`: passed with pinned Node.js 25.9.0
+- `npm run check`: passed; 70 unit tests, 10 integration tests, 32 launcher tests, and all public gates
+- Production dependency audit: passed with zero vulnerabilities
+- `npm run audit:build`: passed with the single bounded dev-only Forge advisory
+- `npm run test:e2e`: passed, 2 packaged Electron tests
+- Launcher/readiness gates: passed
+- Universal macOS package and `npm run verify:dist`: passed
+- Native GitHub release workflow: not run
+- Candidate publication: not run
 
 ### Findings / Notes
 
-- Native GitHub runners and physical Windows acceptance remain authoritative for non-macOS artifacts.
+- GitHub, npm, and Cloudflare authentication are currently valid.
+- The stale generated beta.11 local ZIP was moved to
+  `/private/tmp/AdRouter-Agent-darwin-universal-0.1.0-beta.11.previous.zip` so exact beta.12
+  distribution verification could remain fail-closed.
+
+---
+
+## Step D: Final verification and cleanup
+
+### Status
+
+`todo`
+
+### Objective
+
+Bind human acceptance to the exact beta.12 artifacts, promote only after the physical Windows gate,
+and restore preserved local work.
+
+### Tasks
+
+- [ ] Install and approve the exact candidate on the primary operator device.
+- [ ] Complete the required physical Windows 11 x64 acceptance cohort.
+- [ ] Validate and attach `authentication-acceptance.json` to the beta.12 release.
+- [ ] Dispatch protected finalization to move `beta` and `latest` and remove `candidate`.
+- [ ] Verify exact public installs and revoke temporary npm dist-tag access.
+- [ ] Restore the preserved PitchDemo work and confirm its contents are unchanged.
+- [ ] Record final release identifiers, validation results, and remaining risks.
+
+### Relevant Files
+
+- `scripts/authentication-acceptance.schema.json`
+- `docs/release-checklist.md`
+- `RELEASE.md`
+- preserved local PitchDemo changes
+
+### Expected Changes
+
+- create: public-safe beta.12 authentication acceptance attachment
+- modify: npm dist-tags only after exact acceptance
+- restore: unrelated local PitchDemo working state
+
+### Do Not Modify
+
+- beta.12 bytes, tag, or artifact manifest after candidate publication
+- hosted database, backend, infrastructure, or secrets unrelated to final dist-tag movement
+
+### Commands
+
+```bash
+node scripts/validate-authentication-acceptance.mjs authentication-acceptance.json --manifest artifact-manifest.json
+gh release upload v0.1.0-beta.12 authentication-acceptance.json
+gh workflow run promote-release.yml --ref v0.1.0-beta.12 -f tag=v0.1.0-beta.12 -f phase=finalize-release -f channel=beta
+npm view @adrouter/agent dist-tags --json
+```
+
+### Acceptance Criteria
+
+- [ ] Exact primary-device and physical-Windows evidence validates against beta.12 artifacts.
+- [ ] Finalization moves only the intended channels without rebuilding.
+- [ ] Temporary dist-tag credentials are removed and revoked.
+- [ ] The original unrelated local work is restored unchanged.
+- [ ] The repository has no unintended release or generated files.
+
+### Validation Results
+
+- Physical Windows acceptance: not run
+- Final npm promotion: not run
+- Local-work restoration: not run
+
+### Findings / Notes
+
+- This step is intentionally blocked from completion until the user supplies the physical Windows
+  acceptance cohort for the exact candidate.
 
 ---
 
 ## Follow-up Work
 
-- Remove the bounded Forge `brace-expansion` exception after an upstream-compatible toolchain
-  update.
-- Finalize beta.11 only after physical Windows acceptance and exact evidence attachment.
+- Complete physical Windows beta.12 acceptance before moving `beta` or `latest`.
 - Stable release, signing/notarization, and automatic updates remain separate work.
+- Remove the bounded Forge advisory exception after an upstream-compatible toolchain update.
 
 ## Decision Log
 
 | Date | Decision | Rationale | Impact |
 | --- | --- | --- | --- |
-| 2026-07-29 | Pin `tar@7.5.22` and `tmp@0.2.7`. | Exact overrides remove the open and critical advisory roots without a risky Forge migration. | Targeted alerts close while packaging behavior remains compatible. |
-| 2026-07-29 | Allow only the dev-only Forge `brace-expansion` GHSA. | The production path is already patched and upstream Forge still pins incompatible legacy dependencies. | Any other high/critical advisory fails CI; upstream migration remains tracked. |
-| 2026-07-29 | Parse packaged bundle literals instead of substring matching. | Exact value comparison addresses CodeQL while preserving cross-platform static verification. | Hostile prefix/suffix and dead-text matches no longer satisfy the release gate. |
-| 2026-07-29 | Publish beta.11 under `candidate` first. | Candidate evaluation must not change accepted channels. | Beta/latest remain unchanged through candidate testing. |
-| 2026-07-29 | Require physical Windows acceptance before finalization. | The user must validate the Windows install and security flow on real hardware. | Final promotion is blocked until the Windows cohort passes. |
+| 2026-08-01 | Allocate beta.12 for sign-in-first enrollment. | Beta.11 is already immutable and public. | Login changes receive a new tag, package version, and artifacts. |
+| 2026-08-01 | Reuse the existing backend contract. | Device handoff, polling, cancellation, approval, and token routes are already deployed. | No Fly, Supabase, schema, secret, or infrastructure change is needed. |
+| 2026-08-01 | Publish beta.12 to `candidate` before final channels. | Native and physical Windows acceptance must bind exact immutable artifacts. | `beta` and `latest` stay on beta.7 until finalization. |
+| 2026-08-01 | Exclude existing PitchDemo work from beta.12. | It predates and is unrelated to the login release. | User work remains preserved and the release diff stays scoped. |

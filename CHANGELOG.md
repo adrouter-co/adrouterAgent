@@ -2,6 +2,30 @@
 
 All notable changes to AdRouter Agent are documented here.
 
+## [0.1.0-beta.12] - 2026-08-01
+
+### Added
+
+- Added sign-in-first Desktop Agent enrollment: the browser authenticates first, and the Agent
+  creates its installation key and approval request only after the user selects **Continue**.
+- Added main-process controls to reopen or copy the sign-in/approval link and signed best-effort
+  cancellation for abandoned or failed authorizations.
+
+### Changed
+
+- Existing installations remain active while a replacement is pending and are replaced only after
+  the candidate installation completes signed profile validation.
+- Pending approvals resume after restart, while the pre-Continue browser handoff remains memory-only.
+- The hosted AdRouter WebUI now distinguishes Desktop Agent handoffs and completion guidance from
+  AdRouterCLI without changing the shared backend protocol.
+
+### Security
+
+- Kept browser handoff identifiers, direct enrollment URLs, key generation, clipboard access, and
+  browser launching out of the sandboxed renderer.
+- Sanitized enrollment and network failures so raw platform or server errors are not exposed to the
+  renderer.
+
 ## [0.1.0-beta.11] - 2026-07-29
 
 ### Security
@@ -194,6 +218,7 @@ All notable changes to AdRouter Agent are documented here.
 - Updates are downloaded and installed manually.
 - A reachable AdRouter server and valid bearer token are required.
 
+[0.1.0-beta.12]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.12
 [0.1.0-beta.11]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.11
 [0.1.0-beta.10]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.10
 [0.1.0-beta.9]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.9

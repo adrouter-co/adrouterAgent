@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import {
@@ -29,6 +30,14 @@ import {
 
 const MAX_AUTH_RESPONSE_BYTES = 256 * 1024;
 const REFRESH_SKEW_MS = 60_000;
+const PREPARED_SIGN_IN_TTL_MS = 15 * 60_000;
+const DEVICE_AUTHORIZATION_CANCEL_PATH = '/v1/device/authorizations/cancel' as const;
+
+const officialWebOriginFor = (origin: string): string => {
+  if (origin === 'https://api.adrouter.co') return 'https://app.adrouter.co';
+  if (origin === 'https://api-staging.adrouter.co') return 'https://app-staging.adrouter.co';
+  throw new Error('Connect this Agent is available only for official AdRouter servers.');
+};
 
 const DeviceAuthorizationSchema = z
   .object({
@@ -67,6 +76,7 @@ const OAuthErrorSchema = z
       'invalid_dpop_proof',
       'use_dpop_nonce',
       'client_not_allowed',
+      'developer_required',
       'installation_not_allowed',
       'rate_limited',
       'client_upgrade_required',
@@ -76,6 +86,15 @@ const OAuthErrorSchema = z
 
 interface AccessState {
   token: string;
+  expiresAt: number;
+}
+
+interface PreparedEnrollment {
+  origin: string;
+  sponsoredCompute: boolean;
+  displayName: string;
+  browserHandoffId: string;
+  signInUrl: string;
   expiresAt: number;
 }
 
@@ -98,6 +117,40 @@ const idleStatus = (): EnrollmentStatus => ({
   nextPollAt: null,
   message: null,
 });
+
+const preparedStatus = (
+  prepared: PreparedEnrollment,
+  message = 'Sign in to AdRouter in your browser, then return here to continue.'
+): EnrollmentStatus => ({
+  ...idleStatus(),
+  state: 'awaiting_sign_in',
+  expiresAt: new Date(prepared.expiresAt).toISOString(),
+  message,
+});
+
+const safeEnrollmentFailureMessage = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : '';
+  const allowed = [
+    'This AdRouter Agent version must be upgraded.',
+    'This Agent client is not allowed by the selected AdRouter server.',
+    'Sign in to AdRouter and finish developer registration before continuing.',
+    'This AdRouter account cannot create another installation.',
+    'Your AdRouter sign-in expired. Sign in again and retry.',
+    'AdRouter is receiving too many installation requests. Try again shortly.',
+    'AdRouter rejected this device proof.',
+    "AdRouter rejected this device proof. Check that this computer's clock is correct.",
+    'AdRouter did not provide the required installation proof challenge.',
+    'AdRouter returned an invalid installation approval response.',
+    'AdRouter returned an unsafe approval URL.',
+  ];
+  if (
+    allowed.includes(message) ||
+    /^AdRouter Agent [0-9A-Za-z.+-]+ or newer is required\.$/.test(message)
+  ) {
+    return message;
+  }
+  return 'AdRouter could not start installation approval. Sign in again and retry.';
+};
 
 const safeStatus = (
   pending: PendingEnrollmentRecord,
@@ -127,12 +180,32 @@ const requireOfficialWebUrl = (value: string): string => {
   return url.toString();
 };
 
+const requireOfficialSignInUrl = (value: string): string => {
+  const url = new URL(value);
+  if (
+    url.protocol !== 'https:' ||
+    url.username ||
+    url.password ||
+    !(OFFICIAL_ADROUTER_WEB_ORIGINS as readonly string[]).includes(url.origin) ||
+    url.pathname !== '/developers' ||
+    url.search !== '?connect=agent' ||
+    !/^#handoff=[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      url.hash
+    )
+  ) {
+    throw new Error('The AdRouter sign-in link is invalid.');
+  }
+  return url.toString();
+};
+
 export class InstallationAuthManager {
   private readonly fetchFn: typeof fetch;
   private readonly now: () => number;
   private access?: AccessState;
   private refreshFlight?: Promise<AccessState>;
   private pollController?: AbortController;
+  private prepared?: PreparedEnrollment;
+  private continueFlight?: Promise<EnrollmentStatus>;
   private statusValue: EnrollmentStatus = idleStatus();
   private persistenceCompromised = false;
 
@@ -155,7 +228,49 @@ export class InstallationAuthManager {
       throw new Error('Connect this Agent is available only for official AdRouter servers.');
     }
     await this.configuration.assertSecureStorage();
-    await this.cancelEnrollment();
+    if (this.continueFlight) await this.continueFlight;
+    await this.discardActiveEnrollment();
+    const browserHandoffId = randomUUID();
+    const prepared: PreparedEnrollment = {
+      origin,
+      sponsoredCompute: input.sponsoredCompute,
+      displayName: input.displayName,
+      browserHandoffId,
+      signInUrl: `${officialWebOriginFor(origin)}/developers?connect=agent#handoff=${browserHandoffId}`,
+      expiresAt: this.now() + PREPARED_SIGN_IN_TTL_MS,
+    };
+    this.prepared = prepared;
+    this.statusValue = preparedStatus(prepared);
+    return this.statusValue;
+  }
+
+  public async continueEnrollment(): Promise<EnrollmentStatus> {
+    if (!this.continueFlight) {
+      this.continueFlight = this.createPendingEnrollment().finally(() => {
+        this.continueFlight = undefined;
+      });
+    }
+    return this.continueFlight;
+  }
+
+  private async createPendingEnrollment(): Promise<EnrollmentStatus> {
+    const existing = await this.configuration.getPendingEnrollment();
+    if (existing && Date.parse(existing.expiresAt) > this.now()) {
+      this.prepared = undefined;
+      this.statusValue = safeStatus(existing);
+      if (!this.pollController) this.beginPolling(existing);
+      return this.statusValue;
+    }
+    const prepared = this.prepared;
+    if (!prepared || prepared.expiresAt <= this.now()) {
+      this.prepared = undefined;
+      this.statusValue = {
+        ...idleStatus(),
+        state: 'expired',
+        message: 'The sign-in window expired. Start again to reconnect.',
+      };
+      return this.statusValue;
+    }
     this.statusValue = {
       ...idleStatus(),
       state: 'starting',
@@ -165,72 +280,108 @@ export class InstallationAuthManager {
     const body = exactJsonBytes({
       client_kind: DESKTOP_CLIENT_KIND,
       client_version: this.clientVersion,
-      display_name: input.displayName,
+      display_name: prepared.displayName,
       public_key_jwk: keyPair.publicJwk,
       requested_scopes: [...INSTALLATION_SCOPES],
       storage_class: 'os_encrypted',
+      browser_handoff_id: prepared.browserHandoffId,
     });
-    const endpoint = `${origin}/v1/device/authorizations`;
-    const challenge = await this.fetchFn(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Digest': contentDigest(body),
-      },
-      body: Buffer.from(body),
-      redirect: 'manual',
-    });
-    this.rejectRedirect(challenge);
-    const nonce = this.validNonce(challenge);
-    if (challenge.status !== 401 || !nonce) {
-      throw await this.responseError(
-        challenge,
-        'AdRouter did not provide the required installation proof challenge.'
+    let pending: PendingEnrollmentRecord | undefined;
+    try {
+      const endpoint = `${prepared.origin}/v1/device/authorizations`;
+      const challenge = await this.fetchFn(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Digest': contentDigest(body),
+        },
+        body: Buffer.from(body),
+        redirect: 'manual',
+      });
+      this.rejectRedirect(challenge);
+      const nonce = this.validNonce(challenge);
+      if (challenge.status !== 401 || !nonce) {
+        throw await this.responseError(
+          challenge,
+          'AdRouter did not provide the required installation proof challenge.'
+        );
+      }
+      const response = await this.signedFetch({
+        origin: prepared.origin,
+        path: '/v1/device/authorizations',
+        body,
+        privateJwk: keyPair.privateJwk,
+        nonce,
+      });
+      if (!response.ok) {
+        throw await this.responseError(
+          response,
+          `AdRouter could not start installation approval (${response.status}).`
+        );
+      }
+      const parsedAuthorization = DeviceAuthorizationSchema.safeParse(
+        await this.readJson(response)
       );
+      if (!parsedAuthorization.success) {
+        throw new Error('AdRouter returned an invalid installation approval response.');
+      }
+      const created = parsedAuthorization.data;
+      const now = this.now();
+      pending = {
+        version: 1,
+        privateJwk: keyPair.privateJwk,
+        deviceCode: created.device_code,
+        userCode: created.user_code,
+        verificationUri: requireOfficialWebUrl(created.verification_uri),
+        verificationUriComplete: requireOfficialWebUrl(created.verification_uri_complete),
+        intervalSeconds: created.interval,
+        expiresAt: new Date(now + created.expires_in * 1_000).toISOString(),
+        nextPollAt: new Date(now + created.interval * 1_000).toISOString(),
+        origin: prepared.origin,
+        clientVersion: this.clientVersion,
+        displayName: prepared.displayName,
+        sponsoredCompute: prepared.sponsoredCompute,
+        scopes: [...INSTALLATION_SCOPES],
+      };
+      await this.configuration.savePendingEnrollment(pending);
+      this.prepared = undefined;
+      this.statusValue = safeStatus(pending);
+      this.beginPolling(pending);
+      return this.statusValue;
+    } catch (error) {
+      if (pending) await this.cancelPendingAuthorization(pending);
+      await this.configuration.clearPendingEnrollment().catch(() => undefined);
+      this.prepared = undefined;
+      this.statusValue = {
+        ...idleStatus(),
+        state: 'failed',
+        message: safeEnrollmentFailureMessage(error),
+      };
+      return this.statusValue;
     }
-    const response = await this.signedFetch({
-      origin,
-      path: '/v1/device/authorizations',
-      body,
-      privateJwk: keyPair.privateJwk,
-      nonce,
-    });
-    if (!response.ok) {
-      throw await this.responseError(
-        response,
-        `AdRouter could not start installation approval (${response.status}).`
-      );
-    }
-    const created = DeviceAuthorizationSchema.parse(await this.readJson(response));
-    const now = this.now();
-    const pending: PendingEnrollmentRecord = {
-      version: 1,
-      privateJwk: keyPair.privateJwk,
-      deviceCode: created.device_code,
-      userCode: created.user_code,
-      verificationUri: requireOfficialWebUrl(created.verification_uri),
-      verificationUriComplete: requireOfficialWebUrl(created.verification_uri_complete),
-      intervalSeconds: created.interval,
-      expiresAt: new Date(now + created.expires_in * 1_000).toISOString(),
-      nextPollAt: new Date(now + created.interval * 1_000).toISOString(),
-      origin,
-      clientVersion: this.clientVersion,
-      displayName: input.displayName,
-      sponsoredCompute: input.sponsoredCompute,
-      scopes: [...INSTALLATION_SCOPES],
-    };
-    await this.configuration.savePendingEnrollment(pending);
-    this.statusValue = safeStatus(pending);
-    this.beginPolling(pending);
-    return this.statusValue;
   }
 
   public async enrollmentStatus(): Promise<EnrollmentStatus> {
     const pending = await this.configuration.getPendingEnrollment();
-    if (!pending) return this.statusValue;
+    if (!pending) {
+      if (this.prepared) {
+        if (this.prepared.expiresAt <= this.now()) {
+          this.prepared = undefined;
+          this.statusValue = {
+            ...idleStatus(),
+            state: 'expired',
+            message: 'The sign-in window expired. Start again to reconnect.',
+          };
+        } else {
+          this.statusValue = preparedStatus(this.prepared, this.statusValue.message ?? undefined);
+        }
+      }
+      return this.statusValue;
+    }
     if (pending.clientVersion !== this.clientVersion) {
       await this.configuration.clearPendingEnrollment();
       this.pollController?.abort();
+      await this.cancelPendingAuthorization(pending);
       this.statusValue = safeStatus(
         pending,
         'failed',
@@ -241,6 +392,7 @@ export class InstallationAuthManager {
     if (Date.parse(pending.expiresAt) <= this.now()) {
       await this.configuration.clearPendingEnrollment();
       this.pollController?.abort();
+      await this.cancelPendingAuthorization(pending);
       this.statusValue = safeStatus(
         pending,
         'expired',
@@ -256,22 +408,47 @@ export class InstallationAuthManager {
   }
 
   public async cancelEnrollment(): Promise<EnrollmentStatus> {
+    if (this.continueFlight) await this.continueFlight;
     this.pollController?.abort();
     this.pollController = undefined;
+    this.prepared = undefined;
     const pending = await this.configuration.getPendingEnrollment().catch(() => undefined);
-    await this.configuration.clearPendingEnrollment();
+    await this.configuration.clearPendingEnrollment().catch(() => undefined);
+    if (pending) await this.cancelPendingAuthorization(pending);
     this.statusValue = pending
       ? safeStatus(pending, 'cancelled', 'Installation approval was cancelled on this device.')
       : idleStatus();
     return this.statusValue;
   }
 
-  public async approvalUrl(): Promise<string> {
+  public async enrollmentUrl(): Promise<string> {
+    if (this.prepared && this.prepared.expiresAt > this.now()) {
+      return requireOfficialSignInUrl(this.prepared.signInUrl);
+    }
     const pending = await this.configuration.getPendingEnrollment();
     if (!pending || Date.parse(pending.expiresAt) <= this.now()) {
-      throw new Error('There is no active installation approval to open.');
+      throw new Error('There is no active AdRouter sign-in or approval to open.');
     }
     return requireOfficialWebUrl(pending.verificationUriComplete);
+  }
+
+  public async approvalUrl(): Promise<string> {
+    return this.enrollmentUrl();
+  }
+
+  public noteBrowserOpenFailure(): EnrollmentStatus {
+    if (this.prepared && this.prepared.expiresAt > this.now()) {
+      this.statusValue = preparedStatus(
+        this.prepared,
+        'The browser could not be opened. Copy the sign-in link and open it manually.'
+      );
+    } else if (this.statusValue.state === 'pending') {
+      this.statusValue = {
+        ...this.statusValue,
+        message: 'The browser could not be opened. Copy the approval link and open it manually.',
+      };
+    }
+    return this.statusValue;
   }
 
   public async authorize(request: ProtectedRouterRequest): Promise<ProtectedRouterHeaders> {
@@ -361,8 +538,13 @@ export class InstallationAuthManager {
   }
 
   public async signOut(): Promise<SignOutResult> {
+    if (this.continueFlight) await this.continueFlight;
     this.pollController?.abort();
     this.pollController = undefined;
+    this.prepared = undefined;
+    const pending = await this.configuration.getPendingEnrollment().catch(() => undefined);
+    await this.configuration.clearPendingEnrollment().catch(() => undefined);
+    if (pending) await this.cancelPendingAuthorization(pending);
     let remoteRevocationConfirmed = false;
     try {
       const record = await this.configuration.getInstallationRecord();
@@ -397,6 +579,7 @@ export class InstallationAuthManager {
   public dispose(): void {
     this.pollController?.abort();
     this.pollController = undefined;
+    this.prepared = undefined;
     this.clearMemory();
   }
 
@@ -424,6 +607,7 @@ export class InstallationAuthManager {
         if (result === 'approved') return;
         if (result === 'denied' || result === 'expired' || result === 'failed') {
           await this.configuration.clearPendingEnrollment();
+          await this.cancelPendingAuthorization(pending);
           return;
         }
         pending = (await this.configuration.getPendingEnrollment()) ?? pending;
@@ -444,6 +628,7 @@ export class InstallationAuthManager {
     }
     if (!signal.aborted) {
       await this.configuration.clearPendingEnrollment();
+      await this.cancelPendingAuthorization(pending);
       this.statusValue = safeStatus(
         pending,
         'expired',
@@ -495,13 +680,12 @@ export class InstallationAuthManager {
         keyThumbprint: generateThumbprint(pending),
         storageClassification: 'os_encrypted',
       };
-      this.access = {
+      const candidateAccess = {
         token: token.access_token,
         expiresAt: this.now() + token.expires_in * 1_000,
       };
-      const diagnostics = await this.diagnosticsWithRecord(record, signal);
+      const diagnostics = await this.diagnosticsWithRecord(record, candidateAccess.token, signal);
       if (!diagnostics.authenticated) {
-        this.clearMemory();
         this.statusValue = safeStatus(
           pending,
           'failed',
@@ -514,6 +698,7 @@ export class InstallationAuthManager {
         diagnostics.models,
         diagnostics.checkedAt
       );
+      this.access = candidateAccess;
       this.persistenceCompromised = false;
       this.statusValue = safeStatus(pending, 'approved', 'This Agent is connected.');
       return 'approved';
@@ -560,6 +745,7 @@ export class InstallationAuthManager {
 
   private async diagnosticsWithRecord(
     record: InstallationRecord,
+    accessToken: string,
     signal: AbortSignal
   ): Promise<RouterDiagnostics> {
     const client = new AdRouterClient({
@@ -567,11 +753,9 @@ export class InstallationAuthManager {
       authentication: {
         mode: 'installation',
         authorize: async (request) => {
-          const access = this.access;
-          if (!access) throw new Error('The approved access token is unavailable.');
           return this.protectedHeaders(
             record,
-            access.token,
+            accessToken,
             request.method,
             request.path,
             request.body,
@@ -694,7 +878,7 @@ export class InstallationAuthManager {
 
   private async signedFetch(input: {
     origin: string;
-    path: '/v1/device/authorizations' | '/v1/oauth/token';
+    path: '/v1/device/authorizations' | typeof DEVICE_AUTHORIZATION_CANCEL_PATH | '/v1/oauth/token';
     body: Uint8Array;
     privateJwk: InstallationRecord['privateJwk'];
     nonce?: string;
@@ -771,7 +955,27 @@ export class InstallationAuthManager {
           : 'This AdRouter Agent version must be upgraded.'
       );
     }
-    return new Error(parsed?.error ?? fallback);
+    if (parsed?.code === 'client_not_allowed') {
+      return new Error('This Agent client is not allowed by the selected AdRouter server.');
+    }
+    if (parsed?.code === 'developer_required') {
+      return new Error('Sign in to AdRouter and finish developer registration before continuing.');
+    }
+    if (parsed?.code === 'installation_not_allowed') {
+      return new Error('This AdRouter account cannot create another installation.');
+    }
+    if (parsed?.code === 'invalid_access_token') {
+      return new Error('Your AdRouter sign-in expired. Sign in again and retry.');
+    }
+    if (parsed?.code === 'rate_limited') {
+      return new Error('AdRouter is receiving too many installation requests. Try again shortly.');
+    }
+    if (parsed?.code === 'invalid_dpop_proof') {
+      const serverDate = response.headers.get('date');
+      const clockHint = serverDate ? " Check that this computer's clock is correct." : '';
+      return new Error(`AdRouter rejected this device proof.${clockHint}`);
+    }
+    return new Error(fallback);
   }
 
   private async readJson(response: Response): Promise<unknown> {
@@ -805,6 +1009,35 @@ export class InstallationAuthManager {
       throw new Error('Installation authentication is restricted to official AdRouter origins.');
     }
     return record;
+  }
+
+  private async discardActiveEnrollment(): Promise<void> {
+    this.pollController?.abort();
+    this.pollController = undefined;
+    this.prepared = undefined;
+    const pending = await this.configuration.getPendingEnrollment().catch(() => undefined);
+    await this.configuration.clearPendingEnrollment().catch(() => undefined);
+    if (pending) await this.cancelPendingAuthorization(pending);
+  }
+
+  private async cancelPendingAuthorization(pending: PendingEnrollmentRecord): Promise<boolean> {
+    const body = exactJsonBytes({
+      device_code: pending.deviceCode,
+      client_kind: DESKTOP_CLIENT_KIND,
+    });
+    try {
+      const response = await this.signedFetch({
+        origin: pending.origin,
+        path: DEVICE_AUTHORIZATION_CANCEL_PATH,
+        body,
+        privateJwk: pending.privateJwk,
+        signal: AbortSignal.timeout(5_000),
+      });
+      await response.body?.cancel();
+      return response.ok;
+    } catch {
+      return false;
+    }
   }
 
   private clearMemory(): void {

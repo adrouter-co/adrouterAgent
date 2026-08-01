@@ -328,13 +328,15 @@ export class ConfigurationStore {
     const encryptedPendingEnrollment = await this.encryptSecret(JSON.stringify(record));
     await this.write({
       ...configuration,
-      serverUrl: allowRouterUrl(record.origin),
-      sponsoredCompute: record.sponsoredCompute,
-      authMode: 'installation',
+      serverUrl: configuration.encryptedInstallation
+        ? configuration.serverUrl
+        : allowRouterUrl(record.origin),
+      sponsoredCompute: configuration.encryptedInstallation
+        ? configuration.sponsoredCompute
+        : record.sponsoredCompute,
+      authMode: configuration.encryptedInstallation ? configuration.authMode : 'installation',
       encryptedToken: null,
-      encryptedInstallation: null,
       encryptedPendingEnrollment,
-      installationMetadata: null,
     });
   }
 
@@ -458,17 +460,20 @@ export class ConfigurationStore {
     }
     const expired = metadata ? Date.parse(metadata.familyExpiresAt) <= Date.now() : false;
     const reconnectRequired = Boolean(metadata?.reconnectRequired || expired);
-    const state = pendingEnrollment
-      ? 'pending'
-      : mode === 'installation' && configuration?.encryptedInstallation
-        ? reconnectRequired
-          ? metadata?.minimumClientVersion
-            ? 'upgrade_required'
-            : 'reconnect_required'
-          : 'connected'
-        : mode === 'legacy_hosted'
-          ? 'reconnect_required'
-          : 'none';
+    const hasInstallation =
+      mode === 'installation' && Boolean(configuration?.encryptedInstallation);
+    const state =
+      pendingEnrollment && !hasInstallation
+        ? 'pending'
+        : hasInstallation
+          ? reconnectRequired
+            ? metadata?.minimumClientVersion
+              ? 'upgrade_required'
+              : 'reconnect_required'
+            : 'connected'
+          : mode === 'legacy_hosted'
+            ? 'reconnect_required'
+            : 'none';
     return {
       mode,
       state,

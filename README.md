@@ -10,7 +10,7 @@ selection and settlement use a separate display channel; sponsor data is never
 added to model prompts, tool arguments, commands, patches, or compacted agent
 context.
 
-> **Public beta candidate:** AdRouter Agent 0.1.0-beta.11 supports macOS 12+ on Apple Silicon and Intel, Ubuntu
+> **Public beta candidate:** AdRouter Agent 0.1.0-beta.12 supports macOS 12+ on Apple Silicon and Intel, Ubuntu
 > Desktop 24.04 LTS x64, and Windows 11 x64. One agent task can run at a time, and updates are
 > installed manually. It remains on npm `candidate` until physical Windows acceptance passes.
 
@@ -37,7 +37,8 @@ This beta is not Developer ID signed or notarized. If macOS blocks the first
 launch, open **System Settings → Privacy & Security** and choose **Open Anyway**.
 The launcher never removes quarantine metadata or changes Gatekeeper settings.
 After launch, the app is prefilled with `https://api-staging.adrouter.co`. Select **Connect this
-Agent**, compare the displayed code with the AdRouter WebUI, and explicitly approve the installation.
+Agent**, sign in through the AdRouter WebUI, return to the Agent and select **Continue**, then compare
+the displayed code and explicitly approve the installation.
 
 Remote routers must use HTTPS. Plain HTTP is accepted only for `localhost`,
 `127.0.0.1`, and `::1` development servers. Official origins use an OS-encrypted Ed25519
@@ -130,9 +131,12 @@ After `npm run dev` opens the desktop app:
 
 1. For the official staging service, keep `https://api-staging.adrouter.co`, choose whether to enable
    sponsored compute, and select **Connect this Agent**.
-2. Compare the code shown by the Agent with the authenticated AdRouter WebUI and explicitly approve
-   it. The Agent resumes an unexpired approval after restart.
-3. For `http://localhost:8787` or another explicit custom router, open the advanced section, enter
+2. Finish signing in in the browser, return to the Agent, and select **Continue**. The installation
+   key and approval request are not created before this step.
+3. Compare the code shown by the Agent with the authenticated AdRouter WebUI and explicitly approve
+   it. The Agent resumes an unexpired approval after restart and best-effort cancels abandoned
+   approvals on the server.
+4. For `http://localhost:8787` or another explicit custom router, open the advanced section, enter
    that router's bearer token, test the connection, and save it.
 
 Private keys and rotating refresh credentials are encrypted by Electron `safeStorage` using
@@ -187,6 +191,7 @@ The desktop app uses only these routes on the configured AdRouter origin:
 ```text
 GET  /health
 POST /v1/device/authorizations  DPoP proof after nonce challenge
+POST /v1/device/authorizations/cancel  signed cleanup for abandoned approvals
 POST /v1/oauth/token            DPoP-bound device redemption and refresh
 GET  /v1/profile                DPoP access token + bodyless proof
 GET  /v1/models                 public model discovery

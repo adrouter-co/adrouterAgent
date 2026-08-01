@@ -47,7 +47,7 @@ const createRecord = (): InstallationRecord => {
     scopes: ['agent:turn', 'profile:read'],
     origin: 'https://api-staging.adrouter.co',
     clientKind: 'desktop',
-    clientVersion: '0.1.0-beta.11',
+    clientVersion: '0.1.0-beta.12',
     familyExpiresAt: '2030-01-01T00:00:00.000Z',
     displayName: 'AdRouter Agent',
     keyThumbprint: keyPair.thumbprint,
@@ -56,7 +56,7 @@ const createRecord = (): InstallationRecord => {
 };
 
 describe('InstallationAuthManager', () => {
-  it('starts only after a nonce challenge and exposes no device or key secret to the renderer DTO', async () => {
+  it('signs in before the nonce challenge and exposes no handoff, device, or key secret to the renderer DTO', async () => {
     const { store, path } = await createStore();
     const requests: RequestInit[] = [];
     const fetchFn: typeof fetch = vi.fn(async (_input: URL | RequestInfo, init?: RequestInit) => {
@@ -76,31 +76,45 @@ describe('InstallationAuthManager', () => {
         { status: 200, headers: { 'content-type': 'application/json' } }
       );
     });
-    const manager = new InstallationAuthManager(store, '0.1.0-beta.11', { fetchFn });
+    const manager = new InstallationAuthManager(store, '0.1.0-beta.12', { fetchFn });
 
-    const status = await manager.startEnrollment({
+    const prepared = await manager.startEnrollment({
       serverUrl: 'https://api-staging.adrouter.co',
       sponsoredCompute: true,
       displayName: 'AdRouter Agent',
     });
+
+    expect(prepared).toMatchObject({ state: 'awaiting_sign_in', userCode: null });
+    expect(fetchFn).not.toHaveBeenCalled();
+    const signInUrl = await manager.enrollmentUrl();
+    expect(signInUrl).toMatch(
+      /^https:\/\/app-staging\.adrouter\.co\/developers\?connect=agent#handoff=[0-9a-f-]{36}$/
+    );
+    expect(JSON.stringify(prepared)).not.toContain('handoff');
+
+    const status = await manager.continueEnrollment();
 
     expect(status).toMatchObject({ state: 'pending', userCode: 'ABCD-EFGH' });
     expect(JSON.stringify(status)).not.toContain(deviceCode);
     expect(requests[0]?.headers).not.toMatchObject({ DPoP: expect.any(String) });
     expect(requests[1]?.headers).toMatchObject({ DPoP: expect.any(String) });
     const body = JSON.parse(String(requests[0]?.body)) as Record<string, unknown>;
-    expect(Object.keys(body).sort()).toEqual([
-      'client_kind',
-      'client_version',
-      'display_name',
-      'public_key_jwk',
-      'requested_scopes',
-      'storage_class',
-    ]);
+    expect(Object.keys(body).sort()).toEqual(
+      [
+        'client_kind',
+        'client_version',
+        'display_name',
+        'browser_handoff_id',
+        'public_key_jwk',
+        'requested_scopes',
+        'storage_class',
+      ].sort()
+    );
     expect(body).toMatchObject({
       client_kind: 'desktop',
       requested_scopes: ['agent:turn', 'profile:read'],
       storage_class: 'os_encrypted',
+      browser_handoff_id: signInUrl.split('#handoff=')[1],
     });
     expect(body.public_key_jwk).not.toHaveProperty('d');
     const persisted = await readFile(path, 'utf8');
@@ -127,7 +141,7 @@ describe('InstallationAuthManager', () => {
     const fetchFn = vi.fn<typeof fetch>();
     const manager = new InstallationAuthManager(
       new ConfigurationStore(join(directory, 'configuration.json'), unsafeCipher),
-      '0.1.0-beta.11',
+      '0.1.0-beta.12',
       { fetchFn }
     );
 
@@ -139,6 +153,100 @@ describe('InstallationAuthManager', () => {
       })
     ).rejects.toThrow(/unsafe credential storage/);
     expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('preserves an existing installation until replacement and signs cancellation with the pending key', async () => {
+    const { store } = await createStore();
+    const existing = createRecord();
+    await store.completeEnrollment(existing, [], '2026-07-27T00:00:00.000Z');
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const fetchFn: typeof fetch = vi.fn(async (input, init) => {
+      requests.push({ url: String(input), init: init ?? {} });
+      if (requests.length === 1) {
+        return new Response('', { status: 401, headers: { 'DPoP-Nonce': 'enroll-nonce' } });
+      }
+      if (requests.length === 2) {
+        return new Response(
+          JSON.stringify({
+            device_code: deviceCode,
+            user_code: 'ABCD-EFGH',
+            verification_uri: 'https://app-staging.adrouter.co/connect',
+            verification_uri_complete: 'https://app-staging.adrouter.co/connect?code=ABCD-EFGH',
+            expires_in: 600,
+            interval: 5,
+          }),
+          { status: 201, headers: { 'content-type': 'application/json' } }
+        );
+      }
+      return new Response(null, { status: 204 });
+    });
+    const manager = new InstallationAuthManager(store, '0.1.0-beta.12', { fetchFn });
+
+    await manager.startEnrollment({
+      serverUrl: 'https://api-staging.adrouter.co',
+      sponsoredCompute: false,
+      displayName: 'Replacement Agent',
+    });
+    await manager.continueEnrollment();
+
+    await expect(store.getInstallationRecord()).resolves.toMatchObject({
+      installationId: existing.installationId,
+      refreshToken: existing.refreshToken,
+    });
+    await expect(store.get()).resolves.toMatchObject({
+      configured: true,
+      sponsoredCompute: true,
+    });
+
+    await manager.cancelEnrollment();
+
+    const cancellation = requests.at(-1);
+    expect(cancellation?.url).toBe(
+      'https://api-staging.adrouter.co/v1/device/authorizations/cancel'
+    );
+    expect(cancellation?.init.headers).toMatchObject({ DPoP: expect.any(String) });
+    expect(JSON.parse(String(cancellation?.init.body))).toEqual({
+      device_code: deviceCode,
+      client_kind: 'desktop',
+    });
+    await expect(store.getPendingEnrollment()).resolves.toBeUndefined();
+    await expect(store.getInstallationRecord()).resolves.toMatchObject({
+      installationId: existing.installationId,
+    });
+  });
+
+  it('resumes an encrypted pending approval after restart without recreating it', async () => {
+    const { store } = await createStore();
+    const keyPair = generateInstallationKeyPair();
+    const now = Date.now();
+    const pending: PendingEnrollmentRecord = {
+      version: 1,
+      privateJwk: keyPair.privateJwk,
+      deviceCode,
+      userCode: 'ABCD-EFGH',
+      verificationUri: 'https://app-staging.adrouter.co/connect',
+      verificationUriComplete: 'https://app-staging.adrouter.co/connect?code=ABCD-EFGH',
+      intervalSeconds: 5,
+      expiresAt: new Date(now + 20 * 60_000).toISOString(),
+      nextPollAt: new Date(now + 10 * 60_000).toISOString(),
+      origin: 'https://api-staging.adrouter.co',
+      clientVersion: '0.1.0-beta.12',
+      displayName: 'AdRouter Agent',
+      sponsoredCompute: true,
+      scopes: ['agent:turn', 'profile:read'],
+    };
+    await store.savePendingEnrollment(pending);
+    const fetchFn = vi.fn<typeof fetch>();
+    const manager = new InstallationAuthManager(store, '0.1.0-beta.12', { fetchFn });
+
+    await expect(manager.enrollmentStatus()).resolves.toMatchObject({
+      state: 'pending',
+      userCode: 'ABCD-EFGH',
+    });
+    await expect(manager.enrollmentUrl()).resolves.toBe(pending.verificationUriComplete);
+    expect(fetchFn).not.toHaveBeenCalled();
+    manager.dispose();
+    await expect(store.getPendingEnrollment()).resolves.toMatchObject({ deviceCode });
   });
 
   it('polls with the exact device grant and branches on the Router code field', async () => {
@@ -176,12 +284,13 @@ describe('InstallationAuthManager', () => {
       if (!response) throw new Error('Unexpected authentication request.');
       return response;
     });
-    const manager = new InstallationAuthManager(store, '0.1.0-beta.11', { fetchFn });
+    const manager = new InstallationAuthManager(store, '0.1.0-beta.12', { fetchFn });
     await manager.startEnrollment({
       serverUrl: 'https://api-staging.adrouter.co',
       sponsoredCompute: true,
       displayName: 'AdRouter Agent',
     });
+    await manager.continueEnrollment();
     const pending = await store.getPendingEnrollment();
     if (!pending) throw new Error('Expected encrypted pending enrollment.');
     const pollOnce = Reflect.get(manager, 'pollOnce') as (
@@ -232,7 +341,7 @@ describe('InstallationAuthManager', () => {
           { status: 200, headers: { 'content-type': 'application/json' } }
         )
     );
-    const manager = new InstallationAuthManager(store, '0.1.0-beta.11', { fetchFn });
+    const manager = new InstallationAuthManager(store, '0.1.0-beta.12', { fetchFn });
     const body = Buffer.from('{"exact":true}', 'utf8');
     const [first, second] = await Promise.all([
       manager.authorize({ method: 'POST', path: '/v1/agent/turn', body }),
@@ -264,7 +373,7 @@ describe('InstallationAuthManager', () => {
     const { store } = await createStore();
     const record = createRecord();
     await store.completeEnrollment(record, [], '2026-07-27T00:00:00.000Z');
-    const manager = new InstallationAuthManager(store, '0.1.0-beta.11', {
+    const manager = new InstallationAuthManager(store, '0.1.0-beta.12', {
       fetchFn: vi.fn(async () => {
         throw new Error('offline');
       }),
@@ -289,7 +398,7 @@ describe('InstallationAuthManager', () => {
     const record = createRecord();
     await store.completeEnrollment(record, [], '2026-07-27T00:00:00.000Z');
     vi.spyOn(store, 'rotateInstallation').mockRejectedValueOnce(new Error('disk failure'));
-    const manager = new InstallationAuthManager(store, '0.1.0-beta.11', {
+    const manager = new InstallationAuthManager(store, '0.1.0-beta.12', {
       fetchFn: vi.fn(
         async () =>
           new Response(

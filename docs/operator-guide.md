@@ -164,8 +164,9 @@ Independent AdRouter backend
 ```
 
 The renderer receives only redacted installation state and the approval comparison code. The main
-process owns key generation, encrypted persistence, polling, refresh, signing, revocation, database,
-and runtime lifecycle. The utility owns streaming but can request protected headers only for bounded
+process owns the browser handoff, clipboard writes, key generation, encrypted persistence, polling,
+signed cancellation, refresh, signing, revocation, database, and runtime lifecycle. The handoff
+identifier never enters the renderer. The utility owns streaming but can request protected headers only for bounded
 exact bytes on the profile and agent-turn allowlist; it never receives a private key or refresh
 credential.
 
@@ -285,10 +286,13 @@ For the local/custom compatibility path, enter:
 3. Sponsored compute preference.
 4. Select **Test connection**, then **Save custom router**.
 
-Official origins instead show **Connect this Agent**. Main generates an Ed25519 key only after that
-action, shows a comparison code through the renderer, polls at the server interval, encrypts the
-approved key/refresh family with `safeStorage`, and verifies a signed profile. Access tokens remain
-memory-only. Restart resumes an unexpired pending approval.
+Official origins instead show **Connect this Agent**. Main creates a memory-only browser handoff and
+opens the WebUI sign-in page. After the user returns and selects **Continue**, Main generates an
+Ed25519 key, binds the device authorization to the handoff, shows a comparison code through the
+renderer, polls at the server interval, encrypts the approved key/refresh family with `safeStorage`,
+and verifies a signed profile. Access tokens remain memory-only. Restart discards pre-Continue
+preparation but resumes an unexpired encrypted pending approval. Cancellation and terminal failure
+attempt signed server cleanup, and a prior installation is replaced only after validation succeeds.
 
 For a remote backend, use HTTPS. Plain HTTP is accepted only for
 `localhost`, `127.0.0.1`, and `::1`; URLs with embedded credentials or URL

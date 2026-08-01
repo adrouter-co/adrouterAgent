@@ -72,6 +72,8 @@ const api: AdrouterApi = {
       EnrollmentStatusSchema.parse(
         await invoke('configuration.startEnrollment', EnrollmentStartInputSchema.parse(input))
       ),
+    continueEnrollment: async () =>
+      EnrollmentStatusSchema.parse(await invoke('configuration.continueEnrollment', {})),
     enrollmentStatus: async () =>
       EnrollmentStatusSchema.parse(await invoke('configuration.enrollmentStatus', {})),
     cancelEnrollment: async () =>
@@ -79,6 +81,10 @@ const api: AdrouterApi = {
     openEnrollment: async () =>
       IpcSchemas['configuration.openEnrollment'].output.parse(
         await invoke('configuration.openEnrollment', {})
+      ),
+    copyEnrollmentLink: async () =>
+      IpcSchemas['configuration.copyEnrollmentLink'].output.parse(
+        await invoke('configuration.copyEnrollmentLink', {})
       ),
     updatePreferences: async (input) =>
       RouterConfigurationSchema.parse(

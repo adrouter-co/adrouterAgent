@@ -1,6 +1,6 @@
 # Public-beta release procedure
 
-This is the operator runbook for `v0.1.0-beta.11`. It separates safe repository
+This is the operator runbook for `v0.1.0-beta.12`. It separates safe repository
 setup from credential entry and irreversible publication.
 
 ## 1. Prerequisites
@@ -50,7 +50,7 @@ Create an empty public repository and push the reviewed initial commit:
 ```bash
 gh repo create adrouter/adrouterAgent --public --source=. --remote=origin
 git add .
-git commit -m "Prepare AdRouter Agent 0.1.0-beta.11 security candidate"
+git commit -m "Prepare AdRouter Agent 0.1.0-beta.12 sign-in-first candidate"
 git push --set-upstream origin main
 ```
 
@@ -117,9 +117,9 @@ Wait for required CI on `main`, then create the exact annotated tag:
 git fetch origin main --tags
 git switch main
 git pull --ff-only
-test "$(node -p "require('./package.json').version")" = "0.1.0-beta.11"
-git tag -a v0.1.0-beta.11 -m "AdRouter Agent 0.1.0-beta.11"
-git push origin v0.1.0-beta.11
+test "$(node -p "require('./package.json').version")" = "0.1.0-beta.12"
+git tag -a v0.1.0-beta.12 -m "AdRouter Agent 0.1.0-beta.12"
+git push origin v0.1.0-beta.12
 ```
 
 Approve the `macos-release` job when GitHub prompts. The credential-free workflow builds the macOS universal, Ubuntu x64, and
@@ -135,8 +135,8 @@ tag ref** so the environment's deployment-tag policy applies:
 
 ```bash
 gh workflow run promote-release.yml \
-  --ref v0.1.0-beta.11 \
-  -f tag=v0.1.0-beta.11 \
+  --ref v0.1.0-beta.12 \
+  -f tag=v0.1.0-beta.12 \
   -f phase=publish-candidate \
   -f channel=beta
 ```
@@ -159,15 +159,15 @@ only the schema fields in `scripts/authentication-acceptance.schema.json`, then 
 ```bash
 node scripts/validate-authentication-acceptance.mjs authentication-acceptance.json \
   --manifest artifact-manifest.json
-gh release upload v0.1.0-beta.11 authentication-acceptance.json
+gh release upload v0.1.0-beta.12 authentication-acceptance.json
 ```
 
 Dispatch the separate finalization phase from the immutable tag:
 
 ```bash
 gh workflow run promote-release.yml \
-  --ref v0.1.0-beta.11 \
-  -f tag=v0.1.0-beta.11 \
+  --ref v0.1.0-beta.12 \
+  -f tag=v0.1.0-beta.12 \
   -f phase=finalize-release \
   -f channel=beta
 ```
@@ -179,7 +179,7 @@ Finalization revalidates exact acceptance and public installs before `beta` and 
 Final registry checks:
 
 ```bash
-npm view @adrouter/agent@0.1.0-beta.11 version dist.integrity repository --json
+npm view @adrouter/agent@0.1.0-beta.12 version dist.integrity repository --json
 npm view @adrouter/agent dist-tags --json
 npm install --global @adrouter/agent@beta
 adrouter-agent doctor --json
@@ -201,7 +201,7 @@ After final verification:
    `NPM_DIST_TAG_TOKEN`. Trusted publishing handles `npm publish`; dist-tag changes still require
    traditional authenticated access.
 
-Do not attempt to republish `0.1.0-beta.11` to test OIDC. npm versions are
+Do not attempt to republish `0.1.0-beta.12` to test OIDC. npm versions are
 immutable; use a higher beta version.
 
 ## 8. Recovery

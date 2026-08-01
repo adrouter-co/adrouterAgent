@@ -79,18 +79,24 @@ Fresh installations are prefilled with:
 https://api-staging.adrouter.co
 ```
 
-The URL is public configuration. Official hosted access does not use a copied bearer token. The
-Agent creates a unique Ed25519 key only after you select **Connect this Agent**, then the authenticated
-AdRouter WebUI asks you to approve the displayed comparison code.
+The URL is public configuration. Official hosted access does not use a copied bearer token. Selecting
+**Connect this Agent** opens a memory-only sign-in handoff. The Agent creates a unique Ed25519 key only
+after you return from the authenticated WebUI and select **Continue**.
 
 In the app:
 
 1. Leave the staging URL selected and choose the sponsored-compute preference.
 2. Select **Connect this Agent**.
-3. Compare the code displayed by the Agent with the code in the AdRouter WebUI. Approval is never
+3. Sign in in the browser, return to the Agent, and select **Continue**.
+4. Compare the code displayed by the Agent with the code in the AdRouter WebUI. Approval is never
    implicit, even when the app opens the complete link.
-4. Explicitly approve. The main process redeems the approval, stores the installation, and verifies
+5. Explicitly approve. The main process redeems the approval, stores the installation, and verifies
    a signed profile before onboarding completes.
+
+Closing the app before **Continue** discards only the memory-only sign-in preparation. Once the code
+is displayed, the encrypted pending approval resumes after restart. Cancel and terminal failures
+remove the local pending key and attempt signed server-side cancellation. A previous working
+installation remains active until its replacement passes signed profile validation and is stored.
 
 The private key and rotating refresh credential are encrypted by Electron `safeStorage`; access
 tokens remain memory-only. They are not exposed to the renderer, logs, release files, or event

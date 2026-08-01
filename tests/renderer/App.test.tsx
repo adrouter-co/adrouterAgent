@@ -11,9 +11,11 @@ const api = {
     status: vi.fn(),
     signOut: vi.fn(),
     startEnrollment: vi.fn(),
+    continueEnrollment: vi.fn(),
     enrollmentStatus: vi.fn(),
     cancelEnrollment: vi.fn(),
     openEnrollment: vi.fn(),
+    copyEnrollmentLink: vi.fn(),
     updatePreferences: vi.fn(),
   },
   projects: { open: vi.fn(), list: vi.fn(), get: vi.fn(), update: vi.fn(), remove: vi.fn() },
@@ -94,7 +96,7 @@ describe('App onboarding', () => {
     );
   });
 
-  it('starts explicit installation approval and exposes only the comparison code', async () => {
+  it('signs in before starting installation approval and exposes only the comparison code', async () => {
     api.configuration.get.mockResolvedValue({
       serverUrl: 'https://api-staging.adrouter.co',
       sponsoredCompute: true,
@@ -103,6 +105,15 @@ describe('App onboarding', () => {
       models: [],
     });
     api.configuration.startEnrollment.mockResolvedValue({
+      state: 'awaiting_sign_in',
+      userCode: null,
+      verificationUri: null,
+      verificationUriComplete: null,
+      expiresAt: '2026-07-27T00:15:00.000Z',
+      nextPollAt: null,
+      message: 'Sign in to AdRouter in your browser, then return here to continue.',
+    });
+    api.configuration.continueEnrollment.mockResolvedValue({
       state: 'pending',
       userCode: 'ABCD-EFGH',
       verificationUri: 'https://app-staging.adrouter.co/connect',
@@ -117,8 +128,19 @@ describe('App onboarding', () => {
     render(<App />);
     await userEvent.click(await screen.findByRole('button', { name: 'Connect this Agent' }));
 
+    expect(await screen.findByRole('button', { name: 'Continue' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open sign-in page' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy sign-in link' })).toBeInTheDocument();
+    expect(screen.queryByText('ABCD-EFGH')).not.toBeInTheDocument();
+    expect(screen.queryByText(/handoff=/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('AdRouter server URL')).toBeDisabled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
     expect(await screen.findByText('ABCD-EFGH')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open approval page' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy approval link' })).toBeInTheDocument();
+    expect(api.configuration.continueEnrollment).toHaveBeenCalledOnce();
     expect(api.configuration.startEnrollment).toHaveBeenCalledWith({
       serverUrl: 'https://api-staging.adrouter.co',
       sponsoredCompute: true,
