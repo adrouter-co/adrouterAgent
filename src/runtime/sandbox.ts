@@ -1,4 +1,4 @@
-import type { Dirent } from 'node:fs';
+import { type Dirent, existsSync } from 'node:fs';
 import { mkdir, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
@@ -51,31 +51,45 @@ export const buildSandboxConfig = (
   temporaryHome: string,
   workspaceWriteAllowed = true,
   protectedReadPaths: readonly string[] = defaultProtectedPaths(workspaceRoot),
-  platform: NodeJS.Platform = process.platform
-): SandboxRuntimeConfig => ({
-  network: {
-    allowedDomains: [],
-    deniedDomains: ['*'],
-    strictAllowlist: true,
-    allowLocalBinding: false,
-  },
-  filesystem: {
-    // sandbox-runtime reads are allow-by-default. Denying / first makes the
-    // workspace and the explicitly listed runtime paths the only readable
-    // regions; literal protected paths are re-denied after the workspace
-    // allow rule by the macOS Seatbelt profile generator.
-    allowRead: runtimeReadPaths(workspaceRoot, temporaryHome, platform),
-    denyRead: platform === 'win32' ? [...protectedReadPaths] : ['/', ...protectedReadPaths],
-    allowWrite: workspaceWriteAllowed ? [workspaceRoot, temporaryHome] : [temporaryHome],
-    denyWrite: [...protectedReadPaths],
-    allowGitConfig: false,
-  },
-  credentials: {
-    envVars: Object.keys(process.env)
-      .filter((key) => SECRET_ENVIRONMENT.test(key))
-      .map((name) => ({ name, mode: 'deny' as const })),
-  },
-});
+  platform: NodeJS.Platform = process.platform,
+  resourcesPath: string | undefined = process.resourcesPath
+): SandboxRuntimeConfig => {
+  const helperPath =
+    resourcesPath && platform === 'linux'
+      ? join(resourcesPath, 'vendor', 'seccomp', process.arch, 'apply-seccomp')
+      : resourcesPath && platform === 'win32'
+        ? join(resourcesPath, 'vendor', 'srt-win', process.arch, 'srt-win.exe')
+        : null;
+  const packagedHelper = helperPath && existsSync(helperPath) ? helperPath : null;
+  return {
+    network: {
+      allowedDomains: [],
+      deniedDomains: ['*'],
+      strictAllowlist: true,
+      allowLocalBinding: false,
+    },
+    filesystem: {
+      // sandbox-runtime reads are allow-by-default. Denying / first makes the
+      // workspace and the explicitly listed runtime paths the only readable
+      // regions; literal protected paths are re-denied after the workspace
+      // allow rule by the macOS Seatbelt profile generator.
+      allowRead: runtimeReadPaths(workspaceRoot, temporaryHome, platform),
+      denyRead: platform === 'win32' ? [...protectedReadPaths] : ['/', ...protectedReadPaths],
+      allowWrite: workspaceWriteAllowed ? [workspaceRoot, temporaryHome] : [temporaryHome],
+      denyWrite: [...protectedReadPaths],
+      allowGitConfig: false,
+    },
+    credentials: {
+      envVars: Object.keys(process.env)
+        .filter((key) => SECRET_ENVIRONMENT.test(key))
+        .map((name) => ({ name, mode: 'deny' as const })),
+    },
+    ...(platform === 'linux' && packagedHelper ? { seccomp: { applyPath: packagedHelper } } : {}),
+    ...(platform === 'win32' && packagedHelper
+      ? { windows: { srtWin: { path: packagedHelper } } }
+      : {}),
+  };
+};
 
 const defaultProtectedPaths = (workspaceRoot: string): string[] => [
   resolve(workspaceRoot, '.git'),

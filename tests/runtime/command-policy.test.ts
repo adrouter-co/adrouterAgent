@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { approvalAllowsCommand, classifyCommand } from '@/runtime/command-policy';
 import { sandboxReadiness } from '@/runtime/platform';
@@ -76,4 +79,39 @@ describe('command policy', () => {
     });
     expect(sandboxReadiness('aix').status).toBe('unsupported');
   });
+});
+
+it('binds packaged Linux and Windows sandbox helpers explicitly', () => {
+  const resources = mkdtempSync(join(tmpdir(), 'adrouter-sandbox-resources-'));
+  try {
+    const linuxHelper = join(resources, 'vendor', 'seccomp', process.arch, 'apply-seccomp');
+    const windowsHelper = join(resources, 'vendor', 'srt-win', process.arch, 'srt-win.exe');
+    mkdirSync(join(resources, 'vendor', 'seccomp', process.arch), { recursive: true });
+    mkdirSync(join(resources, 'vendor', 'srt-win', process.arch), { recursive: true });
+    writeFileSync(linuxHelper, 'fixture');
+    writeFileSync(windowsHelper, 'fixture');
+
+    expect(
+      buildSandboxConfig(
+        '/tmp/workspace',
+        '/tmp/adrouter-home',
+        true,
+        undefined,
+        'linux',
+        resources
+      ).seccomp?.applyPath
+    ).toBe(linuxHelper);
+    expect(
+      buildSandboxConfig(
+        '/tmp/workspace',
+        '/tmp/adrouter-home',
+        true,
+        undefined,
+        'win32',
+        resources
+      ).windows?.srtWin?.path
+    ).toBe(windowsHelper);
+  } finally {
+    rmSync(resources, { recursive: true, force: true });
+  }
 });

@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { readdir, rm } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { chmod, copyFile, mkdir, readdir, rm } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
 import { MakerZIP } from '@electron-forge/maker-zip';
 import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
@@ -124,10 +124,50 @@ function hardenMacInfoPlistHook(
   }
 }
 
+async function packageSandboxHelper(
+  buildPath: string,
+  platform: string,
+  arch: string
+): Promise<void> {
+  if (platform === 'darwin') return;
+  if (!['linux', 'win32'].includes(platform) || !['x64', 'arm64'].includes(arch)) {
+    throw new Error(`Unsupported sandbox helper target ${platform}-${arch}.`);
+  }
+  const relativeHelper =
+    platform === 'linux'
+      ? join('seccomp', arch, 'apply-seccomp')
+      : join('srt-win', arch, 'srt-win.exe');
+  const source = resolve(
+    'node_modules',
+    '@anthropic-ai',
+    'sandbox-runtime',
+    'vendor',
+    relativeHelper
+  );
+  const destination = join(buildPath, 'resources', 'vendor', relativeHelper);
+  await mkdir(dirname(destination), { recursive: true });
+  await copyFile(source, destination);
+  await chmod(destination, 0o755);
+}
+
+function packageSandboxHelperHook(
+  buildPath: string,
+  _electronVersion: string,
+  platform: string,
+  arch: string,
+  done: (error?: Error | null) => void
+): void {
+  packageSandboxHelper(buildPath, platform, arch).then(
+    () => done(),
+    (error: unknown) => done(error instanceof Error ? error : new Error(String(error)))
+  );
+}
+
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     afterComplete: [finalizeMacSignaturesHook],
+    afterCopyExtraResources: [packageSandboxHelperHook],
     beforeCopyExtraResources: [hardenMacInfoPlistHook],
     appBundleId: 'com.adrouter.agent',
     appVersion: '0.1.0',

@@ -28,6 +28,9 @@ All notable changes to AdRouter Agent are documented here.
   launcher manifest.
 - Patched the production Pi dependency path to `brace-expansion@5.0.9` and `undici@8.9.0`, and
   pinned `fast-uri@3.1.5`; the production npm audit reports no vulnerabilities.
+- Packaged only the target-architecture native sandbox helper outside ASAR and bound the runtime to
+  its exact Resources path so Linux and Windows continue to fail closed instead of losing OS
+  sandbox enforcement after Vite bundling.
 - Signed update application remains disabled until a future protected schema-4 release is
   provisioned and accepted.
 

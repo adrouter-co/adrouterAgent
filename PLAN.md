@@ -552,13 +552,15 @@ updates unchanged until downloaded-artifact acceptance is complete.
 
 ### Validation Results
 
-- `npm run check`: passed (142 unit, 12 integration, and 47 launcher/release tests plus lint,
+- `npm run check`: passed (143 unit, 12 integration, and 47 launcher/release tests plus lint,
   typecheck, public-boundary, documentation, workflow, and source-parity checks).
 - Production `npm audit --omit=dev --audit-level=moderate`: passed with zero vulnerabilities;
   `npm run audit:build` passed with only the bounded dev-only Forge advisory chain.
 - `npm run verify:release-readiness`: passed, including the exact launcher tarball allowlist.
 - `npm run test:e2e`: passed both packaged Electron functional/security tests on this Mac.
 - Universal `npm run make:mac` and `npm run verify:dist`: passed for one ad-hoc app and ZIP.
+- Local cross-packaging and exact native-helper verification passed for Linux x64 and Windows x64;
+  protected GitHub runner verification remains required before tagging.
 - Exact downloaded-candidate macOS live acceptance and physical Windows acceptance remain pending.
 
 ---

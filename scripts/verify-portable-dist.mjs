@@ -85,19 +85,26 @@ if (zips.length !== 1) throw new Error(`Expected exactly one ${platform}-${arch}
 const packagedFiles = asar.listPackage(archive);
 const nativeSandboxPath =
   platform === 'linux'
-    ? `/node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp/${arch}/apply-seccomp`
-    : `/node_modules/@anthropic-ai/sandbox-runtime/vendor/srt-win/${arch}/srt-win.exe`;
-const unpackedSandboxPath = join(resources, 'app.asar.unpacked', nativeSandboxPath.slice(1));
-if (!packagedFiles.includes(nativeSandboxPath) && !existsSync(unpackedSandboxPath)) {
+    ? join(resources, 'vendor', 'seccomp', arch, 'apply-seccomp')
+    : join(resources, 'vendor', 'srt-win', arch, 'srt-win.exe');
+if (!existsSync(nativeSandboxPath)) {
   throw new Error(`The packaged application is missing ${nativeSandboxPath}.`);
 }
-assertBinaryArchitecture(
-  existsSync(unpackedSandboxPath)
-    ? readFileSync(unpackedSandboxPath)
-    : asar.extractFile(archive, nativeSandboxPath.slice(1)),
-  arch,
-  'The packaged sandbox helper'
-);
+const vendorRoot = join(resources, 'vendor');
+const expectedVendorEntry =
+  platform === 'linux' ? `seccomp/${arch}/apply-seccomp` : `srt-win/${arch}/srt-win.exe`;
+const vendorEntries = readdirSync(vendorRoot, { recursive: true, withFileTypes: true })
+  .filter((entry) => entry.isFile())
+  .map((entry) =>
+    join(entry.parentPath, entry.name)
+      .slice(vendorRoot.length + 1)
+      .replaceAll('\\', '/')
+  )
+  .sort();
+if (JSON.stringify(vendorEntries) !== JSON.stringify([expectedVendorEntry])) {
+  throw new Error(`The packaged sandbox helper inventory is invalid: ${vendorEntries.join(', ')}`);
+}
+assertBinaryArchitecture(readFileSync(nativeSandboxPath), arch, 'The packaged sandbox helper');
 if (
   packagedFiles.some(
     (filename) =>
