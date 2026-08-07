@@ -99,6 +99,22 @@ describe('structured Git operations', () => {
     expect(unstaged.stdout).not.toContain('line 2 reviewed');
   });
 
+  it('rejects a reviewed path when Git attributes activate a filter', async () => {
+    const root = await repository();
+    await writeFile(join(root, '.gitattributes'), '*.txt filter=unsafe\n');
+    await writeFile(join(root, 'tracked.txt'), 'reviewed\n');
+
+    await expect(
+      createGitOperationManifest({
+        capability: 'git.stage',
+        threadId,
+        turnId,
+        workspaceRoot: root,
+        paths: ['tracked.txt'],
+      })
+    ).rejects.toThrow('activate a filter');
+  });
+
   it('commits only the reviewed index and rejects dirty branch switching', async () => {
     const root = await repository();
     await writeFile(join(root, 'tracked.txt'), 'staged\n');

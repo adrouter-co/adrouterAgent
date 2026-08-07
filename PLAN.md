@@ -552,7 +552,7 @@ updates unchanged until downloaded-artifact acceptance is complete.
 
 ### Validation Results
 
-- `npm run check`: passed (141 unit, 12 integration, and 47 launcher/release tests plus lint,
+- `npm run check`: passed (142 unit, 12 integration, and 47 launcher/release tests plus lint,
   typecheck, public-boundary, documentation, workflow, and source-parity checks).
 - Production `npm audit --omit=dev --audit-level=moderate`: passed with zero vulnerabilities;
   `npm run audit:build` passed with only the bounded dev-only Forge advisory chain.

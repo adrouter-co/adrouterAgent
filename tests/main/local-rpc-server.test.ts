@@ -54,9 +54,9 @@ const setup = async (now = Date.now(), temporaryRoot = tmpdir()) => {
     supervisor,
     sessions: new SessionService(database),
     userDataPath: directory,
-    appVersion: '0.1.0-beta.12',
+    appVersion: '0.1.0-beta.13',
     diagnostics: async () => ({ authenticated: true }),
-    platform: 'darwin',
+    platform: process.platform,
     now: () => now,
   });
   return { server, database, project, thread, tasks, now, directory };
@@ -134,7 +134,7 @@ describe('authenticated local RPC', () => {
       ok: true,
       result: {
         protocolVersion: 1,
-        appVersion: '0.1.0-beta.12',
+        appVersion: '0.1.0-beta.13',
         scheduler: { capacity: 2 },
       },
     });
@@ -267,29 +267,32 @@ describe('authenticated local RPC', () => {
     database.close();
   });
 
-  it('creates a mode-0600 Unix socket inside a mode-0700 directory', async () => {
-    const { server, database } = await setup(Date.now());
-    await server.start();
-    const endpointMode = (await stat(server.endpoint)).mode & 0o777;
-    const directoryMode = (await stat(dirname(server.endpoint))).mode & 0o777;
-    expect(endpointMode).toBe(0o600);
-    expect(directoryMode).toBe(0o700);
-    expect(Buffer.byteLength(server.endpoint)).toBeLessThan(104);
+  it.skipIf(process.platform === 'win32')(
+    'creates a mode-0600 Unix socket inside a mode-0700 directory',
+    async () => {
+      const { server, database } = await setup(Date.now());
+      await server.start();
+      const endpointMode = (await stat(server.endpoint)).mode & 0o777;
+      const directoryMode = (await stat(dirname(server.endpoint))).mode & 0o777;
+      expect(endpointMode).toBe(0o600);
+      expect(directoryMode).toBe(0o700);
+      expect(Buffer.byteLength(server.endpoint)).toBeLessThan(104);
 
-    const rawResponse = await new Promise<string>((resolveResponse, rejectResponse) => {
-      const socket = connect(server.endpoint);
-      socket.once('error', rejectResponse);
-      socket.once('data', (chunk) => {
-        resolveResponse(chunk.toString('utf8'));
-        socket.end();
+      const rawResponse = await new Promise<string>((resolveResponse, rejectResponse) => {
+        const socket = connect(server.endpoint);
+        socket.once('error', rejectResponse);
+        socket.once('data', (chunk) => {
+          resolveResponse(chunk.toString('utf8'));
+          socket.end();
+        });
+        socket.once('connect', () => socket.write('{"bad":true}\n'));
       });
-      socket.once('connect', () => socket.write('{"bad":true}\n'));
-    });
-    expect(JSON.parse(rawResponse)).toMatchObject({
-      ok: false,
-      error: { code: 'invalid_request' },
-    });
-    await server.close();
-    database.close();
-  });
+      expect(JSON.parse(rawResponse)).toMatchObject({
+        ok: false,
+        error: { code: 'invalid_request' },
+      });
+      await server.close();
+      database.close();
+    }
+  );
 });

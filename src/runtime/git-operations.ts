@@ -177,19 +177,57 @@ const validateBranch = async (workspace: string, branch: string): Promise<void> 
   if (result.exitCode !== 0) throw new WorkspaceAccessError('The Git branch name is invalid.');
 };
 
-const assertNoExecutableGitFilters = async (workspace: string): Promise<void> => {
-  const filters = await runGit(workspace, [
-    'config',
-    '--get-regexp',
-    '^filter\\..*\\.(clean|smudge|process)$',
-  ]);
-  if (filters.exitCode === 0 && filters.stdout.trim()) {
-    throw new WorkspaceAccessError(
-      'Structured stage and switch are disabled when executable Git filters are configured.'
-    );
+const assertNoActiveGitFilters = async (
+  workspace: string,
+  paths: string[],
+  targetOid?: string
+): Promise<void> => {
+  let inspectedPaths = paths;
+  if (targetOid) {
+    const tree = await runGit(workspace, ['ls-tree', '-r', '-z', '--name-only', targetOid]);
+    if (tree.exitCode !== 0 || tree.truncated) {
+      throw new WorkspaceAccessError('The target branch attributes could not be inspected safely.');
+    }
+    inspectedPaths = tree.stdout.split('\0').filter(Boolean);
+    for (const path of inspectedPaths.filter(
+      (candidate) => candidate === '.gitattributes' || candidate.endsWith('/.gitattributes')
+    )) {
+      const attributes = await runGit(workspace, ['show', `${targetOid}:${path}`]);
+      if (attributes.exitCode !== 0 || attributes.truncated) {
+        throw new WorkspaceAccessError(
+          'The target branch attributes could not be inspected safely.'
+        );
+      }
+      if (
+        attributes.stdout
+          .split(/\r?\n/)
+          .some(
+            (line) =>
+              !line.trimStart().startsWith('#') &&
+              /(?:^|\s)(?:-?filter|filter=(?:[^\s]+))(?:\s|$)/.test(line)
+          )
+      ) {
+        throw new WorkspaceAccessError(
+          'Structured stage and switch are disabled when Git attributes activate a filter.'
+        );
+      }
+    }
   }
-  if (filters.exitCode !== 0 && filters.exitCode !== 1) {
+  if (inspectedPaths.length === 0) return;
+  const attributes = await runGit(workspace, ['check-attr', '-z', '--stdin', 'filter'], {
+    input: `${inspectedPaths.join('\0')}\0`,
+  });
+  if (attributes.exitCode !== 0 || attributes.truncated) {
     throw new WorkspaceAccessError('Git filter policy could not be inspected safely.');
+  }
+  const fields = attributes.stdout.split('\0');
+  for (let index = 0; index + 2 < fields.length; index += 3) {
+    const value = fields[index + 2];
+    if (value && value !== 'unspecified' && value !== 'unset') {
+      throw new WorkspaceAccessError(
+        'Structured stage and switch are disabled when Git attributes activate a filter.'
+      );
+    }
   }
 };
 
@@ -439,19 +477,22 @@ export const createGitOperationManifest = async (input: {
     if (!state.clean) {
       throw new WorkspaceAccessError('Switching branches requires a clean reviewed worktree.');
     }
-    await assertNoExecutableGitFilters(state.workspace);
     const oid = await gitText(state.workspace, ['rev-parse', '--verify', `refs/heads/${branch}`]);
     if (!oid) throw new WorkspaceAccessError('The requested local branch does not exist.');
+    await assertNoActiveGitFilters(state.workspace, [], oid);
     argv = [branch, oid];
     targets = [{ path: `refs/heads/${branch}`, kind: 'git-ref', beforeHash: oid }];
   } else if (input.capability === 'git.stage') {
-    await assertNoExecutableGitFilters(state.workspace);
     const paths = [...new Set(input.paths ?? [])];
     if (paths.length === 0 || paths.length > 32) {
       throw new WorkspaceAccessError('Stage between one and 32 exact paths at a time.');
     }
     const snapshots = await Promise.all(
       paths.map((path) => snapshotStructuredTarget(state.workspace, path, true))
+    );
+    await assertNoActiveGitFilters(
+      state.workspace,
+      snapshots.map((target) => target.path)
     );
     targets = snapshots.map((target) => ({
       path: target.path,
@@ -460,8 +501,8 @@ export const createGitOperationManifest = async (input: {
     }));
     argv = snapshots.map((target) => target.path);
   } else if (input.capability === 'git.stage.hunk') {
-    await assertNoExecutableGitFilters(state.workspace);
     const selected = await selectedHunkPatch(state.workspace, input.path ?? '', input.hunks ?? []);
+    await assertNoActiveGitFilters(state.workspace, [selected.target.path]);
     targets = [
       {
         path: selected.target.path,
@@ -565,13 +606,13 @@ export const executeGitOperation = async (
       if (currentTarget !== argv[1]) {
         throw new WorkspaceAccessError('The reviewed switch target changed.');
       }
-      await assertNoExecutableGitFilters(state.workspace);
+      await assertNoActiveGitFilters(state.workspace, [], argv[1]);
       args = ['switch', argv[0] ?? ''];
     } else if (manifest.capability === 'git.stage') {
       if (argv.length === 0 || argv.length > 32) {
         throw new WorkspaceAccessError('The stage binding is invalid.');
       }
-      await assertNoExecutableGitFilters(state.workspace);
+      await assertNoActiveGitFilters(state.workspace, argv);
       args = ['add', '--', ...argv];
     } else if (manifest.capability === 'git.stage.hunk') {
       if (
@@ -581,7 +622,7 @@ export const executeGitOperation = async (
       ) {
         throw new WorkspaceAccessError('The hunk stage binding is invalid.');
       }
-      await assertNoExecutableGitFilters(state.workspace);
+      await assertNoActiveGitFilters(state.workspace, [argv[0] ?? '']);
       input = reviewedHunkPatch(manifest) ?? undefined;
       if (!input || Buffer.byteLength(input) > MAX_HUNK_PATCH_BYTES) {
         throw new WorkspaceAccessError('The reviewed Git hunk patch is unavailable.');
