@@ -1,69 +1,57 @@
-# Public beta release checklist
+# Credential-free beta release checklist
 
-Use this checklist after the `release-tag` workflow creates a draft GitHub
-prerelease. Do not publish artifacts copied from a local `out/` directory.
+Use this checklist for the ad-hoc/unsigned schema-3 beta candidate. Never publish local `out/`
+artifacts, a dirty tree, or an already-used version/tag.
 
-## Automated gates
+## Automated gates and draft
 
-- [ ] The requested version matches `package.json` and `CHANGELOG.md`.
-- [ ] Production and build-tool dependency audits, lint, typecheck, unit, integration, packaged E2E,
-      and canonical
-      platform-auth compatibility checks passed without an inference credential in automation.
-- [ ] The workflow produced `darwin-universal`, `linux-x64`, and `win32-x64`
-      ZIPs, the exact npm tarball, `SHA256SUMS`, per-target and launcher
-      CycloneDX SBOMs, and schema-3 `artifact-manifest.json`.
-- [ ] Ad-hoc signature integrity, the absence of an Apple Team Identifier,
-      production fuses, transport policy, legal resources, and both CPU slices
-      passed distribution verification.
-- [ ] No workflow logs or release artifacts contain router/provider secrets,
-      absolute developer paths, or test-only hooks.
-- [ ] GitHub attestations verify for every checksummed release asset.
+- [ ] The immutable tag, root/launcher versions, source placeholder, Forge bundle version, About
+      metadata, changelog, and promotion default agree.
+- [ ] The tree is clean and `npm run check`, release readiness, packaged E2E, audits, source parity,
+      and `git diff --check` pass under Node.js 25.9.0.
+- [ ] The inventory contains exactly `darwin-universal`, `linux-x64`, and `win32-x64` ZIPs; three
+      native SBOMs; launcher tarball/SBOM; `SHA256SUMS`; schema-3 `artifact-manifest.json`; and
+      attestations.
+- [ ] The launcher manifest binds exact canonical URLs, SHA-256 digests, layouts, platforms,
+      architectures, bundle identity, and authentication fixture.
+- [ ] macOS is universal and ad-hoc signed with no team identifier; Linux and Windows are explicitly
+      unsigned portable artifacts.
+- [ ] Linux/Windows Electron binaries and bundled sandbox helpers match x64.
+- [ ] No workflow log or artifact contains a secret, absolute developer path, source map, test hook,
+      alternate origin, or unintended file.
+- [ ] Signed update application and stable publication remain disabled.
 
-## Downloaded-artifact acceptance
+## Candidate publication
 
-- [ ] Download the ZIP from the draft release rather than from Actions and
-      confirm its SHA-256 digest matches `SHA256SUMS`.
-- [ ] On Apple Silicon, install `@adrouter/agent@candidate`, run
-      `adrouter-agent`, confirm `~/Applications/AdRouter Agent.app` exists, and
-      complete the manual acceptance test.
-- [ ] Repeat npm installation and the core router/edit/approval flow on Intel.
-- [ ] Repeat npm installation, OS-encrypted installation approval, signed profile/turn, refresh,
-      revocation, sandbox boundaries, and launch on clean Ubuntu 24.04 x64 and Windows 11 x64 hosts.
-- [ ] If Gatekeeper blocks the app, confirm the launcher shows the documented
-      Open Anyway guidance and never changes quarantine or Gatekeeper settings.
-- [ ] Cover macOS 12 as the oldest supported system and one current macOS
-      release across the two machines.
-- [ ] Confirm invalid approval URL, denial, expiry, revoked/lost installation, unsafe storage,
-      unavailable router, required upgrade, and unavailable model states are understandable and
-      recoverable.
-- [ ] Confirm reinstalling the same build preserves local SQLite history and
-      the OS-encrypted router configuration.
+- [ ] Publish the existing draft GitHub prerelease before npm.
+- [ ] Publish the exact launcher tarball only under npm `candidate`; confirm `beta` and `latest`
+      remain on the prior accepted version.
+- [ ] Anonymous candidate install, doctor, integrity, and launch smoke passes on macOS arm64/Intel,
+      Ubuntu x64, and Windows x64.
+- [ ] Download every public ZIP and match its size and SHA-256 to both `SHA256SUMS` and the embedded
+      schema-3 launcher manifest.
 
-## Publication and rollback
+## Downloaded exact-artifact acceptance
 
-- [ ] Release notes label the build as a public beta and list supported OS/CPU
-      targets, unsigned portable artifacts, Windows alpha sandbox setup,
-      single-active-run, manual-update, and router-required limitations.
-- [ ] GitHub private security advisories are enabled for the repository.
-- [ ] Publish the existing draft prerelease without replacing its tag or
-      assets.
-- [ ] Dispatch `phase=publish-candidate`, verify the GitHub prerelease and npm `candidate`, and
-      confirm `beta`/`latest` remain on the previous accepted version.
-- [ ] Generate the exact public-safe `authentication-acceptance.json` from a primary operator device
-      and a distinct-OS physical Windows 11 x64 cohort, validate it against
-      `artifact-manifest.json`, and attach it to
-      the matching draft/prerelease before channel promotion.
-- [ ] Install `@adrouter/agent@candidate` anonymously on every supported
-      OS/CPU target; confirm it selects the correct public ZIP, validates the
-      platform bundle, and creates the documented per-user installation before
-      moving `beta` and `latest`.
-- [ ] Dispatch `phase=finalize-release` only after physical Windows acceptance is attached; confirm
-      it rechecks all
-      public installs, moves the intended final channels, and removes `candidate` without rebuilding.
-- [ ] Delete `NPM_DIST_TAG_TOKEN` from `npm-publish` and revoke the short-lived granular npm token
-      after final verification.
-- [ ] If a defect is found after publication, mark the release withdrawn,
-      remove its downloadable assets, and publish a higher patch version. Never
-      retarget an existing release tag.
-- [ ] Confirm future stable promotion moves `latest` only and leaves `beta` on the newest accepted
-      beta.
+- [ ] Complete launcher install, hosted sign-in, profile/turn, streaming, rotation, revocation,
+      sandbox, structured-operation approval, immutable preset policy, changed-guidance revocation,
+      session recovery, and local automation smoke on this primary Mac.
+- [ ] Repeat on a separate physical Windows 11 x64 laptop after one-time sandbox setup; hosted
+      runners do not replace this cohort.
+- [ ] Tampered checksum, URL, layout, architecture, or manifest data fails closed.
+- [ ] Reinstalling the same exact version preserves encrypted installation material, projects,
+      sessions, and unrelated workspace/Git changes.
+
+## Acceptance record and later finalization
+
+- [ ] Create only schema-1 `authentication-acceptance.json` fields and bind all four archive
+      identities (three ZIPs plus npm tarball) to `artifact-manifest.json`.
+- [ ] Record the primary macOS operator and physical Windows 11 x64 cohorts; every required result
+      is true.
+- [ ] Validate the record locally and attach it to the matching immutable prerelease without
+      replacing existing assets.
+- [ ] Obtain separate finalization authorization before moving `beta`/`latest` or removing
+      `candidate`.
+- [ ] Delete `NPM_DIST_TAG_TOKEN` and revoke its short-lived granular npm token after finalization.
+- [ ] On a defect, withdraw as policy permits and issue a higher version; never replace assets,
+      retarget a tag, force Git state, or republish an npm version.

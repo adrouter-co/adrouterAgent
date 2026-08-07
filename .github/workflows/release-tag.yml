@@ -29,6 +29,7 @@ jobs:
       - name: Verify exact release identity
         run: |
           version="$(node -p "require('./package.json').version")"
+          test "${version#*-beta.}" != "$version"
           test "$GITHUB_REF_TYPE" = "tag"
           test "$GITHUB_REF_NAME" = "v$version"
           test "$(git rev-list -n 1 "$GITHUB_REF_NAME")" = "$GITHUB_SHA"
@@ -85,7 +86,7 @@ jobs:
           retention-days: 14
 
   release:
-    name: aggregate credential-free portable release
+    name: aggregate credential-free beta release
     needs: package
     runs-on: macos-14
     timeout-minutes: 30
@@ -110,6 +111,8 @@ jobs:
           merge-multiple: true
       - run: npm ci
       - name: Prepare and verify exact release inventory
+        env:
+          ADROUTER_CREDENTIAL_FREE_BETA: '1'
         run: |
           version="$(node -p "require('./package.json').version")"
           node scripts/prepare-release-assets.mjs "$version"
@@ -132,12 +135,6 @@ jobs:
             exit 1
           fi
           version="$(node -p "require('./package.json').version")"
-          if test "${version#*-}" = "$version"; then
-            gh release create "$GITHUB_REF_NAME" out/release/* \
-              --verify-tag --target "$GITHUB_SHA" --draft \
-              --title "AdRouter Agent $GITHUB_REF_NAME" --notes-file CHANGELOG.md
-          else
-            gh release create "$GITHUB_REF_NAME" out/release/* \
-              --verify-tag --target "$GITHUB_SHA" --draft --prerelease \
-              --title "AdRouter Agent $GITHUB_REF_NAME public beta" --notes-file CHANGELOG.md
-          fi
+          gh release create "$GITHUB_REF_NAME" out/release/* \
+            --verify-tag --target "$GITHUB_SHA" --draft --prerelease \
+            --title "AdRouter Agent $GITHUB_REF_NAME candidate beta" --notes-file CHANGELOG.md

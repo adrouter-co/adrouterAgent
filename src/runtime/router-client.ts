@@ -1,5 +1,6 @@
 import type { Context, Tool } from '@earendil-works/pi-ai';
 import { z } from 'zod';
+import { classifyRouterOrigin } from '../shared/constants';
 import type {
   InstallationDiagnostics,
   RouterDiagnostics,
@@ -7,64 +8,86 @@ import type {
   RuntimeMode,
   ThinkingLevel,
 } from '../shared/contracts';
+import {
+  liveCatalogStatus,
+  ModelCatalogError,
+  unavailableCatalogStatus,
+  validateLiveCatalog,
+} from '../shared/model-catalog';
 import { containsSponsorKey, removeSponsorData } from '../shared/security';
 import { NdjsonParser, type RouterStreamEvent } from './ndjson';
 
 const ProfileSchema = z.object({}).passthrough();
 const HealthSchema = z.object({ mode: z.enum(['live', 'mock']).optional() }).passthrough();
-const ModelDescriptorSchema = z.object({
-  id: z.string(),
-  provider: z.string().optional(),
-  display_name: z.string().optional(),
-  provider_label: z.string().optional(),
-  thinking_levels: z.array(z.enum(['none', 'medium', 'high'])).optional(),
-  default_thinking_level: z.enum(['none', 'medium', 'high']).optional(),
-  configured: z.boolean().optional(),
-});
-const ModelsSchema = z.union([
-  z.array(z.string()),
-  z.object({ models: z.array(z.union([z.string(), ModelDescriptorSchema])) }),
-]);
+const MAX_ROUTER_ERROR_BYTES = 32 * 1024;
+const MAX_ROUTER_ERROR_DETAILS = 16;
+const RouterErrorEnvelopeSchema = z
+  .object({
+    error: z.string().min(1).max(1_000).optional(),
+    code: z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(/^[a-z][a-z0-9_]*$/)
+      .optional(),
+    details: z.record(z.string().min(1).max(64), z.unknown()).optional(),
+  })
+  .passthrough();
 
-const modelDescriptor = (
-  value: string | z.infer<typeof ModelDescriptorSchema>
-): RouterModelDescriptor => {
-  if (typeof value === 'string') {
-    return {
-      id: value,
-      provider: 'router',
-      displayName: value,
-      providerLabel: 'AdRouter',
-      thinkingLevels: ['none', 'medium', 'high'],
-      defaultThinkingLevel: 'medium',
-      configured: false,
-    };
-  }
-  const thinkingLevels = value.thinking_levels ?? ['none', 'medium', 'high'];
-  const defaultThinkingLevel = value.default_thinking_level ?? 'medium';
-  return {
-    id: value.id,
-    provider: value.provider ?? 'router',
-    displayName: value.display_name ?? value.id,
-    providerLabel: value.provider_label ?? value.provider ?? 'AdRouter',
-    thinkingLevels,
-    defaultThinkingLevel: thinkingLevels.includes(defaultThinkingLevel)
-      ? defaultThinkingLevel
-      : (thinkingLevels[0] ?? 'medium'),
-    configured: value.configured ?? false,
-  };
-};
-
+export type RouterErrorDetails = Readonly<Record<string, number>>;
 export class RouterHttpError extends Error {
   public constructor(
     public readonly status: number,
     message: string,
-    public readonly minimumClientVersion: string | null = null
+    public readonly minimumClientVersion: string | null = null,
+    public readonly code: string | null = null,
+    public readonly details: RouterErrorDetails = {}
   ) {
     super(message);
     this.name = 'RouterHttpError';
   }
 }
+
+const readRouterError = async (
+  response: Response
+): Promise<{ message: string | null; code: string | null; details: RouterErrorDetails }> => {
+  if (!response.body) return { message: null, code: null, details: {} };
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > MAX_ROUTER_ERROR_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return { message: null, code: null, details: {} };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return { message: null, code: null, details: {} };
+  }
+  try {
+    const parsed = RouterErrorEnvelopeSchema.parse(
+      JSON.parse(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString('utf8'))
+    );
+    const details = Object.fromEntries(
+      Object.entries(parsed.details ?? {})
+        .filter(
+          (entry): entry is [string, number] =>
+            typeof entry[1] === 'number' &&
+            Number.isFinite(entry[1]) &&
+            Math.abs(entry[1]) <= Number.MAX_SAFE_INTEGER
+        )
+        .slice(0, MAX_ROUTER_ERROR_DETAILS)
+    );
+    return { message: parsed.error ?? null, code: parsed.code ?? null, details };
+  } catch {
+    return { message: null, code: null, details: {} };
+  }
+};
 
 export interface RouterClientOptions {
   serverUrl: string;
@@ -100,7 +123,6 @@ export interface RouterTurnInput {
   systemPrompt?: string;
   projectDisplayName: string;
   adsEnabled: boolean;
-  onRetry?: (attempt: number, reason: string) => void;
 }
 
 const normalizeServerUrl = (input: string): string => input.replace(/\/+$/, '');
@@ -149,10 +171,11 @@ export class AdRouterClient {
     requiredVersion: string | null = null
   ): InstallationDiagnostics {
     const installation = this.options.authentication.mode === 'installation';
+    const originClass = classifyRouterOrigin(this.serverUrl);
     return {
       mode: installation ? 'installation' : 'custom_bearer',
       state: authenticated && installation ? 'connected' : 'none',
-      originClass: installation ? 'official' : 'custom',
+      originClass,
       storageClassification: installation ? 'os_encrypted' : null,
       signedRequestSupport: installation,
       refreshHealthy: authenticated && installation,
@@ -238,6 +261,7 @@ export class AdRouterClient {
         authenticated: false,
         mode: 'unknown',
         models: [],
+        catalog: unavailableCatalogStatus(checkedAt, 'catalog_unreachable'),
         modelsStale: false,
         checkedAt,
         error: error instanceof Error ? error.message : 'AdRouter is unreachable.',
@@ -250,6 +274,7 @@ export class AdRouterClient {
         authenticated: false,
         mode: 'unknown',
         models: [],
+        catalog: unavailableCatalogStatus(checkedAt, 'catalog_http_error'),
         modelsStale: false,
         checkedAt,
         error: `AdRouter health check failed (${health.status}).`,
@@ -259,18 +284,42 @@ export class AdRouterClient {
     const healthPayload = HealthSchema.parse(await health.json());
 
     let models: RouterModelDescriptor[] = [];
+    let catalog = unavailableCatalogStatus(checkedAt, 'catalog_unreachable');
+    let catalogError: string | null = null;
     try {
       const modelsResponse = await this.fetchFn(`${this.serverUrl}/v1/models`, {
         redirect: 'manual',
         signal,
       });
-      if (modelsResponse.ok) {
-        const modelsPayload = ModelsSchema.parse(await modelsResponse.json());
-        const rawModels = Array.isArray(modelsPayload) ? modelsPayload : modelsPayload.models;
-        models = rawModels.map(modelDescriptor);
+      if (modelsResponse.status >= 300 && modelsResponse.status < 400) {
+        throw new ModelCatalogError(
+          'catalog_invalid',
+          'AdRouter model discovery redirects are not allowed.'
+        );
       }
-    } catch {
-      // Authentication is checked separately; model discovery failure is reported below.
+      if (!modelsResponse.ok) {
+        catalog = unavailableCatalogStatus(checkedAt, 'catalog_http_error');
+        catalogError = `AdRouter model discovery failed (${modelsResponse.status}).`;
+      } else {
+        const validated = validateLiveCatalog(
+          await modelsResponse.json(),
+          classifyRouterOrigin(this.serverUrl) === 'official'
+        );
+        models = validated.models;
+        catalog = liveCatalogStatus(validated, checkedAt);
+      }
+    } catch (error) {
+      if (error instanceof ModelCatalogError) {
+        catalog = unavailableCatalogStatus(
+          checkedAt,
+          error.code,
+          error.code === 'catalog_incompatible' || error.code === 'catalog_invalid'
+        );
+        catalogError = error.message;
+      } else {
+        catalog = unavailableCatalogStatus(checkedAt, 'catalog_unreachable');
+        catalogError = error instanceof Error ? error.message : 'AdRouter model discovery failed.';
+      }
     }
 
     try {
@@ -281,6 +330,7 @@ export class AdRouterClient {
           authenticated: false,
           mode: healthPayload.mode ?? 'unknown',
           models,
+          catalog,
           modelsStale: false,
           checkedAt,
           error: `AdRouter authentication failed (${profile.status}).`,
@@ -297,6 +347,7 @@ export class AdRouterClient {
         authenticated: false,
         mode: healthPayload.mode ?? 'unknown',
         models,
+        catalog,
         modelsStale: false,
         checkedAt,
         error: error instanceof Error ? error.message : 'AdRouter authentication failed.',
@@ -309,9 +360,10 @@ export class AdRouterClient {
       authenticated: true,
       mode: healthPayload.mode ?? 'unknown',
       models,
+      catalog,
       modelsStale: false,
       checkedAt,
-      error: models.length > 0 ? null : 'AdRouter returned no models.',
+      error: models.length > 0 ? null : (catalogError ?? 'AdRouter returned no models.'),
       authentication: this.authenticationDiagnostics(true),
     };
   }
@@ -341,49 +393,30 @@ export class AdRouterClient {
     }
 
     const requestBytes = Buffer.from(JSON.stringify(requestBody), 'utf8');
-    let response: Response | undefined;
-    let lastError: unknown;
-    for (let attempt = 0; attempt <= 2; attempt += 1) {
-      try {
-        response = await this.protectedFetch(
-          '/v1/agent/turn',
-          'POST',
-          requestBytes,
-          {
-            'Content-Type': 'application/json',
-            Accept: 'application/x-ndjson, application/json',
-          },
-          signal
-        );
-        if (response.ok) {
-          break;
-        }
-        const retryable = response.status === 409 || response.status === 502;
-        if (!retryable || attempt === 2) {
-          throw new RouterHttpError(
-            response.status,
-            response.status === 426
-              ? 'This AdRouter Agent version must be upgraded before reconnecting.'
-              : `AdRouter returned ${response.status}.`,
-            response.status === 426 ? minimumClientVersion(response) : null
-          );
-        }
-        input.onRetry?.(attempt + 1, `AdRouter returned ${response.status}.`);
-        await new Promise((resolveDelay) => setTimeout(resolveDelay, 250 * (attempt + 1)));
-      } catch (error) {
-        lastError = error;
-        if (signal?.aborted || error instanceof RouterHttpError || attempt === 2) {
-          throw error;
-        }
-        input.onRetry?.(attempt + 1, error instanceof Error ? error.message : String(error));
-        await new Promise((resolveDelay) => setTimeout(resolveDelay, 250 * (attempt + 1)));
-      }
+    const response = await this.protectedFetch(
+      '/v1/agent/turn',
+      'POST',
+      requestBytes,
+      {
+        'Content-Type': 'application/json',
+        Accept: 'application/x-ndjson, application/json',
+      },
+      signal
+    );
+    if (!response.ok) {
+      const envelope = await readRouterError(response);
+      throw new RouterHttpError(
+        response.status,
+        response.status === 426
+          ? 'This AdRouter Agent version must be upgraded before reconnecting.'
+          : (envelope.message ?? `AdRouter returned ${response.status}.`),
+        response.status === 426 ? minimumClientVersion(response) : null,
+        envelope.code,
+        envelope.details
+      );
     }
-
-    if (!response?.ok || !response.body) {
-      throw lastError instanceof Error
-        ? lastError
-        : new Error('AdRouter returned no response body.');
+    if (!response.body) {
+      throw new Error('AdRouter returned no response body.');
     }
 
     const reader = response.body.getReader();

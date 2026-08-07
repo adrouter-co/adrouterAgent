@@ -120,6 +120,8 @@ test('selects only supported operating-system and CPU combinations', () => {
   assert.equal(artifactKey('linux', 'x64'), 'linux-x64');
   assert.equal(selectArtifact(manifest, 'win32', 'x64').key, 'win32-x64');
   assert.throws(() => assertSupportedPlatform('linux', 'arm64'), /Unsupported operating system/);
+  assert.throws(() => assertSupportedPlatform('win32', 'arm64'), /Unsupported operating system/);
+  assert.throws(() => assertSupportedPlatform('linux', 'ia32'), /Unsupported operating system/);
 });
 
 test('accepts macOS 12 or newer and refuses root execution', () => {

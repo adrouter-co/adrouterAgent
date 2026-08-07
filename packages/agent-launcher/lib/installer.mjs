@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   access,
   constants as fsConstants,
@@ -144,6 +144,9 @@ export function releasePaths(
       supportDirectory,
       appPath: join(applicationsDirectory, 'AdRouter Agent.app'),
       receiptPath: join(supportDirectory, 'receipt.json'),
+      pendingPath: join(supportDirectory, 'pending-activation.json'),
+      markerPath: join(supportDirectory, 'health-marker.json'),
+      rollbackPath: join(applicationsDirectory, '.adrouter-agent-rollback'),
     };
   }
   if (platform === 'linux') {
@@ -156,6 +159,9 @@ export function releasePaths(
       supportDirectory,
       appPath: join(applicationsDirectory, 'app'),
       receiptPath: join(supportDirectory, 'receipt.json'),
+      pendingPath: join(supportDirectory, 'pending-activation.json'),
+      markerPath: join(supportDirectory, 'health-marker.json'),
+      rollbackPath: join(applicationsDirectory, '.adrouter-agent-rollback'),
     };
   }
   const localAppData =
@@ -167,6 +173,9 @@ export function releasePaths(
     supportDirectory,
     appPath: join(applicationsDirectory, 'AdRouter Agent'),
     receiptPath: join(supportDirectory, 'receipt.json'),
+    pendingPath: join(supportDirectory, 'pending-activation.json'),
+    markerPath: join(supportDirectory, 'health-marker.json'),
+    rollbackPath: join(applicationsDirectory, '.adrouter-agent-rollback'),
   };
 }
 
@@ -197,7 +206,15 @@ async function verifyMacApp(appPath, manifest, executeImpl) {
   await executeImpl('/usr/bin/codesign', ['--verify', '--deep', '--strict', appPath]);
   const signatureResult = await executeImpl('/usr/bin/codesign', ['-dv', '--verbose=4', appPath]);
   const signatureDetails = `${signatureResult.stdout ?? ''}${signatureResult.stderr ?? ''}`;
-  if (
+  const artifact = manifest.artifacts.find((candidate) => candidate.key === 'darwin-universal');
+  if (artifact?.verificationMode === 'macos-developer-id') {
+    if (
+      !signatureDetails.includes('Authority=Developer ID Application:') ||
+      !signatureDetails.includes(`TeamIdentifier=${artifact.signature.expectedSigner}`)
+    ) {
+      throw new Error('The application does not match the expected Developer ID signer.');
+    }
+  } else if (
     !signatureDetails.includes('Signature=adhoc') ||
     !signatureDetails.includes('TeamIdentifier=not set')
   ) {
@@ -224,20 +241,44 @@ async function verifyMacApp(appPath, manifest, executeImpl) {
   }
 }
 
-async function verifyPortableApp(appPath, artifact) {
+async function verifyPortableApp(appPath, artifact, executeImpl) {
   const executable = join(appPath, ...artifact.executablePath.split('/'));
   const stat = await lstat(executable);
   if (!stat.isFile() || stat.isSymbolicLink()) {
     throw new Error('The portable application executable is missing or unsafe.');
   }
   if (artifact.platform === 'linux') await access(executable, fsConstants.X_OK);
+  if (artifact.verificationMode === 'windows-authenticode') {
+    const script =
+      '& { param([string]$executable) ' +
+      '$signature=Get-AuthenticodeSignature -LiteralPath $executable; ' +
+      '[pscustomobject]@{Status=[string]$signature.Status;Subject=[string]$signature.SignerCertificate.Subject} | ConvertTo-Json -Compress }';
+    const { stdout } = await executeImpl('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      script,
+      executable,
+    ]);
+    let signature;
+    try {
+      signature = JSON.parse(stdout);
+    } catch {
+      throw new Error('Unable to inspect the Windows Authenticode signature.');
+    }
+    if (signature.Status !== 'Valid' || signature.Subject !== artifact.signature.expectedSigner) {
+      throw new Error('The Windows executable does not match the expected Authenticode signer.');
+    }
+  }
 }
 
 async function verifyApp(appPath, manifest, artifact, executeImpl = execute) {
   if (artifact.verificationMode === 'macos-adhoc') {
     await verifyMacApp(appPath, manifest, executeImpl);
+  } else if (artifact.verificationMode === 'macos-developer-id') {
+    await verifyMacApp(appPath, manifest, executeImpl);
   } else {
-    await verifyPortableApp(appPath, artifact);
+    await verifyPortableApp(appPath, artifact, executeImpl);
   }
 }
 
@@ -301,6 +342,9 @@ async function download(manifest, artifact, destination, fetchImpl = fetch) {
     ) {
       throw new Error('Release download exceeds the maximum permitted size.');
     }
+    if (manifest.schema === 4 && declaredSize !== null && declaredSize !== artifact.bytes) {
+      throw new Error('Release ZIP declared size does not match the signed manifest.');
+    }
     const handle = await open(destination, 'wx', 0o600);
     let received = 0;
     const digest = createHash('sha256');
@@ -322,6 +366,9 @@ async function download(manifest, artifact, destination, fetchImpl = fetch) {
     }
     if (declaredSize !== null && received !== declaredSize) {
       throw new Error('Release download ended before the declared content length.');
+    }
+    if (manifest.schema === 4 && received !== artifact.bytes) {
+      throw new Error('Release ZIP size verification failed.');
     }
     const actual = digest.digest('hex');
     if (actual !== artifact.sha256) throw new Error('Release ZIP checksum verification failed.');
@@ -385,7 +432,7 @@ async function extractArchive(archive, extracted, artifact, executeImpl) {
 async function readReceipt(receiptPath, appPath, platform) {
   try {
     const receipt = JSON.parse(await readFile(receiptPath, 'utf8'));
-    const current = receipt.schema === 3;
+    const current = receipt.schema === 3 || receipt.schema === 4;
     const legacyMac = platform === 'darwin' && receipt.schema === 2;
     const owned =
       (current || legacyMac) &&
@@ -406,9 +453,89 @@ function receiptMatchesManifest(receipt, manifest, artifact) {
   );
 }
 
+const readJsonFile = async (path, maximumBytes = 1024 * 1024) => {
+  const text = await readFile(path, 'utf8');
+  if (Buffer.byteLength(text) > maximumBytes) throw new Error('Launcher state is oversized.');
+  return JSON.parse(text);
+};
+
+const validPendingActivation = (pending, paths) =>
+  pending?.schema === 1 &&
+  pending.applicationPath === paths.appPath &&
+  pending.rollbackPath === paths.rollbackPath &&
+  pending.markerPath === paths.markerPath &&
+  typeof pending.targetVersion === 'string' &&
+  typeof pending.deadlineAt === 'string' &&
+  Number.isFinite(Date.parse(pending.deadlineAt)) &&
+  typeof pending.token === 'string' &&
+  /^[A-Za-z0-9_-]{43}$/.test(pending.token) &&
+  pending.previousReceipt &&
+  typeof pending.previousReceipt === 'object';
+
+export async function reconcilePendingActivation(manifest, options = {}) {
+  const platform = options.platform ?? process.platform;
+  const architecture = options.arch ?? process.arch;
+  const artifact = selectArtifact(manifest, platform, architecture);
+  const paths = releasePaths(manifest, options.homeDirectory, platform, options);
+  if (!(await exists(paths.pendingPath))) return { state: 'none' };
+  const pending = await readJsonFile(paths.pendingPath);
+  if (!validPendingActivation(pending, paths) || !(await exists(paths.rollbackPath))) {
+    throw new Error('The pending update rollback record is invalid.');
+  }
+  let markerInvalid = false;
+  if (await exists(paths.markerPath)) {
+    let marker;
+    try {
+      marker = await readJsonFile(paths.markerPath, 4096);
+    } catch {
+      markerInvalid = true;
+    }
+    if (
+      marker?.schema === 1 &&
+      marker.protocol === 1 &&
+      marker.releaseVersion === pending.targetVersion &&
+      marker.token === pending.token
+    ) {
+      await rm(paths.rollbackPath, { recursive: true, force: true });
+      await rm(paths.markerPath, { force: true });
+      await rm(paths.pendingPath, { force: true });
+      return { state: 'healthy', targetVersion: pending.targetVersion };
+    }
+    markerInvalid = true;
+  }
+  const now =
+    options.now instanceof Date ? options.now.getTime() : Number(options.now ?? Date.now());
+  if (!Number.isFinite(now)) throw new Error('The update reconciliation time is invalid.');
+  if (now <= Date.parse(pending.deadlineAt)) {
+    return { state: markerInvalid ? 'pending-invalid-marker' : 'pending', pending };
+  }
+  if (await appIsRunning(paths.appPath, artifact, options.executeImpl ?? execute)) {
+    return { state: 'pending-running', pending };
+  }
+  await rm(paths.appPath, { recursive: true, force: true });
+  await rename(paths.rollbackPath, paths.appPath);
+  await writeReceipt(paths.receiptPath, pending.previousReceipt);
+  await rm(paths.markerPath, { force: true });
+  await rm(paths.pendingPath, { force: true });
+  return { state: 'rolled-back', targetVersion: pending.targetVersion };
+}
+
 async function appIsRunning(appPath, artifact, executeImpl = execute) {
   const executable = join(appPath, ...artifact.executablePath.split('/'));
-  if (artifact.platform === 'win32') return false;
+  if (artifact.platform === 'win32') {
+    const script =
+      '& { param([string]$executable) ' +
+      '$running=Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $executable }; ' +
+      'if ($running) { "running" } }';
+    const { stdout } = await executeImpl('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      script,
+      executable,
+    ]);
+    return stdout.trim() === 'running';
+  }
   const { stdout } = await executeImpl('/bin/ps', ['-axo', 'command=']);
   return stdout
     .split('\n')
@@ -445,7 +572,7 @@ export async function inspectInstallation(manifest, options = {}) {
   const artifact = selectArtifact(manifest, platform, architecture);
   const paths = releasePaths(manifest, options.homeDirectory, platform, options);
   const report = {
-    schema: 3,
+    schema: manifest.schema,
     distributionMode: manifest.distributionMode,
     platform,
     architecture,
@@ -470,7 +597,12 @@ export async function inspectInstallation(manifest, options = {}) {
     pendingEnrollment: 'unknown',
     originClass: 'unknown',
     reconnectNeed: 'unknown',
-    warning: platform === 'darwin' ? MAC_WARNING : PORTABLE_WARNING,
+    warning:
+      artifact.signature?.required === true
+        ? null
+        : platform === 'darwin'
+          ? MAC_WARNING
+          : PORTABLE_WARNING,
   };
   try {
     assertSupportedPlatform(platform, architecture);
@@ -496,7 +628,8 @@ export async function inspectInstallation(manifest, options = {}) {
     await verifyApp(paths.appPath, manifest, artifact, options.executeImpl);
     report.bundleIntegrity = true;
     report.signedRequestSupport = true;
-    report.signatureType = platform === 'darwin' ? 'adhoc' : 'unsigned-portable';
+    report.signatureType =
+      artifact.signature?.type ?? (platform === 'darwin' ? 'adhoc' : 'unsigned-portable');
   } catch (error) {
     report.signatureType = 'invalid';
     report.error = error instanceof Error ? error.message : String(error);
@@ -515,15 +648,27 @@ export async function install(manifest, options = {}) {
   assertNonRoot(options.uid ?? process.getuid?.());
   const paths = releasePaths(manifest, options.homeDirectory, platform, options);
   const executeImpl = options.executeImpl ?? execute;
+  const reconciliation = await reconcilePendingActivation(manifest, options);
+  if (reconciliation.state === 'rolled-back') {
+    throw new Error(
+      `Agent ${reconciliation.targetVersion} did not report a healthy start and was rolled back; retry only after reviewing diagnostics.`
+    );
+  }
   const existing = await inspectInstallation(manifest, options);
   if (!existing.supported)
     throw new Error(existing.error ?? 'This operating system is not supported.');
   const receiptStatus = await readReceipt(paths.receiptPath, paths.appPath, platform);
   if (existing.installed && existing.receiptMatches && existing.bundleIntegrity) {
+    if (
+      (reconciliation.state === 'pending' || reconciliation.state === 'pending-running') &&
+      options.onPendingActivation
+    ) {
+      options.onPendingActivation(reconciliation.pending);
+    }
     if (receiptStatus.legacyMac) {
       await (options.writeReceiptImpl ?? writeReceipt)(paths.receiptPath, {
         ...receiptStatus.receipt,
-        schema: 3,
+        schema: manifest.schema,
         distributionMode: manifest.distributionMode,
         artifactKey: artifact.key,
         migratedAt: new Date().toISOString(),
@@ -547,10 +692,7 @@ export async function install(manifest, options = {}) {
   const extracted = join(staging, 'extracted');
   const stagedApp =
     artifact.archiveRoot === '.' ? extracted : join(extracted, artifact.archiveRoot);
-  const backupPath = join(
-    paths.applicationsDirectory,
-    `.adrouter-agent-backup-${process.pid}-${Date.now()}`
-  );
+  const backupPath = paths.rollbackPath;
   let backedUp = false;
   let activated = false;
   try {
@@ -561,13 +703,16 @@ export async function install(manifest, options = {}) {
     await verifyExtractedTree(extracted, stagedApp, artifact.archiveRoot);
     await verifyApp(stagedApp, manifest, artifact, executeImpl);
     if (existing.installed) {
+      if (await exists(backupPath)) {
+        throw new Error('A previous managed update rollback directory still exists.');
+      }
       await rename(paths.appPath, backupPath);
       backedUp = true;
     }
     await rename(stagedApp, paths.appPath);
     activated = true;
     await (options.writeReceiptImpl ?? writeReceipt)(paths.receiptPath, {
-      schema: 3,
+      schema: manifest.schema,
       owner: RECEIPT_OWNER,
       distributionMode: manifest.distributionMode,
       artifactKey: artifact.key,
@@ -579,7 +724,30 @@ export async function install(manifest, options = {}) {
       applicationPath: paths.appPath,
       installedAt: new Date().toISOString(),
     });
-    if (backedUp) await rm(backupPath, { recursive: true, force: true });
+    if (backedUp && options.requireHealthyStart) {
+      if (manifest.schema !== 4 || manifest.health?.rollbackRequired !== true) {
+        throw new Error('Healthy-start activation requires a signed schema-4 rollback policy.');
+      }
+      const token = randomBytes(32).toString('base64url');
+      const deadlineAt = new Date(
+        (options.now instanceof Date ? options.now.getTime() : Number(options.now ?? Date.now())) +
+          manifest.health.deadlineSeconds * 1000
+      ).toISOString();
+      const pending = {
+        schema: 1,
+        applicationPath: paths.appPath,
+        rollbackPath: paths.rollbackPath,
+        markerPath: paths.markerPath,
+        targetVersion: manifest.releaseVersion,
+        deadlineAt,
+        token,
+        previousReceipt: receiptStatus.receipt,
+      };
+      await writeReceipt(paths.pendingPath, pending);
+      options.onPendingActivation?.(pending);
+    } else if (backedUp) {
+      await rm(backupPath, { recursive: true, force: true });
+    }
     return paths.appPath;
   } catch (error) {
     if (activated) await rm(paths.appPath, { recursive: true, force: true });
@@ -619,11 +787,36 @@ export async function launch(appPath, options = {}) {
   const spawnImpl = options.spawnImpl ?? spawn;
   const executable =
     platform === 'darwin' ? '/usr/bin/open' : join(appPath, ...artifact.executablePath.split('/'));
-  const args = platform === 'darwin' ? [appPath] : [];
+  const applicationArgs = Array.isArray(options.args) ? options.args : [];
+  if (
+    applicationArgs.some(
+      (argument) =>
+        typeof argument !== 'string' ||
+        argument.length > 4096 ||
+        !argument.startsWith('--adrouter-launcher-health-')
+    )
+  ) {
+    throw new Error('Refusing unsupported launcher application arguments.');
+  }
+  const args =
+    platform === 'darwin'
+      ? [appPath, ...(applicationArgs.length > 0 ? ['--args', ...applicationArgs] : [])]
+      : applicationArgs;
   await new Promise((resolvePromise, reject) => {
     const child = spawnImpl(executable, args, { detached: true, stdio: 'ignore' });
     child.once('error', reject);
     child.once('spawn', resolvePromise);
     child.unref();
   });
+}
+
+export function applicationExecutablePath(appPath, artifact, platform = process.platform) {
+  const relative =
+    artifact?.executablePath ??
+    (platform === 'darwin'
+      ? 'Contents/MacOS/AdRouter Agent'
+      : platform === 'win32'
+        ? 'AdRouter Agent.exe'
+        : 'AdRouter Agent');
+  return join(appPath, ...relative.split('/'));
 }

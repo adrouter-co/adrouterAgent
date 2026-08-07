@@ -1,4 +1,5 @@
-import { existsSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { verifyPackagedStagingDefault } from './verify-packaged-default.mjs';
@@ -8,6 +9,33 @@ const arch = process.argv[3] ?? 'x64';
 if (!['linux', 'win32'].includes(platform) || arch !== 'x64') {
   throw new Error('Usage: node scripts/verify-portable-dist.mjs <linux|win32> x64');
 }
+
+const assertBinaryArchitecture = (body, expectedArchitecture, label) => {
+  let machine;
+  if (body.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) {
+    if (body[5] !== 1) throw new Error(`${label} is not a little-endian ELF binary.`);
+    machine = body.readUInt16LE(18);
+  } else if (body.subarray(0, 2).toString('ascii') === 'MZ') {
+    const peOffset = body.readUInt32LE(0x3c);
+    if (body.subarray(peOffset, peOffset + 4).toString('binary') !== 'PE\0\0') {
+      throw new Error(`${label} has an invalid PE header.`);
+    }
+    machine = body.readUInt16LE(peOffset + 4);
+  } else {
+    throw new Error(`${label} is not a supported native executable.`);
+  }
+  const expectedMachine =
+    expectedArchitecture === 'arm64'
+      ? platform === 'linux'
+        ? 0xb7
+        : 0xaa64
+      : platform === 'linux'
+        ? 0x3e
+        : 0x8664;
+  if (machine !== expectedMachine) {
+    throw new Error(`${label} does not match the requested ${expectedArchitecture} architecture.`);
+  }
+};
 
 const require = createRequire(import.meta.url);
 const asar = require('@electron/asar');
@@ -19,8 +47,28 @@ const executable = join(
 );
 const resources = join(packageRoot, 'resources');
 const archive = join(resources, 'app.asar');
+const requireProtectedSignature = process.env.ADROUTER_REQUIRE_PLATFORM_SIGNATURE === '1';
 if (!existsSync(executable) || !existsSync(archive)) {
   throw new Error(`The ${platform}-${arch} package is missing its executable or app.asar.`);
+}
+assertBinaryArchitecture(readFileSync(executable), arch, 'The packaged Electron executable');
+if (platform === 'win32' && requireProtectedSignature) {
+  const expectedSubject = process.env.ADROUTER_WINDOWS_SIGNER_SUBJECT;
+  if (!expectedSubject)
+    throw new Error('Protected Windows verification requires the signer subject.');
+  const script =
+    '& { param([string]$root,[string]$subject) ' +
+    '$files=Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object { $_.Extension -in ".exe",".dll",".node" }; ' +
+    'if (-not $files) { exit 1 }; foreach ($file in $files) { $s=Get-AuthenticodeSignature -LiteralPath $file.FullName; ' +
+    'if ([string]$s.Status -ne "Valid" -or [string]$s.SignerCertificate.Subject -ne $subject) { exit 1 } } }';
+  execFileSync('powershell.exe', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-Command',
+    script,
+    packageRoot,
+    expectedSubject,
+  ]);
 }
 for (const resource of ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'PRIVACY.md']) {
   if (!existsSync(join(resources, resource)))
@@ -35,6 +83,21 @@ const zips = existsSync(makeRoot)
 if (zips.length !== 1) throw new Error(`Expected exactly one ${platform}-${arch} ZIP.`);
 
 const packagedFiles = asar.listPackage(archive);
+const nativeSandboxPath =
+  platform === 'linux'
+    ? `/node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp/${arch}/apply-seccomp`
+    : `/node_modules/@anthropic-ai/sandbox-runtime/vendor/srt-win/${arch}/srt-win.exe`;
+const unpackedSandboxPath = join(resources, 'app.asar.unpacked', nativeSandboxPath.slice(1));
+if (!packagedFiles.includes(nativeSandboxPath) && !existsSync(unpackedSandboxPath)) {
+  throw new Error(`The packaged application is missing ${nativeSandboxPath}.`);
+}
+assertBinaryArchitecture(
+  existsSync(unpackedSandboxPath)
+    ? readFileSync(unpackedSandboxPath)
+    : asar.extractFile(archive, nativeSandboxPath.slice(1)),
+  arch,
+  'The packaged sandbox helper'
+);
 if (
   packagedFiles.some(
     (filename) =>

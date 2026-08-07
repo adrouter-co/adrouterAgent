@@ -2,6 +2,48 @@
 
 All notable changes to AdRouter Agent are documented here.
 
+## [0.1.0-beta.13] - 2026-08-07
+
+### Added
+
+- Added exact Router model-catalog validation, token-aware sponsor-free context compaction, safe
+  checkpoints, and durable session fork/search/redacted import/export workflows.
+- Added immutable approved structured file, dependency, script, network, and Git operations plus a
+  capacity-bounded workspace/Git lease scheduler and opt-in bounded child delegation.
+- Added exact-digest declarative bundles and GUI-paired Ed25519 automation over owner-only local IPC,
+  with dependency-free launcher `pair` and `rpc` commands.
+- Added Agent-native task presets with immutable per-task instructions/capability snapshots, plus
+  exact-digest project Markdown skills and explicitly inserted prompt templates.
+- Added backward-readable RFC 8785/Ed25519 release-manifest schema 4, fixed-origin signed update
+  checks, healthy-start rollback state, and protected macOS/Windows signing hooks.
+
+### Security
+
+- Every mutation and Git write remains bound to an expiring one-use operation and a fresh exact
+  approval; scheduler concurrency, delegation, automation, network, outputs, and queues are bounded.
+- Task policy is checked before approval consumption and cannot be widened by later project/preset
+  edits; changed, removed, or revoked project guidance fails closed without stale fallback.
+- The candidate remains credential-free: macOS is ad-hoc signed, Linux and Windows are unsigned,
+  and every artifact is pinned by canonical URL, layout, architecture, and SHA-256 in a schema-3
+  launcher manifest.
+- Patched the production Pi dependency path to `brace-expansion@5.0.9` and `undici@8.9.0`, and
+  pinned `fast-uri@3.1.5`; the production npm audit reports no vulnerabilities.
+- Signed update application remains disabled until a future protected schema-4 release is
+  provisioned and accepted.
+
+### Changed
+
+- Restored an explicit beta-only credential-free release path while retaining schema-4 verification
+  and rollback code for a future signed release.
+- Candidate publication leaves npm `beta` and `latest` unchanged until downloaded beta.13 artifacts
+  pass primary macOS and physical Windows 11 x64 acceptance.
+
+### Known limitations
+
+- This beta is not Developer ID signed, notarized, or Authenticode signed; updates remain manual.
+- Physical Windows 11 x64 acceptance is intentionally deferred until the exact npm/GitHub candidate
+  is installed on the designated Windows laptop.
+
 ## [0.1.0-beta.12] - 2026-08-01
 
 ### Added
@@ -218,6 +260,7 @@ All notable changes to AdRouter Agent are documented here.
 - Updates are downloaded and installed manually.
 - A reachable AdRouter server and valid bearer token are required.
 
+[0.1.0-beta.13]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.13
 [0.1.0-beta.12]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.12
 [0.1.0-beta.11]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.11
 [0.1.0-beta.10]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.10

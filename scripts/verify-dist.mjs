@@ -8,6 +8,7 @@ const require = createRequire(import.meta.url);
 const asar = require('@electron/asar');
 const packageJson = require('../package.json');
 const out = resolve('out');
+const requireProtectedSignature = process.env.ADROUTER_REQUIRE_PLATFORM_SIGNATURE === '1';
 
 if (!existsSync(out)) {
   throw new Error('No Forge output found. Run npm run make:mac first.');
@@ -50,7 +51,21 @@ for (const app of apps) {
     throw new Error(`Unable to inspect app signature: ${signatureResult.stderr}`);
   }
   const signature = `${signatureResult.stdout}${signatureResult.stderr}`;
-  if (!signature.includes('Signature=adhoc') || !signature.includes('TeamIdentifier=not set')) {
+  if (requireProtectedSignature) {
+    const teamIdentifier = process.env.ADROUTER_APPLE_TEAM_IDENTIFIER;
+    if (
+      !teamIdentifier ||
+      !signature.includes('Authority=Developer ID Application:') ||
+      !signature.includes(`TeamIdentifier=${teamIdentifier}`)
+    ) {
+      throw new Error('Expected the protected Developer ID signer and team identifier.');
+    }
+    execFileSync('spctl', ['--assess', '--type', 'execute', appPath], { stdio: 'inherit' });
+    execFileSync('xcrun', ['stapler', 'validate', appPath], { stdio: 'inherit' });
+  } else if (
+    !signature.includes('Signature=adhoc') ||
+    !signature.includes('TeamIdentifier=not set')
+  ) {
     throw new Error('Expected a credential-free ad-hoc signature with no Apple Team Identifier.');
   }
 
@@ -60,7 +75,7 @@ for (const app of apps) {
   if (
     info.CFBundleIdentifier !== 'com.adrouter.agent' ||
     info.CFBundleShortVersionString !== '0.1.0' ||
-    info.CFBundleVersion !== '10012' ||
+    info.CFBundleVersion !== '10013' ||
     info.NSAppTransportSecurity?.NSAllowsArbitraryLoads !== false ||
     info.NSAppTransportSecurity?.NSAllowsLocalNetworking !== true
   ) {
@@ -105,7 +120,7 @@ for (const app of apps) {
       throw new Error(`The packaged application contains forbidden content: ${forbidden}`);
     }
   }
-  if (!packagedText.includes('0.1.0-beta.12')) {
+  if (!packagedText.includes('0.1.0-beta.13')) {
     throw new Error('The packaged About metadata does not include the public release version.');
   }
   verifyPackagedStagingDefault(packagedFiles, (filename) =>
@@ -129,4 +144,6 @@ for (const app of apps) {
   }
 }
 
-console.log(`Verified ${apps.length} credential-free ad-hoc app(s) and ${zips.length} ZIP(s).`);
+console.log(
+  `Verified ${apps.length} ${requireProtectedSignature ? 'Developer ID/notarized' : 'credential-free ad-hoc'} app(s) and ${zips.length} ZIP(s).`
+);

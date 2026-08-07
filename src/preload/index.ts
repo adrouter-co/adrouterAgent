@@ -3,11 +3,30 @@ import { z } from 'zod';
 import {
   type AdrouterApi,
   ApprovalResolveInputSchema,
+  AutomationClientInputSchema,
+  AutomationClientSchema,
+  AutomationEndpointSchema,
+  AutomationPairingInputSchema,
+  AutomationPairingSchema,
+  BundleListInputSchema,
+  BundleRevokeInputSchema,
+  BundleSummarySchema,
+  BundleTrustInputSchema,
   EnrollmentStartInputSchema,
   EnrollmentStatusSchema,
   EventSchema,
   EventsSubscribeInputSchema,
   EventsUnsubscribeInputSchema,
+  GitWorkflowPreviewInputSchema,
+  GitWorkflowPreviewSchema,
+  GitWorkflowResolveInputSchema,
+  GitWorkflowResultSchema,
+  GuidanceContentSchema,
+  GuidanceListInputSchema,
+  GuidanceReadPromptInputSchema,
+  GuidanceRevokeInputSchema,
+  GuidanceSummarySchema,
+  GuidanceTrustInputSchema,
   IdSchema,
   type IpcMethod,
   IpcSchemas,
@@ -25,12 +44,30 @@ import {
   RouterDiagnosticsSchema,
   RouterPreferencesInputSchema,
   RouterTestInputSchema,
+  SessionCopyLastInputSchema,
+  SessionExportInputSchema,
+  SessionExportV1Schema,
+  SessionHtmlExportInputSchema,
+  SessionHtmlExportSchema,
+  SessionImportConfirmInputSchema,
+  SessionImportInputSchema,
+  SessionImportPreviewInputSchema,
+  SessionImportPreviewSchema,
   SubscriptionSchema,
+  TaskPresetCreateInputSchema,
+  TaskPresetDeleteInputSchema,
+  TaskPresetUpdateInputSchema,
+  TaskPresetV1Schema,
   ThreadCreateInputSchema,
   ThreadDetailSchema,
+  ThreadForkInputSchema,
   ThreadIdInputSchema,
+  ThreadLabelInputSchema,
   ThreadListInputSchema,
   ThreadSchema,
+  ThreadSearchInputSchema,
+  TurnClearQueueInputSchema,
+  TurnCompactInputSchema,
   TurnMessageInputSchema,
   TurnSchema,
   TurnStartInputSchema,
@@ -110,6 +147,70 @@ const api: AdrouterApi = {
         await invoke('projects.remove', ProjectIdInputSchema.parse(input))
       ),
   },
+  presets: {
+    list: async () => z.array(TaskPresetV1Schema).parse(await invoke('presets.list', {})),
+    create: async (input) =>
+      TaskPresetV1Schema.parse(
+        await invoke('presets.create', TaskPresetCreateInputSchema.parse(input))
+      ),
+    update: async (input) =>
+      TaskPresetV1Schema.parse(
+        await invoke('presets.update', TaskPresetUpdateInputSchema.parse(input))
+      ),
+    delete: async (input) =>
+      IpcSchemas['presets.delete'].output.parse(
+        await invoke('presets.delete', TaskPresetDeleteInputSchema.parse(input))
+      ),
+  },
+  bundles: {
+    list: async (input) =>
+      z
+        .array(BundleSummarySchema)
+        .parse(await invoke('bundles.list', BundleListInputSchema.parse(input))),
+    trust: async (input) =>
+      BundleSummarySchema.parse(await invoke('bundles.trust', BundleTrustInputSchema.parse(input))),
+    revoke: async (input) =>
+      BundleSummarySchema.parse(
+        await invoke('bundles.revoke', BundleRevokeInputSchema.parse(input))
+      ),
+  },
+  guidance: {
+    list: async (input) =>
+      z
+        .array(GuidanceSummarySchema)
+        .parse(await invoke('guidance.list', GuidanceListInputSchema.parse(input))),
+    trust: async (input) =>
+      GuidanceSummarySchema.parse(
+        await invoke('guidance.trust', GuidanceTrustInputSchema.parse(input))
+      ),
+    revoke: async (input) =>
+      GuidanceSummarySchema.parse(
+        await invoke('guidance.revoke', GuidanceRevokeInputSchema.parse(input))
+      ),
+    readPrompt: async (input) =>
+      GuidanceContentSchema.parse(
+        await invoke('guidance.readPrompt', GuidanceReadPromptInputSchema.parse(input))
+      ),
+  },
+  automation: {
+    endpoint: async () => AutomationEndpointSchema.parse(await invoke('automation.endpoint', {})),
+    pairings: async () =>
+      z.array(AutomationPairingSchema).parse(await invoke('automation.pairings', {})),
+    approvePairing: async (input) =>
+      AutomationPairingSchema.parse(
+        await invoke('automation.approvePairing', AutomationPairingInputSchema.parse(input))
+      ),
+    denyPairing: async (input) =>
+      AutomationPairingSchema.parse(
+        await invoke('automation.denyPairing', AutomationPairingInputSchema.parse(input))
+      ),
+    clients: async () =>
+      z.array(AutomationClientSchema).parse(await invoke('automation.clients', {})),
+    revokeClient: async (input) =>
+      AutomationClientSchema.parse(
+        await invoke('automation.revokeClient', AutomationClientInputSchema.parse(input))
+      ),
+  },
   threads: {
     create: async (input) =>
       IpcSchemas['threads.create'].output.parse(
@@ -119,13 +220,57 @@ const api: AdrouterApi = {
       IpcSchemas['threads.list'].output.parse(
         await invoke('threads.list', ThreadListInputSchema.parse(input))
       ),
+    search: async (input) =>
+      IpcSchemas['threads.search'].output.parse(
+        await invoke('threads.search', ThreadSearchInputSchema.parse(input))
+      ),
     get: async (input) =>
       ThreadDetailSchema.parse(await invoke('threads.get', ThreadIdInputSchema.parse(input))),
+    label: async (input) =>
+      ThreadSchema.parse(await invoke('threads.label', ThreadLabelInputSchema.parse(input))),
+    continue: async (input) =>
+      ThreadSchema.parse(await invoke('threads.continue', ThreadIdInputSchema.parse(input))),
+    fork: async (input) =>
+      ThreadSchema.parse(await invoke('threads.fork', ThreadForkInputSchema.parse(input))),
     archive: async (input) =>
       ThreadSchema.parse(await invoke('threads.archive', ThreadIdInputSchema.parse(input))),
     delete: async (input) =>
       IpcSchemas['threads.delete'].output.parse(
         await invoke('threads.delete', ThreadIdInputSchema.parse(input))
+      ),
+  },
+  sessions: {
+    export: async (input) =>
+      SessionExportV1Schema.parse(
+        await invoke('sessions.export', SessionExportInputSchema.parse(input))
+      ),
+    exportHtml: async (input) =>
+      SessionHtmlExportSchema.parse(
+        await invoke('sessions.exportHtml', SessionHtmlExportInputSchema.parse(input))
+      ),
+    previewImport: async (input) =>
+      SessionImportPreviewSchema.parse(
+        await invoke('sessions.previewImport', SessionImportPreviewInputSchema.parse(input))
+      ),
+    confirmImport: async (input) =>
+      ThreadSchema.parse(
+        await invoke('sessions.confirmImport', SessionImportConfirmInputSchema.parse(input))
+      ),
+    copyLast: async (input) =>
+      IpcSchemas['sessions.copyLast'].output.parse(
+        await invoke('sessions.copyLast', SessionCopyLastInputSchema.parse(input))
+      ),
+    import: async (input) =>
+      ThreadSchema.parse(await invoke('sessions.import', SessionImportInputSchema.parse(input))),
+  },
+  git: {
+    preview: async (input) =>
+      GitWorkflowPreviewSchema.parse(
+        await invoke('git.preview', GitWorkflowPreviewInputSchema.parse(input))
+      ),
+    resolve: async (input) =>
+      GitWorkflowResultSchema.parse(
+        await invoke('git.resolve', GitWorkflowResolveInputSchema.parse(input))
       ),
   },
   turns: {
@@ -138,6 +283,12 @@ const api: AdrouterApi = {
     queueFollowUp: async (input) =>
       IpcSchemas['turns.queueFollowUp'].output.parse(
         await invoke('turns.queueFollowUp', TurnMessageInputSchema.parse(input))
+      ),
+    compact: async (input) =>
+      TurnSchema.parse(await invoke('turns.compact', TurnCompactInputSchema.parse(input))),
+    clearQueue: async (input) =>
+      IpcSchemas['turns.clearQueue'].output.parse(
+        await invoke('turns.clearQueue', TurnClearQueueInputSchema.parse(input))
       ),
     stop: async (input) =>
       IpcSchemas['turns.stop'].output.parse(

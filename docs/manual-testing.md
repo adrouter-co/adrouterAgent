@@ -7,6 +7,7 @@ local build.
 ## Preconditions
 
 - A supported desktop OS (macOS 12+, Ubuntu 24.04 x64, or Windows 11 x64) and Node.js 25.9.0.
+  Windows release evidence must be physical.
 - The sibling `router/backend` dependencies and this repository's dependencies
   are installed.
 - `router/backend/.env.local` contains distinct `ADROUTER_API_KEY` and
@@ -93,6 +94,19 @@ repository-owned instructions. Confirm **Settings** reports which repository
 instruction files were loaded and that project instructions are not written to
 the repository automatically.
 
+Create a **Task preset** with a distinctive instruction and a read-only capability policy. Start a
+task with it, then edit or delete the preset and change the project's defaults. Confirm History still
+shows the original preset digest and immutable task policy, without exposing the instruction text,
+and that disallowed mutations, commands, Git writes, network/dependency operations, and delegation
+remain unavailable even if an approval is forged or left pending.
+
+Add a disposable `.adrouter/skills/review/SKILL.md` with bounded `name` and `description`
+frontmatter and a `.adrouter/prompts/review.md` file. Confirm neither is active before exact-digest
+trust. Trust both, insert the prompt, and verify it only fills the composer until the user submits.
+Load the skill during a task, then change its bytes and confirm the old digest is immediately
+inactive and cannot fall back to the stored snapshot. Repeat with a symlink and malformed/binary
+file and confirm discovery fails closed without exposing file contents.
+
 ## 4. Validate read-only work
 
 Before sending, switch models and thinking levels in the composer. Confirm only
@@ -126,9 +140,11 @@ Ask for a small, unambiguous text edit. When the approval card appears:
 4. Request another edit and confirm a new approval is required; the earlier
    choice must not be remembered.
 
-Open **Changes** and confirm the approved agent edit appears in a read-only
-unified diff. Pre-existing user changes should not be attributed to the agent.
-The drawer must not stage, revert, accept, or commit files.
+Open **Changes** and confirm the approved agent edit appears against the exact task-start Git
+baseline. Pre-existing user changes should not be attributed to the agent. Exercise branch/switch,
+path stage, commit, and explicit remote/refspec push only in a disposable repository: the first click
+must create an exact expiring operation, the second must require a fresh **Allow once**, and any
+changed HEAD/index/path hash or replay must fail. The Agent must never invoke these actions itself.
 
 ## 6. Validate command approval and sandboxing
 
@@ -140,10 +156,13 @@ Request the identical command again and confirm a new approval is required.
 Then verify hard policy boundaries with disposable requests:
 
 - A network command such as `curl https://example.com` is denied.
-- Dependency installation such as `npm install` is denied.
+- Dependency installation through a generic command such as `npm install` is denied; the structured
+  dependency adapter must preview in a temporary mirror with lifecycle scripts disabled and require
+  a separate high-risk approval before an explicitly supported lifecycle run.
 - A privileged command such as `sudo ...` is denied.
 - An absolute or parent-relative path outside the workspace is denied.
-- A destructive or remote Git operation is denied.
+- A destructive/force/ref-deleting Git operation is denied; supported structured Git writes remain
+  bound to their separately reviewed hashes, OIDs, remote, and refspec.
 - Shell operators, command interpolation, and in-place `sed -i` edits are
   denied; commands must use a plain argv and file changes must use
   `apply_patch`.
@@ -162,9 +181,32 @@ Confirm the UI returns to an idle state, the command process group ends, queued
 messages are cleared, pending approvals are denied, and the turn is recorded as
 cancelled.
 
-For crash recovery, start a disposable task and force-quit the app. Relaunch it
-and confirm the active turn is marked interrupted rather than resumed or left
-running.
+For crash recovery, start a disposable task and force-quit the app. Relaunch it and confirm the
+active turn is marked interrupted and requires explicit **Continue** from the last safe checkpoint;
+the interrupted request, unresolved mutation, or partial paid output must not replay.
+
+Fork an immutable safe checkpoint, label and search both branches, then change only the fork and
+confirm its descendant is independent. Export/import the session and confirm sponsor fields,
+secrets, developer paths, and billing are absent by default, optional billing is display-only, and
+the import creates no turn or automatic execution. Select a preset at import confirmation and
+confirm only that preset's new immutable policy/model defaults apply; imported history never imports
+executable policy or authority.
+
+Enable delegation only for a disposable project. Confirm each child requires the high-risk parent
+approval, inherits the exact project/model/policy but no parent conversation, is visible and
+cancellable, cannot delegate again, and that no parent starts more than three children. The normal
+desktop runtime executes one task at a time; workspace/Git leases must still serialize writers if
+the internal scheduler is exercised directly in tests.
+
+Pair the CLI with the running app and compare the GUI code. Confirm its private key remains in
+Electron `safeStorage`; the short `/tmp` Unix endpoint has a current-user-owned mode-0700 parent and
+mode-0600 socket (or a current-user-DACL Windows pipe); replayed nonces, bad signatures, and
+oversized frames fail; and headless mutations produce the same approval card. Revoke the client and
+confirm later RPC calls fail.
+
+Finally run `adrouter-agent update check --channel beta --json` against a signed fixture. Redirects,
+wrong channels, expired/unknown keys, and changed artifact metadata must fail. Public update apply is
+expected to report disabled until exact signed acceptance enables it.
 
 ## 8. Validate sponsor isolation and settlement
 
@@ -221,6 +263,10 @@ The build passes manual acceptance when all of the following hold:
 - Git and non-Git projects open successfully.
 - A live model streams thinking, tool activity, and a final response.
 - Reads are silent; every mutation and general command asks exactly once.
+- Preset/task policy remains immutable, is redacted in the renderer, and is enforced before any
+  one-use approval can be consumed.
+- Project skills/prompts require exact-digest trust, changed resources fail closed, and prompts never
+  auto-submit.
 - Denial leaves the workspace unchanged; approval performs only the displayed
   action.
 - The sandbox blocks network, credentials, privilege escalation, and
@@ -229,8 +275,9 @@ The build passes manual acceptance when all of the following hold:
 - Stop and restart produce deterministic cancelled/interrupted states.
 - Sponsor display and economics work without entering agent context.
 
-Record only the fields accepted by `scripts/authentication-acceptance.schema.json` for the primary
-operator device and a distinct second OS cohort. Validate the result with
+Record only schema-2 fields accepted by `scripts/authentication-acceptance.schema.json`: exactly four
+archive identities and exactly two cohorts (the primary operator and a separate physical Windows
+11 x64 device). Validate the result with
 `node scripts/validate-authentication-acceptance.mjs authentication-acceptance.json --manifest
 artifact-manifest.json` before attaching it to the matching draft release. Never record request or
 response content, codes, account IDs, tokens, proofs, keys, nonces, or full fingerprints. Do not

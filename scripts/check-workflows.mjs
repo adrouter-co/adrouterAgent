@@ -33,7 +33,8 @@ for (const required of [
   'macos-release',
   'attestations: write',
   'id-token: write',
-  'credential-free portable release',
+  'aggregate credential-free beta release',
+  'ADROUTER_CREDENTIAL_FREE_BETA',
   'linux-x64',
   'win32-x64',
 ]) {
@@ -50,9 +51,12 @@ assert.ok(
 );
 for (const forbidden of [
   'APPLE_DEVELOPER_ID',
-  'APPLE_API_KEY',
-  'CERTIFICATE_PASSWORD',
   'REQUIRE_SIGNED_DIST',
+  'RELEASE_SIGNING_PRIVATE_KEY_PEM',
+  'ADROUTER_RELEASE_SIGNING_KEY_FILE',
+  'ADROUTER_APPLE_SIGNING_IDENTITY',
+  'ADROUTER_WINDOWS_SIGN_TOOL',
+  'ADROUTER_SIGNED_RELEASE_ENABLED',
 ]) {
   assert.ok(!release.includes(forbidden), `release workflow still references ${forbidden}`);
 }
@@ -76,7 +80,8 @@ for (const required of [
   'authentication acceptance',
   'CHANNEL',
   'expected_prerelease',
-  '--latest',
+  'r.schema!==3',
+  "?'adhoc':'unsigned-portable'",
 ]) {
   assert.ok(promotion.includes(required), `promotion workflow is missing ${required}`);
 }
@@ -112,8 +117,8 @@ assert.ok(
   'promotion workflow must not use a hosted inference credential'
 );
 assert.ok(
-  promotion.includes('tags.beta !== process.env.VERSION'),
-  'stable channel policy must preserve the beta dist-tag'
+  !promotion.includes('ADROUTER_SIGNED_RELEASE_ENABLED'),
+  'credential-free beta promotion must not depend on the future signed-release gate'
 );
 assert.ok(
   release.includes('version#*-') && promotion.includes('version#*-'),

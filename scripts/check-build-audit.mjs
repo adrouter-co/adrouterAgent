@@ -21,5 +21,5 @@ try {
 const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
 const result = evaluateBuildAudit(report, lock);
 console.log(
-  `Build audit passed; ${result.checked.length} high-severity dependency nodes are bounded to ${result.allowedAdvisory}.`
+  `Build audit passed; ${result.checked.length} high-severity dependency nodes are dev-only and bounded to ${result.allowedAdvisories.join(', ')}.`
 );

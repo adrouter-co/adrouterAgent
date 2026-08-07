@@ -10,9 +10,10 @@ selection and settlement use a separate display channel; sponsor data is never
 added to model prompts, tool arguments, commands, patches, or compacted agent
 context.
 
-> **Public beta candidate:** AdRouter Agent 0.1.0-beta.12 supports macOS 12+ on Apple Silicon and Intel, Ubuntu
-> Desktop 24.04 LTS x64, and Windows 11 x64. One agent task can run at a time, and updates are
-> installed manually. It remains on npm `candidate` until physical Windows acceptance passes.
+> **Candidate boundary:** the immutable 0.1.0-beta.13 candidate supports macOS 12+ on Apple Silicon
+> and Intel, Ubuntu Desktop 24.04 LTS x64, and Windows 11 x64. It is manual-update and
+> ad-hoc/unsigned. npm `beta`/`latest` remain on the prior accepted release until downloaded
+> beta.13 artifacts pass primary macOS and physical Windows 11 x64 acceptance.
 
 ## Install from npm
 
@@ -33,7 +34,7 @@ location. See [platform setup and staging authentication](docs/platform-setup.md
 for Ubuntu prerequisites, Windows one-time sandbox provisioning, install paths,
 and authentication steps.
 
-This beta is not Developer ID signed or notarized. If macOS blocks the first
+The beta.13 candidate is not Developer ID signed or notarized. If macOS blocks the first
 launch, open **System Settings → Privacy & Security** and choose **Open Anyway**.
 The launcher never removes quarantine metadata or changes Gatekeeper settings.
 After launch, the app is prefilled with `https://api-staging.adrouter.co`. Select **Connect this
@@ -147,21 +148,36 @@ servers must use HTTPS; plain HTTP is accepted only for loopback development URL
 Select **Choose folder**, open a project directory, and start a chat. A new
 chat can inspect files immediately. File mutations and general commands pause
 for a fresh **Allow once** or **Deny** decision. The **Changes** drawer shows
-agent-authored diffs only; it never stages, commits, or pushes changes.
+agent-authored diffs separately from the task-start baseline. Explicit branch, switch, path/hunk
+stage, commit, and push controls each create an exact expiring operation and require a fresh second-click
+**Allow once** decision; the Agent never performs them automatically.
+
+For a new task, the composer can apply a saved task preset. The preset's additional instructions and
+capability ceilings are copied into an immutable task snapshot, so editing project defaults or the
+preset later cannot expand an existing task. Settings also discovers project-owned Markdown only
+under `.adrouter/skills/**/SKILL.md` and `.adrouter/prompts/**/*.md`. Each resource is inactive until
+the user trusts its exact path and SHA-256 digest; a changed or removed file fails closed. Trusted
+skills load on demand, while a trusted prompt is inserted into the composer and is never sent
+automatically.
 
 ## What is included
 
 - Git and non-Git project folders selected through the native folder picker.
-- Persistent projects, chats, append-only event history, and restart recovery.
+- Persistent projects, searchable session trees, immutable checkpoint forks, redacted import/export,
+  append-only event history, and explicit restart recovery without request replay.
 - Streamed text, thinking, tool activity, command output, retries, and final
   evidence.
-- Router-discovered models and supported thinking levels.
+- An exact eight-model Router catalog with validated thinking modes and token-aware compaction.
 - Silent safe reads and a fresh **Allow once** or **Deny** decision for every
   file mutation and general command.
 - Workspace containment, protected credential paths, and an OS command sandbox
   that blocks network access, privilege escalation, and outside-workspace
   access.
-- Read-only agent-authored diffs that exclude pre-existing user changes.
+- Agent-authored diffs and exact task-start Git baselines that preserve pre-existing user changes.
+- A single normal active task, workspace/Git writer leases, immutable per-task capability snapshots,
+  and optional depth-one delegation behind that snapshot and a fresh approval.
+- Agent-native task presets; exact-digest bundled guidance; explicitly trusted, bounded project
+  Markdown skills/prompts; and GUI-paired, owner-only Ed25519 local automation.
 - Tier A/B/C/NONE sponsor placement and settlement/economics summaries.
 - Stop, permanent chat deletion, and local project instructions.
 - Privileged installation revocation and local sign out without removing projects, chats, or
@@ -170,7 +186,7 @@ agent-authored diffs only; it never stages, commits, or pushes changes.
 ### Current desktop interaction surface
 
 - The composer is the anchored interaction point for task entry, model and
-  thinking-level selection, sponsor banners, and command approvals.
+  thinking-level/preset selection, sponsor banners, and command approvals.
 - Tier B/C bottom sponsor surfaces attach directly above the composer, animate
   into view when routed, and can be dismissed with the close control. Approval
   cards use the same dock and remain tied to the input area while a command is
@@ -311,9 +327,9 @@ temporary router check is unavailable.
 
 This is expected for network access, dependency installation, credentials,
 privilege escalation, destructive filesystem/Git operations, shell operators,
-and paths outside the selected workspace. Run intentionally required setup
-commands manually outside the agent. If the OS sandbox cannot initialize,
-commands fail closed.
+and paths outside the selected workspace. It can also be an immutable task-preset denial; approval
+cannot raise a task's captured capability ceiling. Use a new deliberately configured task when
+broader authority is actually required. If the OS sandbox cannot initialize, commands fail closed.
 
 For deeper operational guidance, see [docs/operator-guide.md](docs/operator-guide.md).
 
@@ -326,16 +342,16 @@ npm run make:mac
 npm run verify:dist
 ```
 
-The GitHub release workflow runs the complete deterministic and live gates,
-creates macOS universal, Ubuntu x64, and Windows x64 portable ZIPs, verifies
-their platform integrity, generates SHA-256 checksums and CycloneDX SBOMs, and
-opens a draft `vX.Y.Z` prerelease. It uses no signing credentials and does not
-claim publisher identity for the unsigned portable beta artifacts.
+The credential-free beta workflow builds macOS universal plus Ubuntu and Windows x64 ZIPs, creates
+SBOMs and attestations, embeds exact canonical URLs/layouts/architectures/SHA-256 digests in a
+schema-3 launcher manifest, and opens an immutable draft before GitHub and npm `candidate`
+publication. macOS is ad-hoc signed; Linux and Windows are unsigned. A future schema-4 signed
+release requires a separately reviewed Developer ID/notarization, Authenticode, and Ed25519 trust
+setup.
 
-The release operator must manually install the downloaded draft artifacts on
-Apple Silicon, Intel, clean Ubuntu 24.04, and clean Windows 11 hosts before
-publishing. Release tags are immutable; a defective release is withdrawn and
-replaced with a higher patch version.
+The release operator must record exact downloaded-candidate acceptance on the primary Mac and a
+physical Windows 11 x64 device before moving `beta`/`latest`. Release tags and assets are immutable;
+a defective release is withdrawn and replaced with a higher version.
 
 ## License
 

@@ -21,17 +21,27 @@ import { classifyRouterOrigin, DEFAULT_ADROUTER_SERVER_URL } from '../shared/con
 import type {
   ApplicationInfo,
   Approval,
+  AutomationClient,
+  AutomationPairing,
+  BundleSummary,
   DiffFile,
   EnrollmentStatus,
+  GitWorkflowPreview,
+  GuidanceSummary,
   JournalEvent,
   Project,
   RouterConfiguration,
   RouterDiagnostics,
   RouterModelDescriptor,
+  SessionImportPreview,
   Sponsor,
+  TaskCapabilityPolicyV1,
+  TaskPolicySummaryV1,
+  TaskPresetV1,
   ThinkingLevel,
   Thread,
 } from '../shared/contracts';
+import { RouterModelDescriptorSchema } from '../shared/contracts';
 import { buildChangedLineDiff } from './line-diff';
 import { readStoredTheme, type Theme, transitionToTheme } from './theme';
 import { buildTimeline, type SponsorRound, type TimelineItem } from './timeline';
@@ -39,7 +49,21 @@ import { buildTimeline, type SponsorRound, type TimelineItem } from './timeline'
 type Detail = Awaited<ReturnType<Window['adrouter']['threads']['get']>>;
 type Drawer = 'history' | 'changes' | 'settings' | null;
 
-const isTerminal = (status: Thread['status']): boolean => status === 'idle' || status === 'failed';
+const isTerminal = (status: Thread['status']): boolean =>
+  status === 'idle' || status === 'failed' || status === 'interrupted' || status === 'blocked';
+
+const threadDepth = (thread: Thread, threads: Thread[]): number => {
+  const byId = new Map(threads.map((candidate) => [candidate.id, candidate]));
+  let depth = 0;
+  let parentId = thread.parentThreadId;
+  const seen = new Set<string>();
+  while (parentId && depth < 8 && !seen.has(parentId)) {
+    seen.add(parentId);
+    depth += 1;
+    parentId = byId.get(parentId)?.parentThreadId ?? null;
+  }
+  return depth;
+};
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : 'Something went wrong.';
@@ -92,31 +116,31 @@ const formatCurrency = (amount: number): string =>
     maximumFractionDigits: 4,
   }).format(amount);
 
-const normalizeModels = (value: unknown): RouterModelDescriptor[] =>
-  Array.isArray(value)
-    ? value.flatMap((candidate): RouterModelDescriptor[] => {
-        if (typeof candidate === 'string') {
-          return [
-            {
-              id: candidate,
-              provider: 'router',
-              displayName: candidate,
-              providerLabel: 'AdRouter',
-              thinkingLevels: ['none', 'medium', 'high'],
-              defaultThinkingLevel: 'medium',
-              configured: true,
-            },
-          ];
-        }
-        return candidate && typeof candidate === 'object'
-          ? [candidate as RouterModelDescriptor]
-          : [];
-      })
-    : [];
+const normalizeModels = (value: unknown): RouterModelDescriptor[] => {
+  const parsed = RouterModelDescriptorSchema.array().safeParse(value);
+  return parsed.success ? parsed.data : [];
+};
+
+const defaultPresetPolicy = (project?: Project): TaskCapabilityPolicyV1 => ({
+  schemaVersion: 1,
+  workspaceAccess: project?.permissionMode ?? 'workspace-write',
+  fileMutations: project?.permissionMode !== 'read-only',
+  generalCommands: true,
+  networkFetch: true,
+  dependencyChanges: project?.permissionMode !== 'read-only',
+  gitWrites: project?.permissionMode !== 'read-only',
+  delegation: Boolean(project?.delegationEnabled),
+});
 
 export function App(): JSX.Element {
   const [configured, setConfigured] = useState<boolean | undefined>();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [presets, setPresets] = useState<TaskPresetV1[]>([]);
+  const [bundles, setBundles] = useState<BundleSummary[]>([]);
+  const [guidance, setGuidance] = useState<GuidanceSummary[]>([]);
+  const [automationPairings, setAutomationPairings] = useState<AutomationPairing[]>([]);
+  const [automationClients, setAutomationClients] = useState<AutomationClient[]>([]);
+  const [automationEndpoint, setAutomationEndpoint] = useState<string>();
   const [selectedProjectId, setSelectedProjectId] = useState<string>();
   const [threads, setThreads] = useState<Thread[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string>();
@@ -127,6 +151,7 @@ export function App(): JSX.Element {
   const [diffs, setDiffs] = useState<DiffFile[]>([]);
   const [selectedDiffPath, setSelectedDiffPath] = useState<string>();
   const [composer, setComposer] = useState('');
+  const [selectedPresetId, setSelectedPresetId] = useState('');
   const [model, setModel] = useState('auto');
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('medium');
   const [models, setModels] = useState<RouterModelDescriptor[]>([]);
@@ -134,6 +159,18 @@ export function App(): JSX.Element {
   const [serverUrl, setServerUrl] = useState('');
   const [statusBusy, setStatusBusy] = useState(false);
   const [deletingThread, setDeletingThread] = useState<Thread>();
+  const [historyQuery, setHistoryQuery] = useState('');
+  const [labelDraft, setLabelDraft] = useState('');
+  const [selectedCheckpointId, setSelectedCheckpointId] = useState('');
+  const [sessionImportPreview, setSessionImportPreview] = useState<SessionImportPreview>();
+  const [runningMessageMode, setRunningMessageMode] = useState<'steer' | 'follow-up'>('follow-up');
+  const [gitCapability, setGitCapability] = useState<
+    'git.branch.create' | 'git.switch' | 'git.stage' | 'git.stage.hunk' | 'git.commit' | 'git.push'
+  >('git.stage');
+  const [gitPrimary, setGitPrimary] = useState('');
+  const [gitSecondary, setGitSecondary] = useState('');
+  const [gitPreview, setGitPreview] = useState<GitWorkflowPreview>();
+  const [gitBusy, setGitBusy] = useState(false);
   const [dismissedBottomSponsors, setDismissedBottomSponsors] = useState<Set<string>>(
     () => new Set()
   );
@@ -150,7 +187,9 @@ export function App(): JSX.Element {
   const [composerClearance, setComposerClearance] = useState(190);
   const timelineRef = useRef<HTMLDivElement>(null);
   const composerStackRef = useRef<HTMLDivElement>(null);
+  const sessionImportRef = useRef<HTMLInputElement>(null);
   const followTimeline = useRef(true);
+  const newTaskRequested = useRef(false);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
   const selectedThread = selectedThreadId
@@ -158,6 +197,8 @@ export function App(): JSX.Element {
       (detail?.thread.id === selectedThreadId ? detail.thread : undefined))
     : undefined;
   const isRunning = selectedThread ? !isTerminal(selectedThread.status) : false;
+  const needsContinue =
+    selectedThread?.status === 'interrupted' || selectedThread?.status === 'blocked';
   const hasActiveTask = isRunning || threads.some((thread) => !isTerminal(thread.status));
   const runningTurnId = isRunning ? detail?.turns.at(-1)?.id : undefined;
   const timeline = useMemo(
@@ -180,6 +221,7 @@ export function App(): JSX.Element {
       ? bottomSponsor
       : undefined;
   const selectableModels = useMemo(() => {
+    if (routerStatus?.catalog?.compatibility === 'incompatible') return [];
     if (routerStatus?.mode === 'live' && routerStatus.health && routerStatus.authenticated) {
       return models.filter((candidate) => candidate.configured);
     }
@@ -237,23 +279,100 @@ export function App(): JSX.Element {
     setInstructionDraft(selectedProject?.instructions ?? '');
   }, [selectedProject?.instructions]);
 
+  useEffect(() => {
+    setLabelDraft(selectedThread?.label ?? '');
+  }, [selectedThread?.label]);
+
+  useEffect(() => {
+    setSelectedCheckpointId(detail?.checkpoints?.at(-1)?.id ?? '');
+  }, [detail?.checkpoints]);
+
+  useEffect(() => {
+    setGitPreview(undefined);
+    if (gitCapability === 'git.push') {
+      setGitPrimary('origin');
+      setGitSecondary(
+        selectedProject?.git?.branch ? `refs/heads/${selectedProject.git.branch}` : ''
+      );
+    } else if (gitCapability === 'git.stage') {
+      setGitPrimary(diffs.map((diff) => diff.path).join('\n'));
+      setGitSecondary('');
+    } else if (gitCapability === 'git.stage.hunk') {
+      setGitPrimary(selectedDiff?.path ?? '');
+      setGitSecondary('1');
+    } else {
+      setGitPrimary('');
+      setGitSecondary('');
+    }
+  }, [diffs, gitCapability, selectedDiff?.path, selectedProject?.git?.branch]);
+
   const refreshProjects = useCallback(async (): Promise<void> => {
     const next = await window.adrouter.projects.list();
     setProjects(next);
     setSelectedProjectId((current) => current ?? next[0]?.id);
   }, []);
 
-  const refreshThreads = useCallback(async (projectId?: string): Promise<void> => {
+  const refreshPresets = useCallback(async (): Promise<void> => {
+    const next = await window.adrouter.presets.list();
+    setPresets(next);
+    setSelectedPresetId((current) =>
+      current && next.some((preset) => preset.id === current) ? current : ''
+    );
+  }, []);
+
+  const refreshBundles = useCallback(async (projectId?: string): Promise<void> => {
+    if (!projectId) {
+      setBundles([]);
+      return;
+    }
+    setBundles(await window.adrouter.bundles.list({ projectId }));
+  }, []);
+
+  const refreshGuidance = useCallback(async (projectId?: string): Promise<void> => {
+    if (!projectId) {
+      setGuidance([]);
+      return;
+    }
+    setGuidance(await window.adrouter.guidance.list({ projectId }));
+  }, []);
+
+  const refreshAutomation = useCallback(async (): Promise<void> => {
+    const [pairings, clients, endpoint] = await Promise.all([
+      window.adrouter.automation.pairings(),
+      window.adrouter.automation.clients(),
+      window.adrouter.automation.endpoint(),
+    ]);
+    setAutomationPairings(pairings);
+    setAutomationClients(clients);
+    setAutomationEndpoint(endpoint.endpoint);
+  }, []);
+
+  const refreshThreads = useCallback(async (projectId?: string, query = ''): Promise<void> => {
     if (!projectId) {
       setThreads([]);
       return;
     }
-    const next = await window.adrouter.threads.list({ projectId });
+    const next = query.trim()
+      ? await window.adrouter.threads.search({ projectId, query: query.trim() })
+      : await window.adrouter.threads.list({ projectId });
     setThreads(next);
     setSelectedThreadId((current) =>
-      current && next.some((thread) => thread.id === current) ? current : next[0]?.id
+      current && next.some((thread) => thread.id === current)
+        ? current
+        : newTaskRequested.current
+          ? undefined
+          : next[0]?.id
     );
   }, []);
+
+  useEffect(() => {
+    if (!selectedProjectId) return undefined;
+    const timeout = window.setTimeout(
+      () => void refreshThreads(selectedProjectId, historyQuery),
+      180
+    );
+    return () => window.clearTimeout(timeout);
+  }, [historyQuery, refreshThreads, selectedProjectId]);
 
   const refreshDetail = useCallback(async (threadId?: string): Promise<void> => {
     if (!threadId) {
@@ -298,13 +417,13 @@ export function App(): JSX.Element {
         setModel(configuration.selectedModel ?? configuredModels[0]?.id ?? 'auto');
         setThinkingLevel(configuration.selectedThinkingLevel ?? 'medium');
         if (configuration.configured) void refreshRouterStatus();
-        await refreshProjects();
+        await Promise.all([refreshProjects(), refreshPresets()]);
       } catch (caught) {
         setError(errorMessage(caught));
         setConfigured(false);
       }
     })();
-  }, [refreshProjects, refreshRouterStatus]);
+  }, [refreshPresets, refreshProjects, refreshRouterStatus]);
 
   useEffect(() => {
     if (drawer !== 'settings' || !configured) return undefined;
@@ -312,6 +431,22 @@ export function App(): JSX.Element {
     const interval = window.setInterval(() => void refreshRouterStatus(), 15_000);
     return () => window.clearInterval(interval);
   }, [configured, drawer, refreshRouterStatus]);
+
+  useEffect(() => {
+    if (drawer !== 'settings' || !configured) return undefined;
+    void refreshAutomation().catch((caught) => setError(errorMessage(caught)));
+    const interval = window.setInterval(
+      () => void refreshAutomation().catch((caught) => setError(errorMessage(caught))),
+      2_000
+    );
+    return () => window.clearInterval(interval);
+  }, [configured, drawer, refreshAutomation]);
+
+  useEffect(() => {
+    if (drawer !== 'settings' || !configured) return;
+    void refreshPresets().catch((caught) => setError(errorMessage(caught)));
+    void refreshGuidance(selectedProjectId).catch((caught) => setError(errorMessage(caught)));
+  }, [configured, drawer, refreshGuidance, refreshPresets, selectedProjectId]);
 
   useEffect(() => {
     if (!drawer) {
@@ -358,13 +493,24 @@ export function App(): JSX.Element {
   }, [model, selectableModels, thinkingLevel]);
 
   useEffect(() => {
+    if (!selectedPresetId) return;
+    const preset = presets.find((candidate) => candidate.id === selectedPresetId);
+    if (!preset) return;
+    setModel(preset.model);
+    setThinkingLevel(preset.thinkingLevel);
+  }, [presets, selectedPresetId]);
+
+  useEffect(() => {
+    newTaskRequested.current = false;
     setSelectedThreadId(undefined);
     setDetail(undefined);
     setThreads([]);
     setDiffs([]);
     setSelectedDiffPath(undefined);
     void refreshThreads(selectedProjectId);
-  }, [selectedProjectId, refreshThreads]);
+    void refreshBundles(selectedProjectId);
+    void refreshGuidance(selectedProjectId).catch((caught) => setError(errorMessage(caught)));
+  }, [selectedProjectId, refreshBundles, refreshGuidance, refreshThreads]);
 
   useEffect(() => {
     void refreshDetail(selectedThreadId);
@@ -435,7 +581,7 @@ export function App(): JSX.Element {
             setModel(configuration.selectedModel ?? configuredModels[0]?.id ?? 'auto');
             setThinkingLevel(configuration.selectedThinkingLevel ?? 'medium');
             void refreshRouterStatus();
-            await refreshProjects();
+            await Promise.all([refreshProjects(), refreshPresets()]);
           }}
           onModels={(nextModels) => {
             setModels(nextModels);
@@ -482,6 +628,321 @@ export function App(): JSX.Element {
     }
   };
 
+  const setBundleTrust = async (bundle: BundleSummary, trusted: boolean): Promise<void> => {
+    if (!selectedProject) return;
+    try {
+      if (trusted) {
+        await window.adrouter.bundles.trust({
+          projectId: selectedProject.id,
+          bundleId: bundle.id,
+          version: bundle.version,
+          digest: bundle.aggregateDigest,
+        });
+      } else {
+        await window.adrouter.bundles.revoke({
+          projectId: selectedProject.id,
+          bundleId: bundle.id,
+        });
+      }
+      await refreshBundles(selectedProject.id);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  };
+
+  const setGuidanceTrust = async (resource: GuidanceSummary, trusted: boolean): Promise<void> => {
+    if (!selectedProject) return;
+    try {
+      if (trusted) {
+        await window.adrouter.guidance.trust({
+          projectId: selectedProject.id,
+          kind: resource.kind,
+          id: resource.id,
+          path: resource.path,
+          digest: resource.digest,
+        });
+      } else {
+        await window.adrouter.guidance.revoke({
+          projectId: selectedProject.id,
+          kind: resource.kind,
+          id: resource.id,
+        });
+      }
+      await refreshGuidance(selectedProject.id);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  };
+
+  const insertGuidancePrompt = async (resource: GuidanceSummary): Promise<void> => {
+    if (!selectedProject || resource.kind !== 'prompt' || !resource.active) return;
+    try {
+      const prompt = await window.adrouter.guidance.readPrompt({
+        projectId: selectedProject.id,
+        id: resource.id,
+        digest: resource.digest,
+      });
+      setComposer(
+        (current) => `${current.trimEnd()}${current.trim() ? '\n\n' : ''}${prompt.content}`
+      );
+      setDrawer(null);
+      requestAnimationFrame(() => document.getElementById('task-composer')?.focus());
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  };
+
+  const setDelegationEnabled = async (enabled: boolean): Promise<void> => {
+    if (!selectedProject) return;
+    try {
+      const updated = await window.adrouter.projects.update({
+        id: selectedProject.id,
+        delegationEnabled: enabled,
+      });
+      setProjects((current) =>
+        current.map((project) => (project.id === updated.id ? updated : project))
+      );
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  };
+
+  const decidePairing = async (pairingId: string, approve: boolean): Promise<void> => {
+    try {
+      if (approve) await window.adrouter.automation.approvePairing({ pairingId });
+      else await window.adrouter.automation.denyPairing({ pairingId });
+      await refreshAutomation();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  };
+
+  const revokeAutomationClient = async (clientId: string): Promise<void> => {
+    try {
+      await window.adrouter.automation.revokeClient({ clientId });
+      await refreshAutomation();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  };
+
+  const continueThread = async (): Promise<void> => {
+    if (!selectedThreadId || !selectedProjectId) return;
+    try {
+      await window.adrouter.threads.continue({ id: selectedThreadId });
+      await Promise.all([
+        refreshThreads(selectedProjectId, historyQuery),
+        refreshDetail(selectedThreadId),
+      ]);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  };
+
+  const saveThreadLabel = async (): Promise<void> => {
+    if (!selectedThreadId || !selectedProjectId) return;
+    try {
+      await window.adrouter.threads.label({
+        id: selectedThreadId,
+        label: labelDraft.trim() || null,
+      });
+      await refreshThreads(selectedProjectId, historyQuery);
+      await refreshDetail(selectedThreadId);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  };
+
+  const forkCheckpoint = async (): Promise<void> => {
+    if (!selectedCheckpointId || !selectedProjectId) return;
+    try {
+      const fork = await window.adrouter.threads.fork({ checkpointId: selectedCheckpointId });
+      await refreshThreads(selectedProjectId, historyQuery);
+      newTaskRequested.current = false;
+      setSelectedThreadId(fork.id);
+      setDrawer(null);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  };
+
+  const downloadText = (contents: string, type: string, filename: string): void => {
+    const blob = new Blob([contents], { type });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportSession = async (format: 'json' | 'html' = 'json'): Promise<void> => {
+    if (!selectedThreadId || !selectedThread) return;
+    try {
+      if (format === 'html') {
+        const exported = await window.adrouter.sessions.exportHtml({ threadId: selectedThreadId });
+        downloadText(exported.html, 'text/html', exported.filename);
+        return;
+      }
+      const session = await window.adrouter.sessions.export({
+        threadId: selectedThreadId,
+        includeBilling: false,
+      });
+      downloadText(
+        `${JSON.stringify(session, null, 2)}\n`,
+        'application/json',
+        `${
+          selectedThread.title
+            .replace(/[^a-z0-9]+/gi, '-')
+            .replace(/^-|-$/g, '')
+            .slice(0, 80) || 'adrouter-session'
+        }.json`
+      );
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  };
+
+  const importSession = async (file?: File): Promise<void> => {
+    if (!file || !selectedProjectId) return;
+    try {
+      if (file.size > 10 * 1024 * 1024) throw new Error('Session imports are limited to 10 MiB.');
+      const preview = await window.adrouter.sessions.previewImport({
+        projectId: selectedProjectId,
+        sourceName: file.name,
+        content: await file.text(),
+      });
+      setSessionImportPreview(preview);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      if (sessionImportRef.current) sessionImportRef.current.value = '';
+    }
+  };
+
+  const confirmSessionImport = async (): Promise<void> => {
+    if (!sessionImportPreview || !selectedProjectId) return;
+    try {
+      const imported = await window.adrouter.sessions.confirmImport({
+        previewId: sessionImportPreview.previewId,
+        ...(selectedPresetId ? { presetId: selectedPresetId } : {}),
+      });
+      setSessionImportPreview(undefined);
+      setHistoryQuery('');
+      await refreshThreads(selectedProjectId);
+      newTaskRequested.current = false;
+      setSelectedThreadId(imported.id);
+      setDrawer(null);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  };
+
+  const copyLastAssistantResponse = async (): Promise<void> => {
+    if (!selectedThreadId) return;
+    try {
+      await window.adrouter.sessions.copyLast({ threadId: selectedThreadId });
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  };
+
+  const compactContext = async (): Promise<void> => {
+    if (!selectedThreadId) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await window.adrouter.turns.compact({ threadId: selectedThreadId });
+      await refreshDetail(selectedThreadId);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearQueuedFollowUps = async (): Promise<void> => {
+    if (!selectedThreadId) return;
+    try {
+      await window.adrouter.turns.clearQueue({ threadId: selectedThreadId });
+      await refreshDetail(selectedThreadId);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  };
+
+  const previewGitOperation = async (): Promise<void> => {
+    if (!selectedThreadId) return;
+    setGitBusy(true);
+    setError(undefined);
+    try {
+      const common = { threadId: selectedThreadId, capability: gitCapability };
+      const input =
+        gitCapability === 'git.branch.create' || gitCapability === 'git.switch'
+          ? { ...common, branch: gitPrimary.trim() }
+          : gitCapability === 'git.stage'
+            ? {
+                ...common,
+                paths: [
+                  ...new Set(
+                    gitPrimary
+                      .split(/[\n,]/)
+                      .map((path) => path.trim())
+                      .filter(Boolean)
+                  ),
+                ],
+              }
+            : gitCapability === 'git.stage.hunk'
+              ? {
+                  ...common,
+                  path: gitPrimary.trim(),
+                  hunks: [
+                    ...new Set(
+                      gitSecondary
+                        .split(/[\s,]+/)
+                        .filter(Boolean)
+                        .map((value) => Number(value))
+                    ),
+                  ],
+                }
+              : gitCapability === 'git.commit'
+                ? { ...common, message: gitPrimary.trim() }
+                : {
+                    ...common,
+                    remote: gitPrimary.trim(),
+                    remoteRef: gitSecondary.trim(),
+                  };
+      setGitPreview(await window.adrouter.git.preview(input));
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setGitBusy(false);
+    }
+  };
+
+  const resolveGitOperation = async (decision: 'allow-once' | 'deny'): Promise<void> => {
+    if (!gitPreview || !selectedThreadId) return;
+    setGitBusy(true);
+    setError(undefined);
+    try {
+      await window.adrouter.git.resolve({
+        operationId: gitPreview.manifest.operationId,
+        decision,
+      });
+      setGitPreview(undefined);
+      await Promise.all([
+        refreshDetail(selectedThreadId),
+        refreshDiffs(selectedThreadId),
+        refreshThreads(selectedProjectId, historyQuery),
+      ]);
+    } catch (caught) {
+      setGitPreview(undefined);
+      setError(errorMessage(caught));
+    } finally {
+      setGitBusy(false);
+    }
+  };
+
   const send = async (): Promise<void> => {
     if (!composer.trim() || !selectedProject || !selectedModel) {
       return;
@@ -494,15 +955,27 @@ export function App(): JSX.Element {
     setError(undefined);
     try {
       let threadId = selectedThreadId;
+      if (isRunning && threadId) {
+        if (runningMessageMode === 'steer') {
+          await window.adrouter.turns.steer({ threadId, input: text });
+        } else {
+          await window.adrouter.turns.queueFollowUp({ threadId, input: text });
+        }
+        setComposer('');
+        await refreshDetail(threadId);
+        return;
+      }
       if (!threadId) {
         const thread = await window.adrouter.threads.create({
           projectId: selectedProject.id,
           title: text.slice(0, 80),
           model,
           thinkingLevel,
+          ...(selectedPresetId ? { presetId: selectedPresetId } : {}),
         });
         threadId = thread.id;
         await refreshThreads(selectedProject.id);
+        newTaskRequested.current = false;
         setSelectedThreadId(threadId);
       }
       await window.adrouter.turns.start({
@@ -608,6 +1081,7 @@ export function App(): JSX.Element {
             type="button"
             disabled={!selectedProject}
             onClick={() => {
+              newTaskRequested.current = true;
               setSelectedThreadId(undefined);
               setDetail(undefined);
               setDiffs([]);
@@ -711,12 +1185,19 @@ export function App(): JSX.Element {
               </ComposerPanel>
               <Composer
                 value={composer}
-                disabled={!selectedProject || !selectedModel || busy || isRunning}
+                disabled={!selectedProject || !selectedModel || busy || needsContinue}
+                presetDisabled={!selectedProject || busy || needsContinue}
                 isRunning={isRunning}
+                isNewTask={!selectedThread}
+                runningMode={runningMessageMode}
                 models={selectableModels}
                 model={model}
                 thinkingLevel={thinkingLevel}
+                presets={presets}
+                presetId={selectedPresetId}
                 onChange={setComposer}
+                onRunningModeChange={setRunningMessageMode}
+                onPresetChange={setSelectedPresetId}
                 onModelChange={(nextModel) => {
                   const descriptor = selectableModels.find(
                     (candidate) => candidate.id === nextModel
@@ -768,21 +1249,206 @@ export function App(): JSX.Element {
           </div>
           {renderedDrawer === 'history' && (
             <div className="thread-list">
+              <input
+                type="search"
+                aria-label="Search task history"
+                placeholder="Search tasks and context"
+                value={historyQuery}
+                onChange={(event) => setHistoryQuery(event.target.value)}
+              />
+              <div className="history-actions">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={!selectedThreadId}
+                  onClick={() => void exportSession('json')}
+                >
+                  Export JSON
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={!selectedThreadId}
+                  onClick={() => void exportSession('html')}
+                >
+                  Export HTML
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={!selectedThreadId}
+                  onClick={() => void copyLastAssistantResponse()}
+                >
+                  Copy last
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={!selectedThreadId || isRunning || busy}
+                  onClick={() => void compactContext()}
+                >
+                  Compact context
+                </button>
+                {isRunning && (
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => void clearQueuedFollowUps()}
+                  >
+                    Clear queued
+                  </button>
+                )}
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={!selectedProjectId}
+                  onClick={() => sessionImportRef.current?.click()}
+                >
+                  Import
+                </button>
+                <input
+                  ref={sessionImportRef}
+                  className="sr-only"
+                  type="file"
+                  accept="application/json,application/x-ndjson,.json,.jsonl"
+                  aria-label="Import session file"
+                  onChange={(event) => void importSession(event.target.files?.[0])}
+                />
+              </div>
+              {detail?.contextBudget && (
+                <small className="context-budget">
+                  Context {detail.contextBudget.estimatedTokens.toLocaleString()} /{' '}
+                  {detail.contextBudget.maxInputTokens.toLocaleString()} tokens ·{' '}
+                  {detail.contextBudget.status}
+                </small>
+              )}
+              {sessionImportPreview && (
+                <section className="session-controls" aria-label="Session import preview">
+                  <strong>Confirm inert session import</strong>
+                  <small>
+                    {sessionImportPreview.format === 'adrouter-cli-v3-jsonl'
+                      ? 'AdRouterCLI v3 active branch'
+                      : 'AdRouter Agent JSON'}{' '}
+                    · {sessionImportPreview.entries} entries · {sessionImportPreview.messages}{' '}
+                    messages
+                  </small>
+                  <small>
+                    {sessionImportPreview.title} · {sessionImportPreview.model} ·{' '}
+                    {sessionImportPreview.thinkingLevel}
+                  </small>
+                  {sessionImportPreview.warnings.map((warning) => (
+                    <small key={warning}>{warning}</small>
+                  ))}
+                  <label htmlFor="session-import-preset">Task preset</label>
+                  <select
+                    id="session-import-preset"
+                    value={selectedPresetId}
+                    onChange={(event) => setSelectedPresetId(event.target.value)}
+                  >
+                    <option value="">Project defaults</option>
+                    {presets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.name}
+                      </option>
+                    ))}
+                  </select>
+                  <small>
+                    Imported history stays inert. The selected preset supplies only the new task's
+                    immutable execution policy.
+                  </small>
+                  <div className="inline-controls">
+                    <button
+                      className="primary-button"
+                      type="button"
+                      onClick={() => void confirmSessionImport()}
+                    >
+                      Import into this project
+                    </button>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => setSessionImportPreview(undefined)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </section>
+              )}
+              {selectedThread && (
+                <section className="session-controls" aria-label="Selected task session controls">
+                  <label htmlFor="task-label">Label</label>
+                  <div className="inline-controls">
+                    <input
+                      id="task-label"
+                      value={labelDraft}
+                      maxLength={120}
+                      onChange={(event) => setLabelDraft(event.target.value)}
+                    />
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={labelDraft.trim() === (selectedThread.label ?? '')}
+                      onClick={() => void saveThreadLabel()}
+                    >
+                      Save
+                    </button>
+                  </div>
+                  {needsContinue && (
+                    <button
+                      className="primary-button"
+                      type="button"
+                      onClick={() => void continueThread()}
+                    >
+                      Continue interrupted task
+                    </button>
+                  )}
+                  {detail?.policy && <TaskPolicySummary policy={detail.policy} />}
+                  <label htmlFor="fork-checkpoint">Fork from safe checkpoint</label>
+                  <div className="inline-controls">
+                    <select
+                      id="fork-checkpoint"
+                      value={selectedCheckpointId}
+                      onChange={(event) => setSelectedCheckpointId(event.target.value)}
+                      disabled={!detail?.checkpoints?.length}
+                    >
+                      <option value="">No checkpoint</option>
+                      {detail?.checkpoints?.map((checkpoint, index) => (
+                        <option key={checkpoint.id} value={checkpoint.id}>
+                          Checkpoint {index + 1} · entry {checkpoint.entryOrdinal}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={!selectedCheckpointId}
+                      onClick={() => void forkCheckpoint()}
+                    >
+                      Fork
+                    </button>
+                  </div>
+                </section>
+              )}
               {threads.map((thread) => (
                 <div
                   className={`thread-row ${thread.id === selectedThreadId ? 'selected' : ''}`}
                   key={thread.id}
+                  style={{ paddingLeft: `${threadDepth(thread, threads) * 18}px` }}
                 >
                   <button
                     className="thread-select"
                     type="button"
                     onClick={() => {
+                      newTaskRequested.current = false;
                       setSelectedThreadId(thread.id);
                       setDrawer(null);
                     }}
                   >
                     <span className={`status-dot ${thread.status}`} aria-hidden="true" />
-                    <span>{thread.title}</span>
+                    <span>
+                      {thread.title}
+                      {thread.label && <small>{thread.label}</small>}
+                    </span>
                   </button>
                   <button
                     className="thread-delete"
@@ -799,7 +1465,121 @@ export function App(): JSX.Element {
             </div>
           )}
           {renderedDrawer === 'changes' && (
-            <ChangesPanel diffs={diffs} selected={selectedDiff} onSelect={setSelectedDiffPath} />
+            <>
+              {detail?.gitBaseline && (
+                <section className="git-baseline" aria-label="Task-start Git baseline">
+                  <strong>Task-start Git baseline</strong>
+                  <small>
+                    {detail.gitBaseline.ref ?? 'detached HEAD'} ·{' '}
+                    {detail.gitBaseline.headOid?.slice(0, 12) ?? 'unborn'}
+                  </small>
+                  <small>
+                    {detail.gitBaseline.statusEntries.length} pre-existing change(s)
+                    {detail.gitBaseline.truncated ? ' · truncated' : ''}
+                  </small>
+                </section>
+              )}
+              {selectedProject?.git &&
+                selectedThread &&
+                detail?.policy.capabilityPolicy.workspaceAccess === 'workspace-write' &&
+                detail.policy.capabilityPolicy.gitWrites && (
+                  <section className="git-workflow" aria-label="Reviewed Git workflow">
+                    <strong>Reviewed Git workflow</strong>
+                    <small>
+                      Every write gets an exact, expiring before-state preview and a separate
+                      allow-once decision.
+                    </small>
+                    <label htmlFor="git-operation">Operation</label>
+                    <select
+                      id="git-operation"
+                      value={gitCapability}
+                      disabled={gitBusy || isRunning}
+                      onChange={(event) =>
+                        setGitCapability(event.target.value as typeof gitCapability)
+                      }
+                    >
+                      <option value="git.stage">Stage exact paths</option>
+                      <option value="git.stage.hunk">Stage selected text hunks</option>
+                      <option value="git.commit">Commit staged index</option>
+                      <option value="git.branch.create">Create branch</option>
+                      <option value="git.switch">Switch clean worktree</option>
+                      <option value="git.push">Push exact ref</option>
+                    </select>
+                    {gitCapability === 'git.stage' ? (
+                      <textarea
+                        aria-label="Git paths"
+                        placeholder="One workspace-relative path per line"
+                        value={gitPrimary}
+                        onChange={(event) => setGitPrimary(event.target.value)}
+                      />
+                    ) : (
+                      <input
+                        aria-label={
+                          gitCapability === 'git.commit'
+                            ? 'Commit message'
+                            : gitCapability === 'git.push'
+                              ? 'Git remote'
+                              : gitCapability === 'git.stage.hunk'
+                                ? 'Git path'
+                                : 'Git branch'
+                        }
+                        placeholder={gitCapability === 'git.push' ? 'origin' : undefined}
+                        value={gitPrimary}
+                        onChange={(event) => setGitPrimary(event.target.value)}
+                      />
+                    )}
+                    {(gitCapability === 'git.push' || gitCapability === 'git.stage.hunk') && (
+                      <input
+                        aria-label={
+                          gitCapability === 'git.push' ? 'Remote branch ref' : 'Git hunk ordinals'
+                        }
+                        placeholder={gitCapability === 'git.push' ? 'refs/heads/feature' : '1, 3'}
+                        value={gitSecondary}
+                        onChange={(event) => setGitSecondary(event.target.value)}
+                      />
+                    )}
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={gitBusy || isRunning || needsContinue || !gitPrimary.trim()}
+                      onClick={() => void previewGitOperation()}
+                    >
+                      Review exact operation
+                    </button>
+                    {gitPreview && (
+                      <div className="git-preview">
+                        <small>{gitPreview.reason}</small>
+                        {gitPreview.patchPreview && (
+                          <>
+                            <strong>Selected Git hunk patch</strong>
+                            <pre>{gitPreview.patchPreview}</pre>
+                          </>
+                        )}
+                        <code>{gitPreview.manifest.binding}</code>
+                        <div className="approval-actions">
+                          <button
+                            className="allow-button"
+                            type="button"
+                            disabled={gitBusy}
+                            onClick={() => void resolveGitOperation('allow-once')}
+                          >
+                            Allow once
+                          </button>
+                          <button
+                            className="deny-button"
+                            type="button"
+                            disabled={gitBusy}
+                            onClick={() => void resolveGitOperation('deny')}
+                          >
+                            Deny
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                )}
+              <ChangesPanel diffs={diffs} selected={selectedDiff} onSelect={setSelectedDiffPath} />
+            </>
           )}
           {renderedDrawer === 'settings' && (
             <>
@@ -809,6 +1589,15 @@ export function App(): JSX.Element {
                 serverUrl={serverUrl}
                 agentStatus={selectedThread?.status ?? 'ready'}
                 onRefresh={() => void refreshRouterStatus()}
+              />
+              <PresetSettings
+                presets={presets}
+                models={models}
+                project={selectedProject}
+                currentModel={model}
+                currentThinkingLevel={thinkingLevel}
+                onChanged={refreshPresets}
+                onError={setError}
               />
               <details
                 className="project-controls settings-disclosure"
@@ -841,6 +1630,184 @@ export function App(): JSX.Element {
                   )}
                 </div>
               </details>
+              <details
+                className="project-controls settings-disclosure"
+                aria-label="Declarative bundles"
+              >
+                <summary>Declarative bundles</summary>
+                <div className="settings-disclosure-content">
+                  <small>
+                    Only exact, packaged Markdown guidance can be enabled. Bundle content cannot add
+                    tools, network access, or executable hooks.
+                  </small>
+                  {bundles.map((bundle) => (
+                    <label className="toggle-row" key={bundle.id}>
+                      <input
+                        type="checkbox"
+                        checked={bundle.active}
+                        onChange={(event) => void setBundleTrust(bundle, event.target.checked)}
+                        disabled={!selectedProject}
+                      />
+                      <span>
+                        <strong>{bundle.id}</strong> {bundle.version}
+                        <small>
+                          {bundle.entries.map((entry) => entry.title).join(', ')} ·{' '}
+                          {bundle.aggregateDigest.slice(0, 12)}…
+                        </small>
+                        {bundle.trustReason && <small>{bundle.trustReason}</small>}
+                      </span>
+                    </label>
+                  ))}
+                  {bundles.length === 0 && <small>No packaged bundles are available.</small>}
+                </div>
+              </details>
+              <details
+                className="project-controls settings-disclosure"
+                aria-label="Trusted project Markdown"
+              >
+                <summary>Trusted project Markdown</summary>
+                <div className="settings-disclosure-content">
+                  <small>
+                    Only exact Markdown under .adrouter/skills and .adrouter/prompts is eligible.
+                    Skills are loaded on demand; prompts are inserted into the composer and never
+                    sent automatically.
+                  </small>
+                  {guidance.map((resource) => (
+                    <section className="guidance-resource" key={`${resource.kind}:${resource.id}`}>
+                      <span className="guidance-resource-content">
+                        <strong>{resource.name}</strong>
+                        <small>
+                          {resource.kind} · {resource.path} · {resource.bytes.toLocaleString()}{' '}
+                          bytes
+                        </small>
+                        <small>sha256:{resource.digest.slice(0, 16)}…</small>
+                        {resource.description && <small>{resource.description}</small>}
+                        {resource.trustReason && <small>{resource.trustReason}</small>}
+                      </span>
+                      <div className="inline-controls">
+                        {resource.kind === 'prompt' && resource.active && (
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            onClick={() => void insertGuidancePrompt(resource)}
+                          >
+                            Insert prompt
+                          </button>
+                        )}
+                        {resource.active ? (
+                          <button
+                            className="danger-outline-button"
+                            type="button"
+                            onClick={() => void setGuidanceTrust(resource, false)}
+                          >
+                            Revoke
+                          </button>
+                        ) : resource.present ? (
+                          <button
+                            className="primary-button"
+                            type="button"
+                            onClick={() => void setGuidanceTrust(resource, true)}
+                          >
+                            Trust exact digest
+                          </button>
+                        ) : resource.trusted ? (
+                          <button
+                            className="danger-outline-button"
+                            type="button"
+                            onClick={() => void setGuidanceTrust(resource, false)}
+                          >
+                            Revoke missing snapshot
+                          </button>
+                        ) : null}
+                      </div>
+                    </section>
+                  ))}
+                  {guidance.length === 0 && (
+                    <small>No eligible project skills or prompts were found.</small>
+                  )}
+                </div>
+              </details>
+              <details
+                className="project-controls settings-disclosure"
+                aria-label="Delegated child tasks"
+              >
+                <summary>Delegated child tasks</summary>
+                <div className="settings-disclosure-content">
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(selectedProject?.delegationEnabled)}
+                      disabled={!selectedProject}
+                      onChange={(event) => void setDelegationEnabled(event.target.checked)}
+                    />
+                    <span>
+                      <strong>Enable bounded delegation</strong>
+                      <small>
+                        Default for newly created tasks without a preset. Depth one, at most three
+                        visible children. Every child start still requires a fresh high-risk
+                        allow-once decision and uses an independent conversation.
+                      </small>
+                    </span>
+                  </label>
+                </div>
+              </details>
+              <details
+                className="project-controls settings-disclosure"
+                aria-label="Local automation"
+              >
+                <summary>Local automation</summary>
+                <div className="settings-disclosure-content">
+                  <small>
+                    Owner-only local IPC · protocol 1
+                    {automationEndpoint ? ` · ${automationEndpoint}` : ''}
+                  </small>
+                  {automationPairings.map((pairing) => (
+                    <section className="detail-panel" key={pairing.id}>
+                      <strong>{pairing.displayName}</strong>
+                      <span className="user-code">{pairing.comparisonCode}</span>
+                      <small>Scopes: {pairing.scopes.join(', ')}</small>
+                      <small>Key: {pairing.publicKeyFingerprint.slice(0, 16)}…</small>
+                      <div className="onboarding-actions">
+                        <button
+                          className="primary-button"
+                          type="button"
+                          onClick={() => void decidePairing(pairing.id, true)}
+                        >
+                          Approve exact key and scopes
+                        </button>
+                        <button
+                          className="danger-outline-button"
+                          type="button"
+                          onClick={() => void decidePairing(pairing.id, false)}
+                        >
+                          Deny
+                        </button>
+                      </div>
+                    </section>
+                  ))}
+                  {automationPairings.length === 0 && <small>No pairing is awaiting review.</small>}
+                  {automationClients.map((client) => (
+                    <div className="toggle-row" key={client.id}>
+                      <span>
+                        <strong>{client.displayName}</strong>
+                        <small>
+                          {client.scopes.join(', ')} · {client.publicKeyFingerprint.slice(0, 16)}…
+                          {client.revokedAt ? ' · revoked' : ''}
+                        </small>
+                      </span>
+                      {!client.revokedAt && (
+                        <button
+                          className="danger-outline-button"
+                          type="button"
+                          onClick={() => void revokeAutomationClient(client.id)}
+                        >
+                          Revoke
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </details>
               <div className="settings-primary-sections">
                 <EconomicsPanel events={detail?.events ?? []} sponsor={sponsor} />
                 <section className="detail-panel credential-panel" aria-label="AdRouter credential">
@@ -863,7 +1830,9 @@ export function App(): JSX.Element {
                     Sign out attempts to revoke this installation, then always removes its encrypted
                     key and refresh credential locally. Projects, chats, and preferences stay here.
                   </p>
-                  {hasActiveTask && <small>Stop the active agent task before signing out.</small>}
+                  {hasActiveTask && (
+                    <small>Stop all active or queued agent tasks before signing out.</small>
+                  )}
                 </section>
                 <AboutPanel info={applicationInfo} />
               </div>
@@ -1501,6 +2470,371 @@ function EmptyTimeline({
   );
 }
 
+type PresetDraft = Omit<
+  TaskPresetV1,
+  'schemaVersion' | 'id' | 'digest' | 'createdAt' | 'updatedAt'
+> & { id?: string };
+
+const presetDraft = (
+  preset: TaskPresetV1 | undefined,
+  project: Project | undefined,
+  model: string,
+  thinkingLevel: ThinkingLevel
+): PresetDraft =>
+  preset
+    ? {
+        id: preset.id,
+        name: preset.name,
+        model: preset.model,
+        thinkingLevel: preset.thinkingLevel,
+        extraInstructions: preset.extraInstructions,
+        capabilityPolicy: preset.capabilityPolicy,
+      }
+    : {
+        name: '',
+        model,
+        thinkingLevel,
+        extraInstructions: '',
+        capabilityPolicy: defaultPresetPolicy(project),
+      };
+
+function PresetSettings({
+  presets,
+  models,
+  project,
+  currentModel,
+  currentThinkingLevel,
+  onChanged,
+  onError,
+}: {
+  presets: TaskPresetV1[];
+  models: RouterModelDescriptor[];
+  project?: Project;
+  currentModel: string;
+  currentThinkingLevel: ThinkingLevel;
+  onChanged: () => Promise<void>;
+  onError: (message: string) => void;
+}): JSX.Element {
+  const [draft, setDraft] = useState<PresetDraft>();
+  const [saving, setSaving] = useState(false);
+  const [deleteId, setDeleteId] = useState('');
+  const startDraft = (preset?: TaskPresetV1): void => {
+    const descriptor =
+      models.find((candidate) => candidate.id === (preset?.model ?? currentModel)) ?? models[0];
+    if (!descriptor) {
+      onError('A validated Router model is required before creating a task preset.');
+      return;
+    }
+    const level =
+      preset?.thinkingLevel ??
+      (descriptor.thinkingLevels.includes(currentThinkingLevel)
+        ? currentThinkingLevel
+        : descriptor.defaultThinkingLevel);
+    setDraft(presetDraft(preset, project, descriptor.id, level));
+    setDeleteId('');
+  };
+  const save = async (): Promise<void> => {
+    if (!draft) return;
+    setSaving(true);
+    try {
+      const input = {
+        name: draft.name,
+        model: draft.model,
+        thinkingLevel: draft.thinkingLevel,
+        extraInstructions: draft.extraInstructions,
+        capabilityPolicy: draft.capabilityPolicy,
+      };
+      if (draft.id) await window.adrouter.presets.update({ ...input, id: draft.id });
+      else await window.adrouter.presets.create(input);
+      await onChanged();
+      setDraft(undefined);
+    } catch (caught) {
+      onError(errorMessage(caught));
+    } finally {
+      setSaving(false);
+    }
+  };
+  const remove = async (id: string): Promise<void> => {
+    try {
+      await window.adrouter.presets.delete({ id });
+      await onChanged();
+      setDraft((current) => (current?.id === id ? undefined : current));
+      setDeleteId('');
+    } catch (caught) {
+      onError(errorMessage(caught));
+    }
+  };
+  const updatePolicy = (patch: Partial<Omit<TaskCapabilityPolicyV1, 'schemaVersion'>>): void => {
+    setDraft((current) =>
+      current
+        ? { ...current, capabilityPolicy: { ...current.capabilityPolicy, ...patch } }
+        : current
+    );
+  };
+  const capabilityOptions: Array<{
+    key: Exclude<keyof TaskCapabilityPolicyV1, 'schemaVersion' | 'workspaceAccess'>;
+    label: string;
+    description: string;
+    requiresWrite?: boolean;
+  }> = [
+    {
+      key: 'fileMutations',
+      label: 'File mutations',
+      description: 'Create, edit, move, and delete workspace files after allow-once review.',
+      requiresWrite: true,
+    },
+    {
+      key: 'generalCommands',
+      label: 'Sandboxed commands',
+      description: 'Run reviewed commands inside the task sandbox.',
+    },
+    {
+      key: 'networkFetch',
+      label: 'Network fetch',
+      description: 'Make reviewed requests allowed by the bounded network policy.',
+    },
+    {
+      key: 'dependencyChanges',
+      label: 'Dependency changes',
+      description: 'Apply reviewed package-manager operations.',
+      requiresWrite: true,
+    },
+    {
+      key: 'gitWrites',
+      label: 'Git writes',
+      description: 'Expose reviewed stage, commit, branch, switch, and push operations.',
+      requiresWrite: true,
+    },
+    {
+      key: 'delegation',
+      label: 'Bounded delegation',
+      description: 'Allow one reviewed child-task start; children cannot delegate again.',
+    },
+  ];
+  return (
+    <details className="project-controls settings-disclosure" aria-label="Task presets">
+      <summary>
+        <span>Task presets</span>
+        <small>{presets.length}</small>
+      </summary>
+      <div className="settings-disclosure-content">
+        <small>
+          Presets snapshot model defaults, instructions, and capability ceilings when a task is
+          created. Editing or deleting a preset never changes an existing task.
+        </small>
+        <button className="secondary-button" type="button" onClick={() => startDraft()}>
+          New preset
+        </button>
+        {presets.map((preset) => (
+          <section className="guidance-resource" key={preset.id}>
+            <span className="guidance-resource-content">
+              <strong>{preset.name}</strong>
+              <small>
+                {preset.model} · {preset.thinkingLevel} thinking · sha256:
+                {preset.digest.slice(0, 12)}…
+              </small>
+            </span>
+            <div className="inline-controls">
+              <button className="secondary-button" type="button" onClick={() => startDraft(preset)}>
+                Edit
+              </button>
+              {deleteId === preset.id ? (
+                <>
+                  <button
+                    className="danger-outline-button"
+                    type="button"
+                    onClick={() => void remove(preset.id)}
+                  >
+                    Confirm delete
+                  </button>
+                  <button className="text-button" type="button" onClick={() => setDeleteId('')}>
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="danger-outline-button"
+                  type="button"
+                  onClick={() => setDeleteId(preset.id)}
+                >
+                  Delete
+                </button>
+              )}
+            </div>
+          </section>
+        ))}
+        {presets.length === 0 && <small>No task presets saved.</small>}
+        {draft && (
+          <form
+            className="preset-editor"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void save();
+            }}
+          >
+            <strong>{draft.id ? 'Edit task preset' : 'Create task preset'}</strong>
+            <label htmlFor="preset-name">Name</label>
+            <input
+              id="preset-name"
+              value={draft.name}
+              maxLength={64}
+              required
+              onChange={(event) =>
+                setDraft((current) =>
+                  current ? { ...current, name: event.target.value } : current
+                )
+              }
+            />
+            <label htmlFor="preset-model">Router model</label>
+            <select
+              id="preset-model"
+              value={draft.model}
+              onChange={(event) => {
+                const descriptor = models.find((candidate) => candidate.id === event.target.value);
+                if (!descriptor) return;
+                setDraft((current) =>
+                  current
+                    ? {
+                        ...current,
+                        model: descriptor.id,
+                        thinkingLevel: descriptor.defaultThinkingLevel,
+                      }
+                    : current
+                );
+              }}
+            >
+              {models.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.displayName} · {candidate.providerLabel}
+                </option>
+              ))}
+            </select>
+            <label htmlFor="preset-thinking">Thinking level</label>
+            <select
+              id="preset-thinking"
+              value={draft.thinkingLevel}
+              onChange={(event) =>
+                setDraft((current) =>
+                  current
+                    ? { ...current, thinkingLevel: event.target.value as ThinkingLevel }
+                    : current
+                )
+              }
+            >
+              {(models.find((candidate) => candidate.id === draft.model)?.thinkingLevels ?? []).map(
+                (level) => (
+                  <option key={level} value={level}>
+                    {level}
+                  </option>
+                )
+              )}
+            </select>
+            <label htmlFor="preset-instructions">Additional task instructions</label>
+            <textarea
+              id="preset-instructions"
+              value={draft.extraInstructions}
+              maxLength={32 * 1024}
+              onChange={(event) =>
+                setDraft((current) =>
+                  current ? { ...current, extraInstructions: event.target.value } : current
+                )
+              }
+            />
+            <label htmlFor="preset-workspace-access">Workspace access ceiling</label>
+            <select
+              id="preset-workspace-access"
+              value={draft.capabilityPolicy.workspaceAccess}
+              onChange={(event) => {
+                const workspaceAccess = event.target
+                  .value as TaskCapabilityPolicyV1['workspaceAccess'];
+                updatePolicy(
+                  workspaceAccess === 'read-only'
+                    ? {
+                        workspaceAccess,
+                        fileMutations: false,
+                        dependencyChanges: false,
+                        gitWrites: false,
+                      }
+                    : { workspaceAccess }
+                );
+              }}
+            >
+              <option value="workspace-write">Workspace write</option>
+              <option value="read-only">Read only</option>
+            </select>
+            <div className="preset-capabilities">
+              {capabilityOptions.map((option) => (
+                <label className="toggle-row" key={option.key}>
+                  <input
+                    type="checkbox"
+                    checked={draft.capabilityPolicy[option.key]}
+                    disabled={
+                      option.requiresWrite && draft.capabilityPolicy.workspaceAccess === 'read-only'
+                    }
+                    onChange={(event) => updatePolicy({ [option.key]: event.target.checked })}
+                  />
+                  <span>
+                    <strong>{option.label}</strong>
+                    <small>{option.description}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <div className="inline-controls">
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={saving || !draft.name.trim() || !draft.model}
+              >
+                {saving ? 'Saving…' : 'Save preset'}
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={saving}
+                onClick={() => setDraft(undefined)}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function TaskPolicySummary({ policy }: { policy: TaskPolicySummaryV1 }): JSX.Element {
+  const capabilities: Array<[string, boolean]> = [
+    ['files', policy.capabilityPolicy.fileMutations],
+    ['commands', policy.capabilityPolicy.generalCommands],
+    ['network', policy.capabilityPolicy.networkFetch],
+    ['dependencies', policy.capabilityPolicy.dependencyChanges],
+    ['Git writes', policy.capabilityPolicy.gitWrites],
+    ['delegation', policy.capabilityPolicy.delegation],
+  ];
+  return (
+    <section className="task-policy-summary" aria-label="Immutable task policy">
+      <strong>Immutable task policy</strong>
+      <small>
+        {policy.presetName ?? 'Project defaults'} · {policy.capabilityPolicy.workspaceAccess} ·{' '}
+        captured {new Date(policy.capturedAt).toLocaleString()}
+      </small>
+      <small>Snapshot sha256:{policy.snapshotDigest.slice(0, 16)}…</small>
+      {policy.hasExtraInstructions && (
+        <small>{policy.extraInstructionsBytes.toLocaleString()} bytes of preset instructions</small>
+      )}
+      <div className="policy-capabilities">
+        {capabilities.map(([label, allowed]) => (
+          <span className={`policy-capability ${allowed ? 'allowed' : 'blocked'}`} key={label}>
+            {label}: {allowed ? 'allowed' : 'blocked'}
+          </span>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function ComposerPanel({
   shown,
   kind,
@@ -1550,11 +2884,18 @@ function ComposerPanel({
 function Composer({
   value,
   disabled,
+  presetDisabled,
   isRunning,
+  isNewTask,
+  runningMode,
   models,
   model,
   thinkingLevel,
+  presets,
+  presetId,
   onChange,
+  onRunningModeChange,
+  onPresetChange,
   onModelChange,
   onThinkingLevelChange,
   onSend,
@@ -1562,11 +2903,18 @@ function Composer({
 }: {
   value: string;
   disabled: boolean;
+  presetDisabled: boolean;
   isRunning: boolean;
+  isNewTask: boolean;
+  runningMode: 'steer' | 'follow-up';
   models: RouterModelDescriptor[];
   model: string;
   thinkingLevel: ThinkingLevel;
+  presets: TaskPresetV1[];
+  presetId: string;
   onChange: (value: string) => void;
+  onRunningModeChange: (mode: 'steer' | 'follow-up') => void;
+  onPresetChange: (presetId: string) => void;
   onModelChange: (model: string) => void;
   onThinkingLevelChange: (level: ThinkingLevel) => void;
   onSend: () => void;
@@ -1597,12 +2945,44 @@ function Composer({
         placeholder="Ask the agent to inspect, change, test, or explain this repository…"
       />
       <div className="composer-actions">
+        {isNewTask && (
+          <label className="composer-select">
+            <span className="sr-only">Task preset</span>
+            <select
+              aria-label="Task preset"
+              value={presetId}
+              disabled={presetDisabled}
+              onChange={(event) => onPresetChange(event.target.value)}
+            >
+              <option value="">Project defaults</option>
+              {presets.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {isRunning && (
+          <label className="composer-select">
+            <span className="sr-only">Running task message mode</span>
+            <select
+              aria-label="Running task message mode"
+              value={runningMode}
+              disabled={disabled}
+              onChange={(event) => onRunningModeChange(event.target.value as 'steer' | 'follow-up')}
+            >
+              <option value="follow-up">Queue follow-up</option>
+              <option value="steer">Steer current turn</option>
+            </select>
+          </label>
+        )}
         <label className="composer-select">
           <span className="sr-only">Router model</span>
           <select
             aria-label="Router model"
             value={model}
-            disabled={disabled || isRunning || models.length === 0}
+            disabled={disabled || isRunning || models.length === 0 || Boolean(presetId)}
             onChange={(event) => onModelChange(event.target.value)}
           >
             {models.map((candidate) => (
@@ -1617,7 +2997,7 @@ function Composer({
           <select
             aria-label="Thinking level"
             value={thinkingLevel}
-            disabled={disabled || isRunning || !models.length}
+            disabled={disabled || isRunning || !models.length || Boolean(presetId)}
             onChange={(event) => onThinkingLevelChange(event.target.value as ThinkingLevel)}
           >
             {(models.find((candidate) => candidate.id === model)?.thinkingLevels ?? []).map(
@@ -1632,10 +3012,16 @@ function Composer({
           </select>
         </label>
         {isRunning ? (
-          <button className="stop-button" type="button" onClick={() => void onStop()}>
-            <Square size={14} aria-hidden="true" />
-            Stop
-          </button>
+          <>
+            <button className="primary-button" type="submit" disabled={disabled || !value.trim()}>
+              <Send size={15} aria-hidden="true" />
+              {runningMode === 'steer' ? 'Steer' : 'Queue'}
+            </button>
+            <button className="stop-button" type="button" onClick={() => void onStop()}>
+              <Square size={14} aria-hidden="true" />
+              Stop
+            </button>
+          </>
         ) : (
           <button className="primary-button" type="submit" disabled={disabled || !value.trim()}>
             <Send size={15} aria-hidden="true" />
@@ -1654,19 +3040,33 @@ function ApprovalCard({
   approval: Approval;
   onResolve: (approval: Approval, decision: 'allow-once' | 'deny') => Promise<void>;
 }): JSX.Element {
-  const target = approval.argv?.join(' ') ?? approval.path ?? 'Requested operation';
+  const manifest = approval.operationManifest;
+  const target =
+    manifest?.targets.map((candidate) => candidate.path).join(' → ') ||
+    manifest?.network?.url ||
+    approval.argv?.join(' ') ||
+    approval.path ||
+    'Requested operation';
   return (
     <section className="approval-card" aria-labelledby={`approval-${approval.id}`}>
       <p className="eyebrow">Approval required · {approval.risk} risk</p>
       <h2 id={`approval-${approval.id}`}>
-        {approval.kind === 'command'
-          ? 'Run command'
-          : approval.kind === 'file-delete'
-            ? 'Delete file'
-            : 'Edit file'}
+        {manifest
+          ? manifest.capability
+          : approval.kind === 'command'
+            ? 'Run command'
+            : approval.kind === 'file-delete'
+              ? 'Delete file'
+              : 'Edit file'}
       </h2>
       <code>{target}</code>
       <p>{approval.reason}</p>
+      {manifest && (
+        <small>
+          Immutable binding: {manifest.binding.slice(0, 16)}… · expires{' '}
+          {new Date(manifest.expiresAt).toLocaleTimeString()}
+        </small>
+      )}
       <small>Working directory: {approval.cwd}</small>
       <div className="approval-actions">
         <button
@@ -1779,6 +3179,20 @@ function AgentStatusPanel({
           <dd>{status ? new Date(status.checkedAt).toLocaleTimeString() : '—'}</dd>
         </div>
         <div>
+          <dt>Model catalog</dt>
+          <dd>
+            {status?.catalog
+              ? `${status.catalog.compatibility} · ${status.catalog.source}/${status.catalog.freshness}`
+              : 'unknown'}
+          </dd>
+        </div>
+        <div>
+          <dt>Catalog digest</dt>
+          <dd>
+            {status?.catalog?.digest ? `${status.catalog.digest.slice(0, 19)}…` : 'not validated'}
+          </dd>
+        </div>
+        <div>
           <dt>Authentication</dt>
           <dd>{status?.authentication?.mode.replace('_', ' ') ?? 'unknown'}</dd>
         </div>
@@ -1803,6 +3217,12 @@ function AgentStatusPanel({
           <dd>{status?.authentication?.refreshHealthy ? 'healthy' : 'not active'}</dd>
         </div>
       </dl>
+      {status?.catalog?.compatibility === 'incompatible' && (
+        <p className="status-error">
+          This router catalog is incompatible with the installed Agent. Update the Agent before
+          starting another task.
+        </p>
+      )}
       {status?.error && <p className="status-error">{status.error}</p>}
       <details className="settings-disclosure model-disclosure">
         <summary>

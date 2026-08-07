@@ -12,11 +12,18 @@ import {
 import type {
   InstallationDiagnostics,
   RouterAuthenticationModeSchema,
+  RouterCatalogStatus,
   RouterConfiguration,
   RouterDiagnostics,
   RouterModelDescriptor,
   ThinkingLevel,
 } from '../shared/contracts';
+import { RouterCatalogStatusSchema, RouterModelDescriptorSchema } from '../shared/contracts';
+import {
+  bundledCatalogModels,
+  bundledCatalogStatus,
+  unavailableCatalogStatus,
+} from '../shared/model-catalog';
 import { assertSecureCredentialStorage } from './credential-storage';
 import {
   type InstallationRecord,
@@ -37,7 +44,7 @@ interface InstallationMetadata {
 }
 
 interface PersistedConfiguration {
-  version: 4;
+  version: 5;
   serverUrl: string;
   sponsoredCompute: boolean;
   authMode: AuthenticationMode;
@@ -46,6 +53,7 @@ interface PersistedConfiguration {
   encryptedPendingEnrollment: string | null;
   installationMetadata: InstallationMetadata | null;
   models: RouterModelDescriptor[];
+  catalog: RouterCatalogStatus;
   selectedModel: string | null;
   selectedThinkingLevel: ThinkingLevel;
   lastCheckedAt: string | null;
@@ -79,16 +87,6 @@ const electronCredentialCipher: CredentialCipher = {
   },
 };
 
-const legacyModel = (id: string): RouterModelDescriptor => ({
-  id,
-  provider: 'router',
-  displayName: id,
-  providerLabel: 'AdRouter',
-  thinkingLevels: ['none', 'medium', 'high'],
-  defaultThinkingLevel: 'medium',
-  configured: false,
-});
-
 export const allowRouterUrl = (value: string): string => {
   const url = new URL(value);
   const localHost = classifyRouterOrigin(url.toString()) === 'loopback';
@@ -100,14 +98,6 @@ export const allowRouterUrl = (value: string): string => {
   }
   return url.toString().replace(/\/$/, '');
 };
-
-const isModel = (value: unknown): value is RouterModelDescriptor =>
-  Boolean(
-    value &&
-      typeof value === 'object' &&
-      typeof (value as RouterModelDescriptor).id === 'string' &&
-      Array.isArray((value as RouterModelDescriptor).thinkingLevels)
-  );
 
 const isTimestampOrNull = (value: unknown): value is string | null =>
   value === null || (typeof value === 'string' && Number.isFinite(Date.parse(value)));
@@ -132,19 +122,21 @@ export class ConfigurationStore {
 
   public async get(): Promise<RouterConfiguration> {
     const configuration = await this.read();
-    const serverUrl = configuration?.serverUrl ?? DEFAULT_ADROUTER_SERVER_URL;
+    const current = configuration ?? this.emptyConfiguration();
+    const serverUrl = current.serverUrl;
     const authentication = await this.authenticationDiagnostics(configuration, serverUrl);
     return {
       serverUrl,
-      sponsoredCompute: configuration?.sponsoredCompute ?? true,
-      tokenStored: Boolean(configuration?.encryptedToken),
+      sponsoredCompute: current.sponsoredCompute,
+      tokenStored: Boolean(current.encryptedToken),
       configured:
         (authentication.mode === 'installation' && authentication.state === 'connected') ||
-        (authentication.mode === 'custom_bearer' && Boolean(configuration?.encryptedToken)),
-      models: configuration?.models ?? [],
-      selectedModel: configuration?.selectedModel ?? configuration?.models[0]?.id ?? null,
-      selectedThinkingLevel: configuration?.selectedThinkingLevel ?? 'medium',
-      lastCheckedAt: configuration?.lastCheckedAt ?? null,
+        (authentication.mode === 'custom_bearer' && Boolean(current.encryptedToken)),
+      models: current.models,
+      catalog: current.catalog,
+      selectedModel: current.selectedModel ?? current.models[0]?.id ?? null,
+      selectedThinkingLevel: current.selectedThinkingLevel,
+      lastCheckedAt: current.lastCheckedAt,
       authentication,
     };
   }
@@ -168,7 +160,7 @@ export class ConfigurationStore {
       ? 'e2e-runtime-token'
       : await this.encryptSecret(input.token);
     await this.write({
-      version: 4,
+      version: 5,
       serverUrl,
       sponsoredCompute: input.sponsoredCompute,
       authMode: 'custom_bearer',
@@ -177,6 +169,7 @@ export class ConfigurationStore {
       encryptedPendingEnrollment: null,
       installationMetadata: null,
       models: diagnostics.models,
+      catalog: diagnostics.catalog,
       ...this.selectPreferences(existing, diagnostics.models),
       lastCheckedAt: diagnostics.checkedAt,
     });
@@ -228,28 +221,34 @@ export class ConfigurationStore {
       );
     }
     try {
-      const runtime = await this.getRuntimeConfiguration();
-      if (runtime.authMode !== 'custom_bearer') throw new Error('Custom bearer state changed.');
+      if (!configuration.encryptedToken) {
+        throw new Error('The encrypted AdRouter credential is unavailable.');
+      }
+      const token = __ADROUTER_E2E__
+        ? process.env.ADROUTER_E2E_TOKEN
+        : await this.decryptSecret(configuration, 'encryptedToken');
+      if (!token) throw new Error('The deterministic E2E router token is unavailable.');
       const diagnostics = await new AdRouterClient({
-        serverUrl: runtime.serverUrl,
-        authentication: { mode: 'custom_bearer', token: runtime.token },
+        serverUrl: configuration.serverUrl,
+        authentication: { mode: 'custom_bearer', token },
       }).diagnostics();
-      if (diagnostics.health && diagnostics.authenticated && diagnostics.models.length > 0) {
-        await this.updateModels(diagnostics.models, diagnostics.checkedAt);
+      if (diagnostics.models.length > 0 && diagnostics.catalog.compatibility === 'compatible') {
+        await this.updateModels(diagnostics.models, diagnostics.catalog, diagnostics.checkedAt);
         return diagnostics;
       }
-      return {
-        ...diagnostics,
-        models: diagnostics.models.length > 0 ? diagnostics.models : configuration.models,
-        modelsStale: diagnostics.models.length === 0 && configuration.models.length > 0,
-      };
+      await this.noteCatalogFailure(diagnostics.catalog, diagnostics.checkedAt);
+      return this.withCachedCatalog((await this.read()) ?? configuration, diagnostics);
     } catch (error) {
-      return this.failedDiagnostics(
+      const checkedAt = new Date().toISOString();
+      const diagnostics = this.failedDiagnostics(
         configuration.serverUrl,
-        new Date().toISOString(),
+        checkedAt,
         error instanceof Error ? error.message : String(error),
-        configuration.models
+        configuration.models,
+        configuration.catalog
       );
+      await this.noteCatalogFailure(diagnostics.catalog, checkedAt);
+      return diagnostics;
     }
   }
 
@@ -274,6 +273,12 @@ export class ConfigurationStore {
     const configuration = await this.read();
     if (!configuration) {
       throw new Error('Complete AdRouter onboarding before starting an agent task.');
+    }
+    if (configuration.catalog.compatibility === 'incompatible') {
+      throw new Error('Update this Agent before using the incompatible router model catalog.');
+    }
+    if (configuration.models.length === 0) {
+      throw new Error('Refresh the router model catalog before starting an agent task.');
     }
     if (configuration.authMode === 'installation' && configuration.encryptedInstallation) {
       if (configuration.installationMetadata?.reconnectRequired) {
@@ -353,6 +358,7 @@ export class ConfigurationStore {
   public async completeEnrollment(
     record: InstallationRecord,
     models: RouterModelDescriptor[],
+    catalog: RouterCatalogStatus,
     checkedAt: string
   ): Promise<void> {
     const configuration = (await this.read()) ?? this.emptyConfiguration();
@@ -366,6 +372,7 @@ export class ConfigurationStore {
       encryptedPendingEnrollment: null,
       installationMetadata: this.metadataFor(record),
       models,
+      catalog,
       ...this.selectPreferences(configuration, models),
       lastCheckedAt: checkedAt,
     });
@@ -402,13 +409,38 @@ export class ConfigurationStore {
     });
   }
 
-  public async updateModels(models: RouterModelDescriptor[], checkedAt: string): Promise<void> {
+  public async updateModels(
+    models: RouterModelDescriptor[],
+    catalog: RouterCatalogStatus,
+    checkedAt: string
+  ): Promise<void> {
     const configuration = await this.read();
     if (!configuration) return;
     await this.write({
       ...configuration,
       models,
+      catalog,
       ...this.selectPreferences(configuration, models),
+      lastCheckedAt: checkedAt,
+    });
+  }
+
+  public async noteCatalogFailure(
+    attemptedCatalog: RouterCatalogStatus,
+    checkedAt: string
+  ): Promise<void> {
+    const configuration = await this.read();
+    if (!configuration) return;
+    await this.write({
+      ...configuration,
+      catalog: {
+        ...configuration.catalog,
+        source: 'cache',
+        freshness: configuration.models.length > 0 ? 'stale' : attemptedCatalog.freshness,
+        compatibility: attemptedCatalog.compatibility,
+        lastAttemptAt: checkedAt,
+        errorCode: attemptedCatalog.errorCode,
+      },
       lastCheckedAt: checkedAt,
     });
   }
@@ -425,8 +457,9 @@ export class ConfigurationStore {
   }
 
   private emptyConfiguration(): PersistedConfiguration {
+    const models = bundledCatalogModels();
     return {
-      version: 4,
+      version: 5,
       serverUrl: DEFAULT_ADROUTER_SERVER_URL,
       sponsoredCompute: true,
       authMode: 'unconfigured',
@@ -434,9 +467,10 @@ export class ConfigurationStore {
       encryptedInstallation: null,
       encryptedPendingEnrollment: null,
       installationMetadata: null,
-      models: [],
-      selectedModel: null,
-      selectedThinkingLevel: 'medium',
+      models,
+      catalog: bundledCatalogStatus(),
+      selectedModel: models[0]?.id ?? null,
+      selectedThinkingLevel: models[0]?.defaultThinkingLevel ?? 'medium',
       lastCheckedAt: null,
     };
   }
@@ -494,21 +528,28 @@ export class ConfigurationStore {
   private async read(): Promise<PersistedConfiguration | undefined> {
     if (!existsSync(this.path)) return undefined;
     const parsed = JSON.parse(await readFile(this.path, 'utf8')) as Record<string, unknown>;
-    if (parsed.version === 1 || parsed.version === 2 || parsed.version === 3) {
+    if (
+      parsed.version === 1 ||
+      parsed.version === 2 ||
+      parsed.version === 3 ||
+      parsed.version === 4
+    ) {
       const migrated = this.migrateLegacy(parsed);
       await this.write(migrated);
       return migrated;
     }
+    const models = RouterModelDescriptorSchema.array().safeParse(parsed.models);
+    const catalog = RouterCatalogStatusSchema.safeParse(parsed.catalog);
     if (
-      parsed.version !== 4 ||
+      parsed.version !== 5 ||
       typeof parsed.serverUrl !== 'string' ||
       typeof parsed.sponsoredCompute !== 'boolean' ||
       !isAuthenticationMode(parsed.authMode) ||
       !this.isCiphertext(parsed.encryptedToken) ||
       !this.isCiphertext(parsed.encryptedInstallation) ||
       !this.isCiphertext(parsed.encryptedPendingEnrollment) ||
-      !Array.isArray(parsed.models) ||
-      !parsed.models.every(isModel) ||
+      !models.success ||
+      !catalog.success ||
       !(parsed.selectedModel === null || typeof parsed.selectedModel === 'string') ||
       !['none', 'medium', 'high'].includes(String(parsed.selectedThinkingLevel)) ||
       !isTimestampOrNull(parsed.lastCheckedAt)
@@ -517,7 +558,7 @@ export class ConfigurationStore {
     }
     const metadata = this.parseMetadata(parsed.installationMetadata);
     return {
-      version: 4,
+      version: 5,
       serverUrl: allowRouterUrl(parsed.serverUrl),
       sponsoredCompute: parsed.sponsoredCompute,
       authMode: parsed.authMode,
@@ -525,7 +566,8 @@ export class ConfigurationStore {
       encryptedInstallation: parsed.encryptedInstallation,
       encryptedPendingEnrollment: parsed.encryptedPendingEnrollment,
       installationMetadata: metadata,
-      models: parsed.models,
+      models: models.data,
+      catalog: catalog.data,
       selectedModel: parsed.selectedModel,
       selectedThinkingLevel: parsed.selectedThinkingLevel as ThinkingLevel,
       lastCheckedAt: parsed.lastCheckedAt,
@@ -536,35 +578,68 @@ export class ConfigurationStore {
     if (
       typeof parsed.serverUrl !== 'string' ||
       typeof parsed.sponsoredCompute !== 'boolean' ||
-      !(typeof parsed.encryptedToken === 'string' || parsed.encryptedToken === null) ||
-      !Array.isArray(parsed.models)
+      !(typeof parsed.encryptedToken === 'string' || parsed.encryptedToken === null)
     ) {
       throw new Error('AdRouter configuration is corrupted. Reconnect this Agent.');
     }
-    const models =
-      parsed.version === 1
-        ? parsed.models.map((model) => legacyModel(String(model)))
-        : parsed.models.filter(isModel);
     const serverUrl = allowRouterUrl(parsed.serverUrl);
     const official = classifyRouterOrigin(serverUrl) === 'official';
+    const models = official ? bundledCatalogModels() : [];
     const hasToken = typeof parsed.encryptedToken === 'string';
+    const versionFour = parsed.version === 4;
+    const authMode =
+      versionFour && isAuthenticationMode(parsed.authMode)
+        ? parsed.authMode
+        : hasToken
+          ? official
+            ? 'legacy_hosted'
+            : 'custom_bearer'
+          : 'unconfigured';
+    const encryptedInstallation =
+      versionFour && this.isCiphertext(parsed.encryptedInstallation)
+        ? parsed.encryptedInstallation
+        : null;
+    const encryptedPendingEnrollment =
+      versionFour && this.isCiphertext(parsed.encryptedPendingEnrollment)
+        ? parsed.encryptedPendingEnrollment
+        : null;
+    const installationMetadata = versionFour
+      ? this.parseMetadata(parsed.installationMetadata)
+      : null;
+    const previousSelection =
+      typeof parsed.selectedModel === 'string'
+        ? models.find((model) => model.id === parsed.selectedModel)
+        : undefined;
+    const requestedThinking = ['none', 'medium', 'high'].includes(
+      String(parsed.selectedThinkingLevel)
+    )
+      ? (parsed.selectedThinkingLevel as ThinkingLevel)
+      : undefined;
+    const selectedModel = previousSelection ?? models[0];
     return {
-      version: 4,
+      version: 5,
       serverUrl,
       sponsoredCompute: parsed.sponsoredCompute,
-      authMode: hasToken ? (official ? 'legacy_hosted' : 'custom_bearer') : 'unconfigured',
+      authMode,
       encryptedToken: parsed.encryptedToken,
-      encryptedInstallation: null,
-      encryptedPendingEnrollment: null,
-      installationMetadata: null,
+      encryptedInstallation,
+      encryptedPendingEnrollment,
+      installationMetadata,
       models,
-      selectedModel:
-        typeof parsed.selectedModel === 'string' ? parsed.selectedModel : (models[0]?.id ?? null),
-      selectedThinkingLevel: ['none', 'medium', 'high'].includes(
-        String(parsed.selectedThinkingLevel)
-      )
-        ? (parsed.selectedThinkingLevel as ThinkingLevel)
-        : 'medium',
+      catalog: official
+        ? bundledCatalogStatus()
+        : {
+            ...unavailableCatalogStatus(new Date(0).toISOString(), 'catalog_unreachable'),
+            source: 'cache',
+            lastAttemptAt: null,
+          },
+      selectedModel: selectedModel?.id ?? null,
+      selectedThinkingLevel:
+        selectedModel &&
+        requestedThinking &&
+        selectedModel.thinkingLevels.includes(requestedThinking)
+          ? requestedThinking
+          : (selectedModel?.defaultThinkingLevel ?? 'medium'),
       lastCheckedAt: isTimestampOrNull(parsed.lastCheckedAt) ? parsed.lastCheckedAt : null,
     };
   }
@@ -600,9 +675,35 @@ export class ConfigurationStore {
   }
 
   private assertConnected(diagnostics: RouterDiagnostics): void {
-    if (!diagnostics.health || !diagnostics.authenticated) {
+    if (
+      !diagnostics.health ||
+      !diagnostics.authenticated ||
+      diagnostics.catalog.compatibility !== 'compatible' ||
+      diagnostics.models.length === 0
+    ) {
       throw new Error(diagnostics.error ?? 'AdRouter connection verification failed.');
     }
+  }
+
+  private withCachedCatalog(
+    configuration: PersistedConfiguration,
+    diagnostics: RouterDiagnostics
+  ): RouterDiagnostics {
+    if (diagnostics.models.length > 0) return diagnostics;
+    const modelsStale = configuration.models.length > 0;
+    return {
+      ...diagnostics,
+      models: configuration.models,
+      modelsStale,
+      catalog: {
+        ...configuration.catalog,
+        source: 'cache',
+        freshness: modelsStale ? 'stale' : configuration.catalog.freshness,
+        compatibility: diagnostics.catalog.compatibility,
+        lastAttemptAt: diagnostics.checkedAt,
+        errorCode: diagnostics.catalog.errorCode,
+      },
+    };
   }
 
   private selectPreferences(
@@ -630,7 +731,8 @@ export class ConfigurationStore {
     serverUrl: string,
     checkedAt: string,
     error: string,
-    models: RouterModelDescriptor[] = []
+    models: RouterModelDescriptor[] = [],
+    cachedCatalog?: RouterCatalogStatus
   ): RouterDiagnostics {
     const originClass: RouterOriginClass = (() => {
       try {
@@ -644,6 +746,15 @@ export class ConfigurationStore {
       authenticated: false,
       mode: 'unknown',
       models,
+      catalog: cachedCatalog
+        ? {
+            ...cachedCatalog,
+            source: 'cache',
+            freshness: models.length > 0 ? 'stale' : cachedCatalog.freshness,
+            lastAttemptAt: checkedAt,
+            errorCode: 'catalog_unreachable',
+          }
+        : unavailableCatalogStatus(checkedAt, 'catalog_unreachable'),
       modelsStale: models.length > 0,
       checkedAt,
       error,

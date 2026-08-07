@@ -28,9 +28,26 @@ test.describe('packaged functional agent', () => {
         return;
       }
       if (request.url === '/v1/models') {
-        response
-          .writeHead(200, { 'content-type': 'application/json' })
-          .end(JSON.stringify({ models: [{ id: 'fixture-model' }] }));
+        response.writeHead(200, { 'content-type': 'application/json' }).end(
+          JSON.stringify({
+            models: [
+              {
+                id: 'fixture-model',
+                provider: 'fixture',
+                model_class: 'pro',
+                display_name: 'Fixture Model',
+                provider_label: 'Packaged E2E',
+                description: 'Deterministic local model used only by packaged acceptance.',
+                thinking_levels: ['none', 'medium', 'high'],
+                default_thinking_level: 'medium',
+                context_window: 131_072,
+                max_input_tokens: 126_976,
+                max_output_tokens: 4_096,
+                configured: true,
+              },
+            ],
+          })
+        );
         return;
       }
       if (request.url !== '/v1/agent/turn' || request.method !== 'POST') {
@@ -191,7 +208,7 @@ test.describe('packaged functional agent', () => {
       await page.getByRole('button', { name: 'Send' }).click();
       await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
       await expect(page.evaluate(() => window.adrouter.configuration.signOut())).rejects.toThrow(
-        'Stop the active agent task before signing out.'
+        'Stop all active or queued agent tasks before signing out.'
       );
       await page.getByRole('button', { name: 'Settings' }).click();
       await expect(page.getByRole('button', { name: 'Sign out' })).toBeDisabled();

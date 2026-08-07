@@ -6,6 +6,7 @@ import { ConfigurationStore, type CredentialCipher } from '@/main/configuration-
 import { InstallationAuthManager } from '@/main/installation-auth';
 import type { InstallationRecord, PendingEnrollmentRecord } from '@/main/installation-records';
 import { generateInstallationKeyPair } from '@/main/platform-auth-crypto';
+import { bundledCatalogModels, bundledCatalogStatus } from '@/shared/model-catalog';
 
 const directories: string[] = [];
 const accessToken = `adr_at_${'A'.repeat(43)}`;
@@ -158,7 +159,12 @@ describe('InstallationAuthManager', () => {
   it('preserves an existing installation until replacement and signs cancellation with the pending key', async () => {
     const { store } = await createStore();
     const existing = createRecord();
-    await store.completeEnrollment(existing, [], '2026-07-27T00:00:00.000Z');
+    await store.completeEnrollment(
+      existing,
+      bundledCatalogModels(),
+      bundledCatalogStatus(),
+      '2026-07-27T00:00:00.000Z'
+    );
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const fetchFn: typeof fetch = vi.fn(async (input, init) => {
       requests.push({ url: String(input), init: init ?? {} });
@@ -324,7 +330,12 @@ describe('InstallationAuthManager', () => {
   it('persists refresh rotation before returning one single-flight access token', async () => {
     const { store, path } = await createStore();
     const record = createRecord();
-    await store.completeEnrollment(record, [], '2026-07-27T00:00:00.000Z');
+    await store.completeEnrollment(
+      record,
+      bundledCatalogModels(),
+      bundledCatalogStatus(),
+      '2026-07-27T00:00:00.000Z'
+    );
     const fetchFn: typeof fetch = vi.fn(
       async () =>
         new Response(
@@ -372,7 +383,12 @@ describe('InstallationAuthManager', () => {
   it('rejects non-allowlisted signing and clears local auth when remote revocation is offline', async () => {
     const { store } = await createStore();
     const record = createRecord();
-    await store.completeEnrollment(record, [], '2026-07-27T00:00:00.000Z');
+    await store.completeEnrollment(
+      record,
+      bundledCatalogModels(),
+      bundledCatalogStatus(),
+      '2026-07-27T00:00:00.000Z'
+    );
     const manager = new InstallationAuthManager(store, '0.1.0-beta.12', {
       fetchFn: vi.fn(async () => {
         throw new Error('offline');
@@ -396,7 +412,12 @@ describe('InstallationAuthManager', () => {
   it('fails closed and clears persisted auth when refresh rotation cannot be stored', async () => {
     const { store } = await createStore();
     const record = createRecord();
-    await store.completeEnrollment(record, [], '2026-07-27T00:00:00.000Z');
+    await store.completeEnrollment(
+      record,
+      bundledCatalogModels(),
+      bundledCatalogStatus(),
+      '2026-07-27T00:00:00.000Z'
+    );
     vi.spyOn(store, 'rotateInstallation').mockRejectedValueOnce(new Error('disk failure'));
     const manager = new InstallationAuthManager(store, '0.1.0-beta.12', {
       fetchFn: vi.fn(

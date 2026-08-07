@@ -4,15 +4,35 @@ import { DatabaseSync } from 'node:sqlite';
 import {
   type Approval,
   type ApprovalDecision,
+  type ApprovalInput,
   ApprovalSchema,
+  type AutomationClient,
+  AutomationClientSchema,
+  type BundleTrust,
+  BundleTrustSchema,
+  type ContextBudgetSnapshot,
+  ContextBudgetSnapshotSchema,
   type DiffFile,
   EventSchema,
   type EventType,
+  type GitTaskBaseline,
+  GitTaskBaselineSchema,
+  type GuidanceContent,
+  GuidanceContentSchema,
+  type GuidanceKind,
   type JournalEvent,
   type Project,
   ProjectSchema,
+  type SessionCheckpoint,
+  SessionCheckpointSchema,
+  type SessionEntry,
+  SessionEntrySchema,
   type Settlement,
   SettlementSchema,
+  type TaskPolicySnapshotV1,
+  TaskPolicySnapshotV1Schema,
+  type TaskPresetV1,
+  TaskPresetV1Schema,
   type Thread,
   ThreadSchema,
   type ThreadStatus,
@@ -20,7 +40,15 @@ import {
   TurnSchema,
   type TurnStatus,
 } from '../shared/contracts';
-import { createId, now, safeRecord } from '../shared/security';
+import {
+  containsSponsorKey,
+  createId,
+  now,
+  removeSponsorData,
+  safeRecord,
+  sha256,
+} from '../shared/security';
+import { projectDefaultPolicySnapshot, taskPolicySummary } from '../shared/task-policy';
 
 interface ProjectRow {
   id: string;
@@ -30,6 +58,7 @@ interface ProjectRow {
   repository_instructions: string;
   repository_instruction_files: string;
   permission_mode: string;
+  delegation_enabled: number;
   git_metadata: string;
   created_at: string;
   updated_at: string;
@@ -38,13 +67,50 @@ interface ProjectRow {
 interface ThreadRow {
   id: string;
   project_id: string;
+  parent_thread_id: string | null;
+  forked_from_checkpoint_id: string | null;
   title: string;
+  label: string | null;
   model: string;
   thinking_level: string;
+  policy_snapshot: string | null;
   status: string;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface TaskPresetRow {
+  schema_version: number;
+  id: string;
+  name: string;
+  name_key: string;
+  model: string;
+  thinking_level: string;
+  extra_instructions: string;
+  capability_policy: string;
+  digest: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface GuidanceTrustRow {
+  project_id: string;
+  kind: string;
+  resource_id: string;
+  path: string;
+  name: string;
+  description: string;
+  digest: string;
+  bytes: number;
+  content: string;
+  trusted_at: string;
+}
+
+export interface GuidanceTrustSnapshot extends GuidanceContent {
+  projectId: string;
+  bytes: number;
+  trustedAt: string;
 }
 
 interface TurnRow {
@@ -53,6 +119,7 @@ interface TurnRow {
   input: string;
   model: string;
   thinking_level: string;
+  kind: string;
   status: string;
   error: string | null;
   created_at: string;
@@ -71,6 +138,7 @@ interface EventRow {
 }
 
 interface ApprovalRow {
+  version: number;
   id: string;
   thread_id: string;
   turn_id: string;
@@ -80,9 +148,31 @@ interface ApprovalRow {
   cwd: string;
   risk: string;
   reason: string;
+  operation_manifest: string | null;
+  expires_at: string | null;
   decision: string | null;
   created_at: string;
   resolved_at: string | null;
+  consumed_at: string | null;
+}
+
+interface BundleTrustRow {
+  project_id: string;
+  bundle_id: string;
+  bundle_version: string;
+  bundle_digest: string;
+  trusted_at: string;
+}
+
+interface AutomationClientRow {
+  id: string;
+  display_name: string;
+  public_key: string;
+  public_key_fingerprint: string;
+  scopes: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
 }
 
 interface BaselineRow {
@@ -92,6 +182,40 @@ interface BaselineRow {
   original_hash: string | null;
   latest_agent_hash: string | null;
   latest_status: string;
+}
+
+interface SessionEntryRow {
+  id: string;
+  thread_id: string;
+  turn_id: string | null;
+  source_event_id: string;
+  ordinal: number;
+  kind: string;
+  timestamp: string;
+  payload: string;
+  digest: string;
+}
+
+interface SessionCheckpointRow {
+  id: string;
+  thread_id: string;
+  turn_id: string;
+  source_event_id: string;
+  entry_ordinal: number;
+  context_digest: string;
+  safe: number;
+  created_at: string;
+}
+
+interface GitTaskBaselineRow {
+  thread_id: string;
+  turn_id: string;
+  head_oid: string | null;
+  ref: string | null;
+  index_tree_hash: string;
+  status_entries: string;
+  truncated: number;
+  captured_at: string;
 }
 
 const migrations = [
@@ -204,6 +328,122 @@ const migrations = [
     SET model = (SELECT threads.model FROM threads WHERE threads.id = turns.thread_id),
         thinking_level = (SELECT threads.thinking_level FROM threads WHERE threads.id = turns.thread_id);
   `,
+  `
+    CREATE TABLE IF NOT EXISTS session_entries (
+      id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+      turn_id TEXT REFERENCES turns(id) ON DELETE SET NULL,
+      source_event_id TEXT NOT NULL UNIQUE REFERENCES events(id) ON DELETE CASCADE,
+      ordinal INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      digest TEXT NOT NULL,
+      UNIQUE(thread_id, ordinal)
+    );
+    CREATE INDEX IF NOT EXISTS session_entries_by_thread
+      ON session_entries(thread_id, ordinal ASC);
+    CREATE TABLE IF NOT EXISTS session_checkpoints (
+      id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+      turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+      source_event_id TEXT NOT NULL UNIQUE REFERENCES events(id) ON DELETE CASCADE,
+      entry_ordinal INTEGER NOT NULL,
+      context_digest TEXT NOT NULL,
+      safe INTEGER NOT NULL CHECK(safe = 1),
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS session_checkpoints_by_thread
+      ON session_checkpoints(thread_id, created_at ASC);
+  `,
+  `
+    ALTER TABLE approvals ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE approvals ADD COLUMN operation_manifest TEXT;
+    ALTER TABLE approvals ADD COLUMN expires_at TEXT;
+    ALTER TABLE approvals ADD COLUMN consumed_at TEXT;
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS project_bundle_trust (
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      bundle_id TEXT NOT NULL,
+      bundle_version TEXT NOT NULL,
+      bundle_digest TEXT NOT NULL,
+      trusted_at TEXT NOT NULL,
+      PRIMARY KEY(project_id, bundle_id)
+    );
+    CREATE INDEX IF NOT EXISTS bundle_trust_by_project
+      ON project_bundle_trust(project_id, trusted_at ASC);
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS automation_clients (
+      id TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      public_key TEXT NOT NULL UNIQUE,
+      public_key_fingerprint TEXT NOT NULL UNIQUE,
+      scopes TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      last_used_at TEXT,
+      revoked_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS automation_clients_active
+      ON automation_clients(revoked_at, created_at ASC);
+  `,
+  `
+    ALTER TABLE threads ADD COLUMN parent_thread_id TEXT REFERENCES threads(id) ON DELETE SET NULL;
+    ALTER TABLE threads ADD COLUMN forked_from_checkpoint_id TEXT REFERENCES session_checkpoints(id) ON DELETE SET NULL;
+    ALTER TABLE threads ADD COLUMN label TEXT;
+    CREATE INDEX IF NOT EXISTS threads_by_parent
+      ON threads(parent_thread_id, created_at ASC);
+    CREATE TABLE IF NOT EXISTS git_task_baselines (
+      thread_id TEXT PRIMARY KEY REFERENCES threads(id) ON DELETE CASCADE,
+      turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+      head_oid TEXT,
+      ref TEXT,
+      index_tree_hash TEXT NOT NULL,
+      status_entries TEXT NOT NULL,
+      truncated INTEGER NOT NULL,
+      captured_at TEXT NOT NULL
+    );
+  `,
+  `
+    ALTER TABLE projects ADD COLUMN delegation_enabled INTEGER NOT NULL DEFAULT 0;
+  `,
+  `
+    ALTER TABLE turns ADD COLUMN kind TEXT NOT NULL DEFAULT 'agent';
+  `,
+  `
+    ALTER TABLE threads ADD COLUMN policy_snapshot TEXT;
+    CREATE TABLE IF NOT EXISTS task_presets (
+      id TEXT PRIMARY KEY,
+      schema_version INTEGER NOT NULL CHECK(schema_version = 1),
+      name TEXT NOT NULL,
+      name_key TEXT NOT NULL UNIQUE,
+      model TEXT NOT NULL,
+      thinking_level TEXT NOT NULL,
+      extra_instructions TEXT NOT NULL,
+      capability_policy TEXT NOT NULL,
+      digest TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS task_presets_by_name
+      ON task_presets(name_key ASC);
+    CREATE TABLE IF NOT EXISTS project_guidance_trust (
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK(kind IN ('skill', 'prompt')),
+      resource_id TEXT NOT NULL,
+      path TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      digest TEXT NOT NULL,
+      bytes INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      trusted_at TEXT NOT NULL,
+      PRIMARY KEY(project_id, kind, resource_id)
+    );
+    CREATE INDEX IF NOT EXISTS guidance_trust_by_project
+      ON project_guidance_trust(project_id, kind, resource_id);
+  `,
 ];
 
 const fromProjectRow = (row: ProjectRow): Project =>
@@ -215,6 +455,7 @@ const fromProjectRow = (row: ProjectRow): Project =>
     repositoryInstructions: row.repository_instructions,
     repositoryInstructionFiles: JSON.parse(row.repository_instruction_files),
     permissionMode: row.permission_mode,
+    delegationEnabled: row.delegation_enabled === 1,
     git: JSON.parse(row.git_metadata),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -224,7 +465,10 @@ const fromThreadRow = (row: ThreadRow): Thread =>
   ThreadSchema.parse({
     id: row.id,
     projectId: row.project_id,
+    parentThreadId: row.parent_thread_id,
+    forkedFromCheckpointId: row.forked_from_checkpoint_id,
     title: row.title,
+    label: row.label,
     model: row.model,
     thinkingLevel: row.thinking_level,
     status: row.status,
@@ -233,6 +477,35 @@ const fromThreadRow = (row: ThreadRow): Thread =>
     updatedAt: row.updated_at,
   });
 
+const fromTaskPresetRow = (row: TaskPresetRow): TaskPresetV1 =>
+  TaskPresetV1Schema.parse({
+    schemaVersion: row.schema_version,
+    id: row.id,
+    name: row.name,
+    model: row.model,
+    thinkingLevel: row.thinking_level,
+    extraInstructions: row.extra_instructions,
+    capabilityPolicy: JSON.parse(row.capability_policy),
+    digest: row.digest,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+
+const fromGuidanceTrustRow = (row: GuidanceTrustRow): GuidanceTrustSnapshot => ({
+  ...GuidanceContentSchema.parse({
+    kind: row.kind,
+    id: row.resource_id,
+    name: row.name,
+    description: row.description,
+    path: row.path,
+    digest: row.digest,
+    content: row.content,
+  }),
+  projectId: row.project_id,
+  bytes: row.bytes,
+  trustedAt: row.trusted_at,
+});
+
 const fromTurnRow = (row: TurnRow): Turn =>
   TurnSchema.parse({
     id: row.id,
@@ -240,6 +513,7 @@ const fromTurnRow = (row: TurnRow): Turn =>
     input: row.input,
     model: row.model,
     thinkingLevel: row.thinking_level,
+    kind: row.kind,
     status: row.status,
     error: row.error,
     createdAt: row.created_at,
@@ -260,6 +534,7 @@ const fromEventRow = (row: EventRow): JournalEvent =>
 
 const fromApprovalRow = (row: ApprovalRow): Approval =>
   ApprovalSchema.parse({
+    version: row.version,
     id: row.id,
     threadId: row.thread_id,
     turnId: row.turn_id,
@@ -269,9 +544,69 @@ const fromApprovalRow = (row: ApprovalRow): Approval =>
     cwd: row.cwd,
     risk: row.risk,
     reason: row.reason,
+    operationManifest: row.operation_manifest ? JSON.parse(row.operation_manifest) : null,
+    expiresAt: row.expires_at,
     decision: row.decision,
     createdAt: row.created_at,
     resolvedAt: row.resolved_at,
+  });
+
+const fromSessionEntryRow = (row: SessionEntryRow): SessionEntry =>
+  SessionEntrySchema.parse({
+    id: row.id,
+    threadId: row.thread_id,
+    turnId: row.turn_id,
+    sourceEventId: row.source_event_id,
+    ordinal: row.ordinal,
+    kind: row.kind,
+    timestamp: row.timestamp,
+    payload: JSON.parse(row.payload),
+    digest: row.digest,
+  });
+
+const fromSessionCheckpointRow = (row: SessionCheckpointRow): SessionCheckpoint =>
+  SessionCheckpointSchema.parse({
+    id: row.id,
+    threadId: row.thread_id,
+    turnId: row.turn_id,
+    sourceEventId: row.source_event_id,
+    entryOrdinal: row.entry_ordinal,
+    contextDigest: row.context_digest,
+    safe: row.safe === 1,
+    createdAt: row.created_at,
+  });
+
+const fromBundleTrustRow = (row: BundleTrustRow): BundleTrust =>
+  BundleTrustSchema.parse({
+    projectId: row.project_id,
+    bundleId: row.bundle_id,
+    bundleVersion: row.bundle_version,
+    bundleDigest: row.bundle_digest,
+    trustedAt: row.trusted_at,
+  });
+
+const fromAutomationClientRow = (row: AutomationClientRow): AutomationClient =>
+  AutomationClientSchema.parse({
+    id: row.id,
+    displayName: row.display_name,
+    publicKey: row.public_key,
+    publicKeyFingerprint: row.public_key_fingerprint,
+    scopes: JSON.parse(row.scopes),
+    createdAt: row.created_at,
+    lastUsedAt: row.last_used_at,
+    revokedAt: row.revoked_at,
+  });
+
+const fromGitTaskBaselineRow = (row: GitTaskBaselineRow): GitTaskBaseline =>
+  GitTaskBaselineSchema.parse({
+    threadId: row.thread_id,
+    turnId: row.turn_id,
+    headOid: row.head_oid,
+    ref: row.ref,
+    indexTreeHash: row.index_tree_hash,
+    statusEntries: JSON.parse(row.status_entries),
+    truncated: row.truncated === 1,
+    capturedAt: row.captured_at,
   });
 
 export class AppDatabase {
@@ -285,6 +620,8 @@ export class AppDatabase {
       timeout: 5_000,
     });
     this.migrate(isExisting);
+    this.backfillTaskPolicies();
+    this.backfillSessionProjection();
   }
 
   public close(): void {
@@ -294,23 +631,34 @@ export class AppDatabase {
   public createProject(
     input: Omit<
       Project,
-      'id' | 'createdAt' | 'updatedAt' | 'repositoryInstructions' | 'repositoryInstructionFiles'
+      | 'id'
+      | 'createdAt'
+      | 'updatedAt'
+      | 'repositoryInstructions'
+      | 'repositoryInstructionFiles'
+      | 'delegationEnabled'
     > &
-      Partial<Pick<Project, 'repositoryInstructions' | 'repositoryInstructionFiles'>>
+      Partial<
+        Pick<Project, 'repositoryInstructions' | 'repositoryInstructionFiles' | 'delegationEnabled'>
+      >
   ): Project {
     const createdAt = now();
     const project: Project = {
       ...input,
       repositoryInstructions: input.repositoryInstructions ?? '',
       repositoryInstructionFiles: input.repositoryInstructionFiles ?? [],
+      delegationEnabled: input.delegationEnabled ?? false,
       id: createId(),
       createdAt,
       updatedAt: createdAt,
     };
     this.database
       .prepare(
-        `INSERT INTO projects (id, path, display_name, instructions, repository_instructions, repository_instruction_files, permission_mode, git_metadata, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO projects
+           (id, path, display_name, instructions, repository_instructions,
+            repository_instruction_files, permission_mode, delegation_enabled, git_metadata,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         project.id,
@@ -320,6 +668,7 @@ export class AppDatabase {
         project.repositoryInstructions,
         JSON.stringify(project.repositoryInstructionFiles),
         project.permissionMode,
+        project.delegationEnabled ? 1 : 0,
         JSON.stringify(project.git),
         project.createdAt,
         project.updatedAt
@@ -359,6 +708,7 @@ export class AppDatabase {
         | 'repositoryInstructions'
         | 'repositoryInstructionFiles'
         | 'permissionMode'
+        | 'delegationEnabled'
         | 'git'
       >
     >
@@ -378,12 +728,17 @@ export class AppDatabase {
         ? {}
         : { repositoryInstructionFiles: patch.repositoryInstructionFiles }),
       ...(patch.permissionMode === undefined ? {} : { permissionMode: patch.permissionMode }),
+      ...(patch.delegationEnabled === undefined
+        ? {}
+        : { delegationEnabled: patch.delegationEnabled }),
       ...(patch.git === undefined ? {} : { git: patch.git }),
       updatedAt: now(),
     };
     this.database
       .prepare(
-        `UPDATE projects SET display_name = ?, instructions = ?, repository_instructions = ?, repository_instruction_files = ?, permission_mode = ?, git_metadata = ?, updated_at = ? WHERE id = ?`
+        `UPDATE projects SET display_name = ?, instructions = ?, repository_instructions = ?,
+         repository_instruction_files = ?, permission_mode = ?, delegation_enabled = ?,
+         git_metadata = ?, updated_at = ? WHERE id = ?`
       )
       .run(
         updated.displayName,
@@ -391,6 +746,7 @@ export class AppDatabase {
         updated.repositoryInstructions,
         JSON.stringify(updated.repositoryInstructionFiles),
         updated.permissionMode,
+        updated.delegationEnabled ? 1 : 0,
         JSON.stringify(updated.git),
         updated.updatedAt,
         updated.id
@@ -402,29 +758,301 @@ export class AppDatabase {
     this.database.prepare('DELETE FROM projects WHERE id = ?').run(id);
   }
 
-  public createThread(
-    input: Omit<Thread, 'id' | 'status' | 'archivedAt' | 'createdAt' | 'updatedAt'>
-  ): Thread {
+  public listTaskPresets(): TaskPresetV1[] {
+    return (
+      this.database
+        .prepare('SELECT * FROM task_presets ORDER BY name_key ASC, id ASC')
+        .all() as unknown as TaskPresetRow[]
+    ).map(fromTaskPresetRow);
+  }
+
+  public getTaskPreset(id: string): TaskPresetV1 | undefined {
+    const row = this.database
+      .prepare('SELECT * FROM task_presets WHERE id = ?')
+      .get(id) as unknown as TaskPresetRow | undefined;
+    return row ? fromTaskPresetRow(row) : undefined;
+  }
+
+  public saveTaskPreset(raw: TaskPresetV1): TaskPresetV1 {
+    const preset = TaskPresetV1Schema.parse(raw);
+    const nameKey = preset.name.normalize('NFKC').toLocaleLowerCase('en-US');
+    this.database
+      .prepare(
+        `INSERT INTO task_presets
+           (id, schema_version, name, name_key, model, thinking_level, extra_instructions,
+            capability_policy, digest, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           schema_version = excluded.schema_version,
+           name = excluded.name,
+           name_key = excluded.name_key,
+           model = excluded.model,
+           thinking_level = excluded.thinking_level,
+           extra_instructions = excluded.extra_instructions,
+           capability_policy = excluded.capability_policy,
+           digest = excluded.digest,
+           updated_at = excluded.updated_at`
+      )
+      .run(
+        preset.id,
+        preset.schemaVersion,
+        preset.name,
+        nameKey,
+        preset.model,
+        preset.thinkingLevel,
+        preset.extraInstructions,
+        JSON.stringify(preset.capabilityPolicy),
+        preset.digest,
+        preset.createdAt,
+        preset.updatedAt
+      );
+    return this.getTaskPreset(preset.id) ?? preset;
+  }
+
+  public deleteTaskPreset(id: string): boolean {
+    return (
+      Number(this.database.prepare('DELETE FROM task_presets WHERE id = ?').run(id).changes) === 1
+    );
+  }
+
+  public listGuidanceTrust(projectId: string): GuidanceTrustSnapshot[] {
+    return (
+      this.database
+        .prepare(
+          `SELECT * FROM project_guidance_trust
+           WHERE project_id = ? ORDER BY kind ASC, resource_id ASC`
+        )
+        .all(projectId) as unknown as GuidanceTrustRow[]
+    ).map(fromGuidanceTrustRow);
+  }
+
+  public getGuidanceTrust(
+    projectId: string,
+    kind: GuidanceKind,
+    resourceId: string
+  ): GuidanceTrustSnapshot | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT * FROM project_guidance_trust
+         WHERE project_id = ? AND kind = ? AND resource_id = ?`
+      )
+      .get(projectId, kind, resourceId) as unknown as GuidanceTrustRow | undefined;
+    return row ? fromGuidanceTrustRow(row) : undefined;
+  }
+
+  public trustGuidance(input: Omit<GuidanceTrustSnapshot, 'trustedAt'>): GuidanceTrustSnapshot {
+    if (!this.getProject(input.projectId)) throw new Error('Project not found.');
+    const { projectId, bytes, ...rawContent } = input;
+    const content = GuidanceContentSchema.parse(rawContent);
+    const trustedAt = now();
+    this.database
+      .prepare(
+        `INSERT INTO project_guidance_trust
+           (project_id, kind, resource_id, path, name, description, digest, bytes, content,
+            trusted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(project_id, kind, resource_id) DO UPDATE SET
+           path = excluded.path,
+           name = excluded.name,
+           description = excluded.description,
+           digest = excluded.digest,
+           bytes = excluded.bytes,
+           content = excluded.content,
+           trusted_at = excluded.trusted_at`
+      )
+      .run(
+        projectId,
+        content.kind,
+        content.id,
+        content.path,
+        content.name,
+        content.description,
+        content.digest,
+        bytes,
+        content.content,
+        trustedAt
+      );
+    return (
+      this.getGuidanceTrust(projectId, content.kind, content.id) ?? {
+        ...content,
+        projectId,
+        bytes,
+        trustedAt,
+      }
+    );
+  }
+
+  public revokeGuidanceTrust(projectId: string, kind: GuidanceKind, resourceId: string): boolean {
+    return (
+      Number(
+        this.database
+          .prepare(
+            `DELETE FROM project_guidance_trust
+             WHERE project_id = ? AND kind = ? AND resource_id = ?`
+          )
+          .run(projectId, kind, resourceId).changes
+      ) === 1
+    );
+  }
+
+  public listBundleTrust(projectId: string): BundleTrust[] {
+    return (
+      this.database
+        .prepare('SELECT * FROM project_bundle_trust WHERE project_id = ? ORDER BY trusted_at ASC')
+        .all(projectId) as unknown as BundleTrustRow[]
+    ).map(fromBundleTrustRow);
+  }
+
+  public trustBundle(input: Omit<BundleTrust, 'trustedAt'>): BundleTrust {
+    if (!this.getProject(input.projectId)) throw new Error('Project not found.');
+    const trust = BundleTrustSchema.parse({ ...input, trustedAt: now() });
+    this.database
+      .prepare(
+        `INSERT INTO project_bundle_trust
+           (project_id, bundle_id, bundle_version, bundle_digest, trusted_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(project_id, bundle_id) DO UPDATE SET
+           bundle_version = excluded.bundle_version,
+           bundle_digest = excluded.bundle_digest,
+           trusted_at = excluded.trusted_at`
+      )
+      .run(
+        trust.projectId,
+        trust.bundleId,
+        trust.bundleVersion,
+        trust.bundleDigest,
+        trust.trustedAt
+      );
+    return trust;
+  }
+
+  public revokeBundleTrust(projectId: string, bundleId: string): boolean {
+    const result = this.database
+      .prepare('DELETE FROM project_bundle_trust WHERE project_id = ? AND bundle_id = ?')
+      .run(projectId, bundleId);
+    return Number(result.changes) === 1;
+  }
+
+  public createAutomationClient(
+    input: Pick<AutomationClient, 'displayName' | 'publicKey' | 'publicKeyFingerprint' | 'scopes'>
+  ): AutomationClient {
     const createdAt = now();
-    const thread: Thread = {
+    const client = AutomationClientSchema.parse({
       ...input,
       id: createId(),
+      createdAt,
+      lastUsedAt: null,
+      revokedAt: null,
+    });
+    this.database
+      .prepare(
+        `INSERT INTO automation_clients
+           (id, display_name, public_key, public_key_fingerprint, scopes, created_at,
+            last_used_at, revoked_at)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)`
+      )
+      .run(
+        client.id,
+        client.displayName,
+        client.publicKey,
+        client.publicKeyFingerprint,
+        JSON.stringify(client.scopes),
+        client.createdAt
+      );
+    return client;
+  }
+
+  public getAutomationClient(id: string): AutomationClient | undefined {
+    const row = this.database
+      .prepare('SELECT * FROM automation_clients WHERE id = ?')
+      .get(id) as unknown as AutomationClientRow | undefined;
+    return row ? fromAutomationClientRow(row) : undefined;
+  }
+
+  public getAutomationClientByFingerprint(fingerprint: string): AutomationClient | undefined {
+    const row = this.database
+      .prepare('SELECT * FROM automation_clients WHERE public_key_fingerprint = ?')
+      .get(fingerprint) as unknown as AutomationClientRow | undefined;
+    return row ? fromAutomationClientRow(row) : undefined;
+  }
+
+  public listAutomationClients(): AutomationClient[] {
+    return (
+      this.database
+        .prepare('SELECT * FROM automation_clients ORDER BY created_at ASC')
+        .all() as unknown as AutomationClientRow[]
+    ).map(fromAutomationClientRow);
+  }
+
+  public touchAutomationClient(id: string, usedAt = now()): void {
+    this.database
+      .prepare('UPDATE automation_clients SET last_used_at = ? WHERE id = ? AND revoked_at IS NULL')
+      .run(usedAt, id);
+  }
+
+  public revokeAutomationClient(id: string, revokedAt = now()): AutomationClient {
+    const client = this.getAutomationClient(id);
+    if (!client) throw new Error('Automation client not found.');
+    if (!client.revokedAt) {
+      this.database
+        .prepare('UPDATE automation_clients SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL')
+        .run(revokedAt, id);
+    }
+    const updated = this.getAutomationClient(id);
+    if (!updated) throw new Error('Automation client could not be reloaded.');
+    return updated;
+  }
+
+  public createThread(
+    input: Omit<
+      Thread,
+      | 'id'
+      | 'status'
+      | 'archivedAt'
+      | 'createdAt'
+      | 'updatedAt'
+      | 'parentThreadId'
+      | 'forkedFromCheckpointId'
+      | 'label'
+    > &
+      Partial<Pick<Thread, 'parentThreadId' | 'forkedFromCheckpointId' | 'label'>> & {
+        policySnapshot?: TaskPolicySnapshotV1;
+      }
+  ): Thread {
+    const project = this.getProject(input.projectId);
+    if (!project) throw new Error('Project not found.');
+    const createdAt = now();
+    const policySnapshot = TaskPolicySnapshotV1Schema.parse(
+      input.policySnapshot ?? projectDefaultPolicySnapshot(project, createdAt)
+    );
+    const thread: Thread = ThreadSchema.parse({
+      ...input,
+      id: createId(),
+      parentThreadId: input.parentThreadId ?? null,
+      forkedFromCheckpointId: input.forkedFromCheckpointId ?? null,
+      label: input.label ?? null,
       status: 'idle',
       archivedAt: null,
       createdAt,
       updatedAt: createdAt,
-    };
+    });
     this.database
       .prepare(
-        `INSERT INTO threads (id, project_id, title, model, thinking_level, status, archived_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO threads
+           (id, project_id, parent_thread_id, forked_from_checkpoint_id, title, label, model,
+            thinking_level, policy_snapshot, status, archived_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         thread.id,
         thread.projectId,
+        thread.parentThreadId,
+        thread.forkedFromCheckpointId,
         thread.title,
+        thread.label,
         thread.model,
         thread.thinkingLevel,
+        JSON.stringify(policySnapshot),
         thread.status,
         thread.archivedAt,
         thread.createdAt,
@@ -444,11 +1072,45 @@ export class AppDatabase {
     ).map(fromThreadRow);
   }
 
+  public searchThreads(projectId: string, query: string): Thread[] {
+    const escaped = `%${query.replace(/[\\%_]/g, (value) => `\\${value}`)}%`;
+    return (
+      this.database
+        .prepare(
+          `SELECT DISTINCT threads.*
+           FROM threads
+           WHERE threads.project_id = ?
+             AND threads.archived_at IS NULL
+             AND (
+               threads.title LIKE ? ESCAPE '\\' COLLATE NOCASE
+               OR COALESCE(threads.label, '') LIKE ? ESCAPE '\\' COLLATE NOCASE
+               OR EXISTS (
+                 SELECT 1 FROM session_entries
+                 WHERE session_entries.thread_id = threads.id
+                   AND session_entries.payload LIKE ? ESCAPE '\\' COLLATE NOCASE
+               )
+             )
+           ORDER BY threads.updated_at DESC
+           LIMIT 50`
+        )
+        .all(projectId, escaped, escaped, escaped) as unknown as ThreadRow[]
+    ).map(fromThreadRow);
+  }
+
   public getThread(id: string): Thread | undefined {
     const row = this.database.prepare('SELECT * FROM threads WHERE id = ?').get(id) as unknown as
       | ThreadRow
       | undefined;
     return row ? fromThreadRow(row) : undefined;
+  }
+
+  public getTaskPolicySnapshot(threadId: string): TaskPolicySnapshotV1 {
+    const row = this.database
+      .prepare('SELECT policy_snapshot FROM threads WHERE id = ?')
+      .get(threadId) as { policy_snapshot: string | null } | undefined;
+    if (!row) throw new Error('Thread not found.');
+    if (!row.policy_snapshot) throw new Error('Task policy snapshot is unavailable.');
+    return TaskPolicySnapshotV1Schema.parse(JSON.parse(row.policy_snapshot));
   }
 
   public updateThreadStatus(id: string, status: ThreadStatus): Thread {
@@ -478,6 +1140,25 @@ export class AppDatabase {
     return { ...thread, model, thinkingLevel, updatedAt };
   }
 
+  public labelThread(id: string, label: string | null): Thread {
+    const thread = this.getThread(id);
+    if (!thread) throw new Error('Thread not found.');
+    const updatedAt = now();
+    this.database
+      .prepare('UPDATE threads SET label = ?, updated_at = ? WHERE id = ?')
+      .run(label, updatedAt, id);
+    return { ...thread, label, updatedAt };
+  }
+
+  public continueInterruptedThread(id: string): Thread {
+    const thread = this.getThread(id);
+    if (!thread) throw new Error('Thread not found.');
+    if (thread.status !== 'interrupted' && thread.status !== 'blocked') {
+      throw new Error('Only an interrupted or blocked task needs explicit continuation.');
+    }
+    return this.updateThreadStatus(id, 'idle');
+  }
+
   public archiveThread(id: string): Thread {
     const thread = this.getThread(id);
     if (!thread) {
@@ -503,7 +1184,8 @@ export class AppDatabase {
     threadId: string,
     input: string,
     model?: string,
-    thinkingLevel?: Turn['thinkingLevel']
+    thinkingLevel?: Turn['thinkingLevel'],
+    kind: Turn['kind'] = 'agent'
   ): Turn {
     const thread = this.getThread(threadId);
     if (!thread) throw new Error('Thread not found.');
@@ -514,6 +1196,7 @@ export class AppDatabase {
       input,
       model: model ?? thread.model,
       thinkingLevel: thinkingLevel ?? thread.thinkingLevel,
+      kind,
       status: 'queued',
       error: null,
       createdAt,
@@ -522,8 +1205,8 @@ export class AppDatabase {
     };
     this.database
       .prepare(
-        `INSERT INTO turns (id, thread_id, input, model, thinking_level, status, error, created_at, started_at, finished_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO turns (id, thread_id, input, model, thinking_level, kind, status, error, created_at, started_at, finished_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         turn.id,
@@ -531,6 +1214,7 @@ export class AppDatabase {
         turn.input,
         turn.model,
         turn.thinkingLevel,
+        turn.kind,
         turn.status,
         turn.error,
         turn.createdAt,
@@ -612,6 +1296,7 @@ export class AppDatabase {
       this.database
         .prepare('UPDATE threads SET updated_at = ? WHERE id = ?')
         .run(timestamp, threadId);
+      this.projectSessionEvent(event);
       this.database.exec('COMMIT');
       return event;
     } catch (error) {
@@ -628,14 +1313,72 @@ export class AppDatabase {
     ).map(fromEventRow);
   }
 
-  public createApproval(approval: Approval): Approval {
-    ApprovalSchema.parse(approval);
+  public listSessionEntries(threadId: string): SessionEntry[] {
+    return (
+      this.database
+        .prepare('SELECT * FROM session_entries WHERE thread_id = ? ORDER BY ordinal ASC')
+        .all(threadId) as unknown as SessionEntryRow[]
+    ).map(fromSessionEntryRow);
+  }
+
+  public listSessionCheckpoints(threadId: string): SessionCheckpoint[] {
+    return (
+      this.database
+        .prepare(
+          'SELECT * FROM session_checkpoints WHERE thread_id = ? ORDER BY created_at ASC, id ASC'
+        )
+        .all(threadId) as unknown as SessionCheckpointRow[]
+    ).map(fromSessionCheckpointRow);
+  }
+
+  public getSessionCheckpoint(id: string): SessionCheckpoint | undefined {
+    const row = this.database
+      .prepare('SELECT * FROM session_checkpoints WHERE id = ?')
+      .get(id) as unknown as SessionCheckpointRow | undefined;
+    return row ? fromSessionCheckpointRow(row) : undefined;
+  }
+
+  public saveGitTaskBaseline(input: GitTaskBaseline): GitTaskBaseline {
+    const baseline = GitTaskBaselineSchema.parse(input);
     this.database
       .prepare(
-        `INSERT INTO approvals (id, thread_id, turn_id, kind, argv, path, cwd, risk, reason, decision, created_at, resolved_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO git_task_baselines
+           (thread_id, turn_id, head_oid, ref, index_tree_hash, status_entries, truncated,
+            captured_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(thread_id) DO NOTHING`
       )
       .run(
+        baseline.threadId,
+        baseline.turnId,
+        baseline.headOid,
+        baseline.ref,
+        baseline.indexTreeHash,
+        JSON.stringify(baseline.statusEntries),
+        baseline.truncated ? 1 : 0,
+        baseline.capturedAt
+      );
+    return this.getGitTaskBaseline(baseline.threadId) ?? baseline;
+  }
+
+  public getGitTaskBaseline(threadId: string): GitTaskBaseline | undefined {
+    const row = this.database
+      .prepare('SELECT * FROM git_task_baselines WHERE thread_id = ?')
+      .get(threadId) as unknown as GitTaskBaselineRow | undefined;
+    return row ? fromGitTaskBaselineRow(row) : undefined;
+  }
+
+  public createApproval(input: ApprovalInput): Approval {
+    const approval = ApprovalSchema.parse(input);
+    this.database
+      .prepare(
+        `INSERT INTO approvals
+           (version, id, thread_id, turn_id, kind, argv, path, cwd, risk, reason,
+            operation_manifest, expires_at, decision, created_at, resolved_at, consumed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+      )
+      .run(
+        approval.version,
         approval.id,
         approval.threadId,
         approval.turnId,
@@ -645,6 +1388,8 @@ export class AppDatabase {
         approval.cwd,
         approval.risk,
         approval.reason,
+        approval.operationManifest ? JSON.stringify(approval.operationManifest) : null,
+        approval.expiresAt,
         approval.decision,
         approval.createdAt,
         approval.resolvedAt
@@ -672,11 +1417,60 @@ export class AppDatabase {
     if (!approval || approval.decision) {
       throw new Error('Approval is not pending.');
     }
+    if (approval.version === 2 && decision === 'allow-thread') {
+      throw new Error('Structured operations can only be allowed once.');
+    }
+    if (
+      approval.version === 2 &&
+      decision === 'allow-once' &&
+      (!approval.expiresAt || Date.parse(approval.expiresAt) <= Date.now())
+    ) {
+      throw new Error('The structured operation approval expired.');
+    }
     const resolvedAt = now();
     this.database
       .prepare('UPDATE approvals SET decision = ?, resolved_at = ? WHERE id = ?')
       .run(decision, resolvedAt, id);
     return { ...approval, decision, resolvedAt };
+  }
+
+  public consumeOperationApproval(
+    id: string,
+    manifestBinding: string,
+    consumedAt = now()
+  ): Approval {
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      const row = this.database
+        .prepare('SELECT * FROM approvals WHERE id = ?')
+        .get(id) as unknown as ApprovalRow | undefined;
+      const approval = row ? fromApprovalRow(row) : undefined;
+      if (
+        approval?.version !== 2 ||
+        approval.decision !== 'allow-once' ||
+        !approval.operationManifest ||
+        approval.operationManifest.binding !== manifestBinding
+      ) {
+        throw new Error('The structured operation is not bound to an allow-once approval.');
+      }
+      if (!approval.expiresAt || Date.parse(approval.expiresAt) <= Date.parse(consumedAt)) {
+        throw new Error('The structured operation approval expired.');
+      }
+      if (row?.consumed_at) {
+        throw new Error('The structured operation approval was already consumed.');
+      }
+      const result = this.database
+        .prepare('UPDATE approvals SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL')
+        .run(consumedAt, id);
+      if (Number(result.changes) !== 1) {
+        throw new Error('The structured operation approval was already consumed.');
+      }
+      this.database.exec('COMMIT');
+      return approval;
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   public denyPendingApprovalsForTurn(turnId: string): Approval[] {
@@ -831,10 +1625,11 @@ export class AppDatabase {
     const interrupted = rows.map((row) =>
       this.updateTurnStatus(row.id, 'interrupted', 'The desktop runtime was interrupted.')
     );
+    for (const turn of interrupted) this.denyPendingApprovalsForTurn(turn.id);
     for (const threadId of new Set(interrupted.map((turn) => turn.threadId))) {
       const thread = this.getThread(threadId);
       if (thread && (thread.status === 'running' || thread.status === 'awaiting_approval')) {
-        this.updateThreadStatus(threadId, 'idle');
+        this.updateThreadStatus(threadId, 'interrupted');
       }
     }
     return interrupted;
@@ -842,19 +1637,31 @@ export class AppDatabase {
 
   public getThreadDetail(threadId: string): {
     thread: Thread;
+    policy: ReturnType<typeof taskPolicySummary>;
     turns: Turn[];
     events: JournalEvent[];
     approvals: Approval[];
+    checkpoints: SessionCheckpoint[];
+    gitBaseline: GitTaskBaseline | null;
+    contextBudget: ContextBudgetSnapshot | null;
   } {
     const thread = this.getThread(threadId);
     if (!thread) {
       throw new Error('Thread not found.');
     }
+    const events = this.listEvents(threadId);
+    const contextBudgetEvent = events.findLast((event) => event.type === 'context.budget');
     return {
       thread,
+      policy: taskPolicySummary(this.getTaskPolicySnapshot(threadId)),
       turns: this.listTurns(threadId),
-      events: this.listEvents(threadId),
+      events,
       approvals: this.listApprovals(threadId),
+      checkpoints: this.listSessionCheckpoints(threadId),
+      gitBaseline: this.getGitTaskBaseline(threadId) ?? null,
+      contextBudget: contextBudgetEvent
+        ? ContextBudgetSnapshotSchema.parse(contextBudgetEvent.payload)
+        : null,
     };
   }
 
@@ -931,6 +1738,233 @@ export class AppDatabase {
       latestAgentHash: baseline.latest_agent_hash,
       currentHash: null,
     }));
+  }
+
+  private sessionProjection(
+    event: JournalEvent
+  ): { kind: SessionEntry['kind']; payload: Record<string, unknown> } | undefined {
+    if (containsSponsorKey(event.payload)) return undefined;
+    const payload = safeRecord(event.payload);
+    if (event.type === 'message.user' && typeof payload.text === 'string') {
+      return {
+        kind: 'user_message',
+        payload: {
+          role: 'user',
+          text: payload.text,
+          ...(typeof payload.mode === 'string' ? { mode: payload.mode } : {}),
+        },
+      };
+    }
+    if (event.type === 'message.complete' && typeof payload.text === 'string') {
+      const usage = safeRecord(payload.usage);
+      const tokenCount = (value: unknown): number =>
+        typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+      return {
+        kind: 'assistant_message',
+        payload: {
+          role: 'assistant',
+          text: payload.text,
+          content: removeSponsorData(payload.content ?? []),
+          model: typeof payload.model === 'string' ? payload.model : 'unknown',
+          usage: {
+            input: tokenCount(usage.input),
+            output: tokenCount(usage.output),
+            cacheRead: tokenCount(usage.cacheRead),
+            cacheWrite: tokenCount(usage.cacheWrite),
+            totalTokens: tokenCount(usage.totalTokens),
+          },
+        },
+      };
+    }
+    if (
+      event.type === 'tool.result' &&
+      typeof payload.name === 'string' &&
+      typeof payload.toolCallId === 'string' &&
+      typeof payload.output === 'string'
+    ) {
+      return {
+        kind: 'tool_result',
+        payload: {
+          name: payload.name,
+          toolCallId: payload.toolCallId,
+          output: payload.output,
+          isError: Boolean(payload.isError),
+        },
+      };
+    }
+    if (event.type === 'compaction' && typeof payload.summary === 'string') {
+      return {
+        kind: 'compaction',
+        payload: {
+          summary: payload.summary,
+          outcome: payload.outcome,
+          droppedMessages: payload.droppedMessages,
+          tokensBefore: payload.tokensBefore,
+          tokensAfter: payload.tokensAfter,
+          modelAssisted: payload.modelAssisted,
+          retainedMessages: removeSponsorData(payload.retainedMessages ?? []),
+        },
+      };
+    }
+    if (
+      event.type === 'approval.resolved' ||
+      event.type === 'file.change' ||
+      event.type === 'diff.change' ||
+      event.type === 'operation.completed' ||
+      event.type === 'runtime.crash'
+    ) {
+      return {
+        kind: 'context_anchor',
+        payload: {
+          eventType: event.type,
+          value: removeSponsorData(payload),
+        },
+      };
+    }
+    return undefined;
+  }
+
+  private projectSessionEvent(event: JournalEvent): void {
+    if (event.type === 'session.checkpoint') {
+      if (!event.turnId || event.payload.safe !== true) return;
+      const exists = this.database
+        .prepare('SELECT 1 AS present FROM session_checkpoints WHERE source_event_id = ?')
+        .get(event.id) as { present: number } | undefined;
+      if (exists) return;
+      const entries = this.database
+        .prepare(
+          'SELECT ordinal, digest FROM session_entries WHERE thread_id = ? ORDER BY ordinal ASC'
+        )
+        .all(event.threadId) as unknown as Array<{ ordinal: number; digest: string }>;
+      const entryOrdinal = entries.at(-1)?.ordinal ?? 0;
+      const checkpoint: SessionCheckpoint = SessionCheckpointSchema.parse({
+        id: createId(),
+        threadId: event.threadId,
+        turnId: event.turnId,
+        sourceEventId: event.id,
+        entryOrdinal,
+        contextDigest: sha256(
+          JSON.stringify({ schemaVersion: 1, entries: entries.map((entry) => entry.digest) })
+        ),
+        safe: true,
+        createdAt: event.timestamp,
+      });
+      this.database
+        .prepare(
+          `INSERT INTO session_checkpoints
+             (id, thread_id, turn_id, source_event_id, entry_ordinal, context_digest, safe, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          checkpoint.id,
+          checkpoint.threadId,
+          checkpoint.turnId,
+          checkpoint.sourceEventId,
+          checkpoint.entryOrdinal,
+          checkpoint.contextDigest,
+          1,
+          checkpoint.createdAt
+        );
+      return;
+    }
+
+    const projection = this.sessionProjection(event);
+    if (!projection) return;
+    const exists = this.database
+      .prepare('SELECT 1 AS present FROM session_entries WHERE source_event_id = ?')
+      .get(event.id) as { present: number } | undefined;
+    if (exists) return;
+    const ordinal =
+      (
+        this.database
+          .prepare(
+            'SELECT COALESCE(MAX(ordinal), 0) AS ordinal FROM session_entries WHERE thread_id = ?'
+          )
+          .get(event.threadId) as { ordinal: number }
+      ).ordinal + 1;
+    const digest = sha256(
+      JSON.stringify({
+        schemaVersion: 1,
+        threadId: event.threadId,
+        turnId: event.turnId,
+        ordinal,
+        kind: projection.kind,
+        timestamp: event.timestamp,
+        payload: projection.payload,
+      })
+    );
+    const entry: SessionEntry = SessionEntrySchema.parse({
+      id: createId(),
+      threadId: event.threadId,
+      turnId: event.turnId,
+      sourceEventId: event.id,
+      ordinal,
+      kind: projection.kind,
+      timestamp: event.timestamp,
+      payload: projection.payload,
+      digest,
+    });
+    this.database
+      .prepare(
+        `INSERT INTO session_entries
+           (id, thread_id, turn_id, source_event_id, ordinal, kind, timestamp, payload, digest)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        entry.id,
+        entry.threadId,
+        entry.turnId,
+        entry.sourceEventId,
+        entry.ordinal,
+        entry.kind,
+        entry.timestamp,
+        JSON.stringify(entry.payload),
+        entry.digest
+      );
+  }
+
+  private backfillTaskPolicies(): void {
+    const rows = this.database
+      .prepare(
+        `SELECT id, project_id, created_at FROM threads
+         WHERE policy_snapshot IS NULL OR policy_snapshot = ''`
+      )
+      .all() as unknown as Array<{ id: string; project_id: string; created_at: string }>;
+    if (rows.length === 0) return;
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      const update = this.database.prepare(
+        `UPDATE threads SET policy_snapshot = ?
+         WHERE id = ? AND (policy_snapshot IS NULL OR policy_snapshot = '')`
+      );
+      for (const row of rows) {
+        const project = this.getProject(row.project_id);
+        if (!project) throw new Error('Cannot backfill a task whose project is missing.');
+        const snapshot = projectDefaultPolicySnapshot(project, row.created_at);
+        update.run(JSON.stringify(snapshot), row.id);
+      }
+      this.database.exec('COMMIT');
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  private backfillSessionProjection(): void {
+    const events = (
+      this.database
+        .prepare('SELECT * FROM events ORDER BY thread_id ASC, sequence ASC')
+        .all() as unknown as EventRow[]
+    ).map(fromEventRow);
+    if (events.length === 0) return;
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      for (const event of events) this.projectSessionEvent(event);
+      this.database.exec('COMMIT');
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   private migrate(backupExistingDatabase: boolean): void {

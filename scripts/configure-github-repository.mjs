@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 
 const repository = 'adrouter/adrouterAgent';
 const reviewer = 'HappyCool121';
-const releaseTag = 'v0.1.0-beta.12';
+const releaseTagPattern = 'v*';
 const dryRun = process.argv.includes('--dry-run');
 const unknown = process.argv.slice(2).filter((argument) => argument !== '--dry-run');
 if (unknown.length > 0) {
@@ -48,7 +48,7 @@ if (!dryRun) {
 const reviewerId = dryRun ? 0 : Number(JSON.parse(api('GET', `users/${reviewer}`)).id);
 if (!dryRun && !Number.isSafeInteger(reviewerId)) throw new Error('Unable to resolve reviewer ID.');
 
-for (const environment of ['macos-release', 'npm-publish']) {
+for (const environment of ['native-release', 'macos-release', 'npm-publish']) {
   api('PUT', `repos/${repository}/environments/${environment}`, {
     wait_timer: 0,
     prevent_self_review: false,
@@ -62,15 +62,15 @@ for (const environment of ['macos-release', 'npm-publish']) {
     const policies = JSON.parse(
       api('GET', `repos/${repository}/environments/${environment}/deployment-branch-policies`)
     ).branch_policies;
-    if (!policies.some((policy) => policy.name === releaseTag)) {
+    if (!policies.some((policy) => policy.name === releaseTagPattern)) {
       api('POST', `repos/${repository}/environments/${environment}/deployment-branch-policies`, {
-        name: releaseTag,
+        name: releaseTagPattern,
         type: 'tag',
       });
     }
   } else {
     api('POST', `repos/${repository}/environments/${environment}/deployment-branch-policies`, {
-      name: releaseTag,
+      name: releaseTagPattern,
       type: 'tag',
     });
   }

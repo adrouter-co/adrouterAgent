@@ -6,6 +6,7 @@ import { shell } from 'electron';
 import { resolveWorkspacePath } from '../runtime/workspace';
 import type { DiffFile } from '../shared/contracts';
 import { sha256 } from '../shared/security';
+import { effectiveTaskCapabilityPolicy } from '../shared/task-policy';
 import type { AppDatabase } from './database';
 
 const pathExists = async (path: string): Promise<boolean> => {
@@ -81,6 +82,12 @@ export class ReviewService {
     const project = this.database.getProject(thread.projectId);
     if (!project) {
       throw new Error('Project not found.');
+    }
+    const policy = effectiveTaskCapabilityPolicy(
+      this.database.getTaskPolicySnapshot(thread.id).capabilityPolicy
+    );
+    if (policy.workspaceAccess !== 'workspace-write' || !policy.fileMutations) {
+      throw new Error('File mutations are disabled by this task policy.');
     }
     const baseline = this.database
       .listBaselines(threadId)

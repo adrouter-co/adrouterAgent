@@ -7,11 +7,31 @@ import {
   normalizeAssistantContent,
   toAgentThinkingLevel,
 } from '@/runtime/agent-session';
+import type { SessionEntry } from '@/shared/contracts';
+import { bundledCatalogModels } from '@/shared/model-catalog';
 import type { RuntimeEvent } from '@/shared/runtime-protocol';
 
 const threadId = '11111111-1111-4111-8111-111111111111';
 const turnId = '22222222-2222-4222-8222-222222222222';
 const timestamp = '2026-07-11T12:00:00.000Z';
+const canonicalModel = bundledCatalogModels()[0];
+if (!canonicalModel) throw new Error('Expected the bundled catalog to contain a model.');
+
+const sessionEntry = (
+  ordinal: number,
+  kind: SessionEntry['kind'],
+  payload: Record<string, unknown>
+): SessionEntry => ({
+  id: `10000000-0000-4000-8000-${ordinal.toString().padStart(12, '0')}`,
+  threadId,
+  turnId,
+  sourceEventId: `20000000-0000-4000-8000-${ordinal.toString().padStart(12, '0')}`,
+  ordinal,
+  kind,
+  timestamp,
+  payload,
+  digest: ordinal.toString(16).padStart(64, '0'),
+});
 
 describe('durable agent context', () => {
   it('maps the router no-thinking value to the Pi agent boundary', () => {
@@ -38,9 +58,25 @@ describe('durable agent context', () => {
           displayName: 'fixture',
           instructions: '',
           repositoryInstructions: '',
+          repositoryInstructionFiles: [],
+          bundleInstructions: '',
+          taskInstructions: '',
+          trustedSkills: [],
+          promptSources: [],
           permissionMode: 'workspace-write',
+          delegationEnabled: false,
+          capabilityPolicy: {
+            schemaVersion: 1,
+            workspaceAccess: 'workspace-write',
+            fileMutations: true,
+            generalCommands: true,
+            networkFetch: true,
+            dependencyChanges: true,
+            gitWrites: true,
+            delegation: false,
+          },
         },
-        model: 'fixture-model',
+        model: { ...canonicalModel, configured: true },
         thinkingLevel: 'medium',
         runtimeMode: 'mock',
         sponsoredCompute: true,
@@ -76,36 +112,26 @@ describe('durable agent context', () => {
 
   it('restores structured assistant tool calls before matching tool results', () => {
     const messages = historyToMessages([
-      {
-        type: 'message.complete',
-        turnId,
-        timestamp,
-        payload: {
-          role: 'assistant',
-          text: '',
-          model: 'deepseek-v4-flash',
-          content: [
-            { type: 'thinking', thinking: 'hidden' },
-            {
-              type: 'toolCall',
-              id: 'call-1',
-              name: 'read_file',
-              arguments: { path: 'src/main.ts' },
-            },
-          ],
-        },
-      },
-      {
-        type: 'tool.result',
-        turnId,
-        timestamp,
-        payload: {
-          name: 'read_file',
-          toolCallId: 'call-1',
-          output: '{"content":"ok"}',
-          isError: false,
-        },
-      },
+      sessionEntry(1, 'assistant_message', {
+        role: 'assistant',
+        text: '',
+        model: 'deepseek-v4-flash',
+        content: [
+          { type: 'thinking', thinking: 'hidden' },
+          {
+            type: 'toolCall',
+            id: 'call-1',
+            name: 'read_file',
+            arguments: { path: 'src/main.ts' },
+          },
+        ],
+      }),
+      sessionEntry(2, 'tool_result', {
+        name: 'read_file',
+        toolCallId: 'call-1',
+        output: '{"content":"ok"}',
+        isError: false,
+      }),
     ]);
 
     expect(messages).toHaveLength(2);
@@ -133,7 +159,7 @@ describe('durable agent context', () => {
     ]);
   });
 
-  it('retains old user constraints and durable anchors during compaction', () => {
+  it('retains old user constraints and durable anchors during token-aware compaction', async () => {
     const messages: AgentMessage[] = [
       {
         role: 'user',
@@ -144,7 +170,7 @@ describe('durable agent context', () => {
         { length: 24 },
         (_, index): AgentMessage => ({
           role: 'assistant',
-          content: [{ type: 'text', text: `${index}:${'x'.repeat(5_000)}` }],
+          content: [{ type: 'text', text: `${index}:${'x'.repeat(20_000)}` }],
           api: 'adrouter',
           provider: 'adrouter',
           model: 'test',
@@ -162,18 +188,36 @@ describe('durable agent context', () => {
       ),
     ];
     const emitted: RuntimeEvent[] = [];
-    const compacted = compactMessages(messages, (event) => emitted.push(event), [
-      'APPROVAL DECISION: custom-runner allowed once',
-      `FILE STATE: src/main.ts modified in ${threadId}`,
-    ]);
+    const compacted = await compactMessages(
+      messages,
+      (event) => emitted.push(event),
+      [
+        'APPROVAL DECISION: custom-runner allowed once',
+        `FILE STATE: src/main.ts modified in ${threadId}`,
+      ],
+      {
+        model: {
+          ...canonicalModel,
+          contextWindow: 131_072,
+          maxInputTokens: 65_536,
+          maxOutputTokens: 32_768,
+        },
+        systemPrompt: 'Fixture system prompt.',
+        tools: [],
+      }
+    );
 
-    expect(compacted).toHaveLength(21);
-    expect(compacted[0]).toMatchObject({ role: 'user' });
-    const summary = compacted[0]?.role === 'user' ? String(compacted[0].content) : '';
+    expect(compacted.length).toBeLessThan(messages.length);
+    expect(compacted[0]).toMatchObject({ role: 'compactionSummary' });
+    const summary = compacted[0]?.role === 'compactionSummary' ? compacted[0].summary : '';
     expect(summary).toContain('Acceptance criteria: preserve the public API.');
     expect(summary).toContain('APPROVAL DECISION: custom-runner allowed once');
     expect(summary).toContain('FILE STATE: src/main.ts modified');
-    expect(emitted).toHaveLength(1);
-    expect(emitted[0]?.type).toBe('compaction');
+    expect(emitted.map((event) => event.type)).toEqual([
+      'context.budget',
+      'compaction',
+      'context.budget',
+    ]);
+    expect(emitted[1]?.payload).toMatchObject({ outcome: 'completed', reserveTokens: 16_384 });
   });
 });

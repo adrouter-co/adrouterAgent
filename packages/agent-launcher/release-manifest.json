@@ -1,50 +1,76 @@
 {
-  "schema": 3,
-  "distributionMode": "credential-free-portable",
-  "releaseVersion": "0.1.0-beta.12",
-  "releaseTag": "v0.1.0-beta.12",
-  "repository": "adrouter/adrouterAgent",
-  "bundleIdentifier": "com.adrouter.agent",
-  "bundleShortVersion": "0.1.0",
-  "bundleVersion": "10012",
-  "authentication": {
-    "fixture": "tests/fixtures/platform-auth-v1.json",
-    "fixtureSha256": "93a8ec8d4eba38f9165179aa0cdfe3316f8134a882bd0426bd83339af55d17f8",
-    "acceptanceAsset": "authentication-acceptance.json"
+  "schema": 4,
+  "signed": {
+    "distributionMode": "signed-release-metadata",
+    "channel": "beta",
+    "releaseVersion": "0.1.0-beta.13",
+    "releaseTag": "v0.1.0-beta.13",
+    "repository": "adrouter/adrouterAgent",
+    "bundleIdentifier": "com.adrouter.agent",
+    "bundleShortVersion": "0.1.0",
+    "bundleVersion": "10013",
+    "minimumAgentVersion": "0.1.0-beta.13",
+    "issuedAt": "UNBUILT",
+    "expiresAt": "UNBUILT",
+    "authentication": {
+      "fixture": "tests/fixtures/platform-auth-v1.json",
+      "fixtureSha256": "93a8ec8d4eba38f9165179aa0cdfe3316f8134a882bd0426bd83339af55d17f8",
+      "acceptanceAsset": "authentication-acceptance.json"
+    },
+    "health": {
+      "deadlineSeconds": 120,
+      "markerProtocol": 1,
+      "rollbackRequired": true
+    },
+    "artifacts": [
+      {
+        "key": "darwin-universal",
+        "platform": "darwin",
+        "architectures": ["arm64", "x64"],
+        "assetName": "AdRouter-Agent-0.1.0-beta.13-darwin-universal.zip",
+        "assetUrl": "https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.13/AdRouter-Agent-0.1.0-beta.13-darwin-universal.zip",
+        "bytes": 0,
+        "sha256": "UNBUILT",
+        "archiveRoot": "AdRouter Agent.app",
+        "executablePath": "Contents/MacOS/AdRouter Agent",
+        "verificationMode": "macos-developer-id",
+        "signature": {
+          "type": "developer-id",
+          "required": true,
+          "expectedSigner": "UNBUILT"
+        }
+      },
+      {
+        "key": "linux-x64",
+        "platform": "linux",
+        "architectures": ["x64"],
+        "assetName": "AdRouter-Agent-0.1.0-beta.13-linux-x64.zip",
+        "assetUrl": "https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.13/AdRouter-Agent-0.1.0-beta.13-linux-x64.zip",
+        "bytes": 0,
+        "sha256": "UNBUILT",
+        "archiveRoot": "AdRouter Agent-linux-x64",
+        "executablePath": "AdRouter Agent",
+        "verificationMode": "portable-checksum",
+        "signature": { "type": "none", "required": false, "expectedSigner": null }
+      },
+      {
+        "key": "win32-x64",
+        "platform": "win32",
+        "architectures": ["x64"],
+        "assetName": "AdRouter-Agent-0.1.0-beta.13-win32-x64.zip",
+        "assetUrl": "https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.13/AdRouter-Agent-0.1.0-beta.13-win32-x64.zip",
+        "bytes": 0,
+        "sha256": "UNBUILT",
+        "archiveRoot": ".",
+        "executablePath": "AdRouter Agent.exe",
+        "verificationMode": "windows-authenticode",
+        "signature": {
+          "type": "authenticode",
+          "required": true,
+          "expectedSigner": "UNBUILT"
+        }
+      }
+    ]
   },
-  "artifacts": [
-    {
-      "key": "darwin-universal",
-      "platform": "darwin",
-      "architectures": ["arm64", "x64"],
-      "assetName": "AdRouter-Agent-0.1.0-beta.12-darwin-universal.zip",
-      "assetUrl": "https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.12/AdRouter-Agent-0.1.0-beta.12-darwin-universal.zip",
-      "sha256": "UNBUILT",
-      "archiveRoot": "AdRouter Agent.app",
-      "executablePath": "Contents/MacOS/AdRouter Agent",
-      "verificationMode": "macos-adhoc"
-    },
-    {
-      "key": "linux-x64",
-      "platform": "linux",
-      "architectures": ["x64"],
-      "assetName": "AdRouter-Agent-0.1.0-beta.12-linux-x64.zip",
-      "assetUrl": "https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.12/AdRouter-Agent-0.1.0-beta.12-linux-x64.zip",
-      "sha256": "UNBUILT",
-      "archiveRoot": "AdRouter Agent-linux-x64",
-      "executablePath": "AdRouter Agent",
-      "verificationMode": "portable-checksum"
-    },
-    {
-      "key": "win32-x64",
-      "platform": "win32",
-      "architectures": ["x64"],
-      "assetName": "AdRouter-Agent-0.1.0-beta.12-win32-x64.zip",
-      "assetUrl": "https://github.com/adrouter/adrouterAgent/releases/download/v0.1.0-beta.12/AdRouter-Agent-0.1.0-beta.12-win32-x64.zip",
-      "sha256": "UNBUILT",
-      "archiveRoot": ".",
-      "executablePath": "AdRouter Agent.exe",
-      "verificationMode": "portable-checksum"
-    }
-  ]
+  "signatures": [{ "keyId": "UNBUILT", "algorithm": "Ed25519", "signature": "UNBUILT" }]
 }

@@ -6,7 +6,7 @@ on:
       tag:
         description: Immutable release tag
         required: true
-        default: v0.1.0-beta.12
+        default: v0.1.0-beta.13
         type: string
       phase:
         description: Explicit pausable promotion phase
@@ -22,7 +22,6 @@ on:
         type: choice
         options:
           - beta
-          - stable
 
 permissions:
   contents: read
@@ -61,13 +60,9 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           test "${{ inputs.tag }}" = "v$version"
-          if test "${{ inputs.channel }}" = "beta"; then
-            test "${version#*-}" != "$version"
-            expected_prerelease=true
-          else
-            test "${version#*-}" = "$version"
-            expected_prerelease=false
-          fi
+          test "${{ inputs.channel }}" = "beta"
+          test "${version#*-}" != "$version"
+          expected_prerelease=true
           test "$GITHUB_REF" = "refs/tags/v$version"
           test "$(git rev-list -n 1 "${{ inputs.tag }}")" = "$(git rev-parse HEAD)"
           test "$(gh release view "${{ inputs.tag }}" --json isPrerelease --jq .isPrerelease)" = "$expected_prerelease"
@@ -86,11 +81,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if test "${{ inputs.channel }}" = "beta"; then
-            gh release edit "${{ inputs.tag }}" --draft=false --prerelease
-          else
-            gh release edit "${{ inputs.tag }}" --draft=false --latest
-          fi
+          gh release edit "${{ inputs.tag }}" --draft=false --prerelease
       - name: Verify public ZIP is anonymously downloadable
         run: |
           version="${{ steps.identity.outputs.version }}"
@@ -206,13 +197,9 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           test "${{ inputs.tag }}" = "v$version"
-          if test "${{ inputs.channel }}" = "beta"; then
-            test "${version#*-}" != "$version"
-            expected_prerelease=true
-          else
-            test "${version#*-}" = "$version"
-            expected_prerelease=false
-          fi
+          test "${{ inputs.channel }}" = "beta"
+          test "${version#*-}" != "$version"
+          expected_prerelease=true
           test "$GITHUB_REF" = "refs/tags/v$version"
           test "$(git rev-list -n 1 "${{ inputs.tag }}")" = "$(git rev-parse HEAD)"
           test "$(gh release view "${{ inputs.tag }}" --json isDraft --jq .isDraft)" = false

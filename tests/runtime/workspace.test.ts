@@ -5,9 +5,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   applyWorkspacePatch,
   listWorkspaceFiles,
+  listWorkspaceFilesPage,
   readWorkspaceTextFile,
+  readWorkspaceTextRange,
   resolveWorkspacePath,
   searchWorkspaceText,
+  searchWorkspaceTextPage,
   WorkspaceAccessError,
 } from '@/runtime/workspace';
 import { sha256 } from '@/shared/security';
@@ -84,5 +87,39 @@ describe('workspace tools', () => {
       { path: 'README.md', line: 1, column: 25, preview: 'username length must be 32' },
     ]);
     expect(sha256('username length must be 32')).toHaveLength(64);
+  });
+
+  it('bounds ranged reads and paginates globbed literal and regex searches', async () => {
+    const root = await workspace();
+    await mkdir(join(root, 'src'));
+    await writeFile(join(root, 'src', 'a.ts'), 'one\nTarget 1\nthree\nTarget 2\n');
+    await writeFile(join(root, 'src', 'b.md'), 'Target ignored by glob\n');
+
+    await expect(
+      readWorkspaceTextRange(root, 'src/a.ts', { startLine: 2, maxLines: 2 })
+    ).resolves.toMatchObject({ content: 'Target 1\nthree', startLine: 2, endLine: 3 });
+    const first = await listWorkspaceFilesPage(root, { path: 'src', limit: 1 });
+    expect(first.items).toHaveLength(1);
+    expect(first.nextCursor).not.toBeNull();
+    await expect(
+      listWorkspaceFilesPage(root, { path: 'src', limit: 1, cursor: first.nextCursor ?? undefined })
+    ).resolves.toMatchObject({ items: [expect.any(String)] });
+
+    const literal = await searchWorkspaceTextPage(root, {
+      query: 'target',
+      caseSensitive: false,
+      glob: '**/*.ts',
+      limit: 1,
+    });
+    expect(literal.items).toHaveLength(1);
+    expect(literal.nextCursor).not.toBeNull();
+    await expect(
+      searchWorkspaceTextPage(root, { query: 'Target [12]', regex: true, glob: '**/*.ts' })
+    ).resolves.toMatchObject({
+      items: [
+        { path: 'src/a.ts', line: 2 },
+        { path: 'src/a.ts', line: 4 },
+      ],
+    });
   });
 });

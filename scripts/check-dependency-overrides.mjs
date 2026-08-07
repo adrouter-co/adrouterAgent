@@ -3,12 +3,21 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const expected = new Map([
-  ['brace-expansion', { alias: 'adrouter-brace-expansion-patch', version: '5.0.8' }],
+  [
+    'brace-expansion',
+    {
+      alias: 'adrouter-brace-expansion-patch',
+      version: '5.0.9',
+      lockKey: 'node_modules/brace-expansion',
+    },
+  ],
   ['protobufjs', { alias: 'adrouter-protobufjs-patch', version: '7.6.5' }],
+  ['undici', { alias: 'adrouter-undici-patch', version: '8.9.0' }],
 ]);
 const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
 const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
 const securityPins = new Map([
+  ['fast-uri', '3.1.5'],
   ['tar', '7.5.22'],
   ['tmp', '0.2.7'],
 ]);
@@ -32,7 +41,8 @@ for (const [name, replacement] of expected) {
     `npm:${name}@${replacement.version}`,
     `${name} must have an exact private helper alias`
   );
-  const nestedKey = `node_modules/@earendil-works/pi-coding-agent/node_modules/${name}`;
+  const nestedKey =
+    replacement.lockKey ?? `node_modules/@earendil-works/pi-coding-agent/node_modules/${name}`;
   assert.equal(
     lock.packages[nestedKey].version,
     replacement.version,

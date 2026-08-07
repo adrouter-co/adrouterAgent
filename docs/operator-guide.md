@@ -81,10 +81,10 @@ The desktop can work on both existing and new local projects.
 | Modify files | Yes. `apply_patch` performs hash-guarded exact replacements after one-time approval. |
 | Delete files | Yes, when the project is writable and the deletion is explicitly approved. |
 | Run checks | Yes. Local tests, lint, typecheck, version checks, and conservative inspection commands are allowed by policy where applicable. |
-| Scaffold a project | Partly. The agent can create project files and run allowed commands, but dependency installation and network-based scaffolding are disabled by the desktop command policy. |
+| Scaffold a project | Partly. The agent can create project files; bounded network and dependency adapters require exact previews and fresh approvals, while generic installer/network shell commands remain denied. |
 | Review work | Yes. The Changes drawer shows agent-authored diffs against a pre-agent baseline. |
-| Commit or push Git changes | No. The desktop does not stage, commit, push, pull, or perform other remote/destructive Git operations. |
-| Use extensions or skills | Not in the current desktop runtime. The embedded runtime disables Pi extensions, skills, prompt templates, themes, and context-file discovery beyond the desktop's explicit project/repository instructions. |
+| Commit or push Git changes | Only through explicit GUI Git controls. Each exact branch/switch/stage/commit/push operation has an expiring before-state binding and a separate allow-once decision; the agent never invokes these controls itself. |
+| Use extensions or skills | Arbitrary Pi extensions/hooks/providers/themes remain disabled. Bounded project Markdown skills and prompt templates are supported only after explicit exact-path/digest trust; skills load on demand and prompts only fill the composer. |
 
 ### Creating a project with the desktop app
 
@@ -99,29 +99,29 @@ The supported workflow is:
    check.
 
 The created files are written into the selected directory. The app does not
-copy the project to a hidden worktree, stage changes, or create a Git commit.
-If the project needs dependencies, install them outside the agent according to
-your normal development process; the desktop intentionally blocks package
-installation commands such as `npm install`, `npm ci`, `pnpm add`, and
-equivalent operations.
+copy the project to a hidden worktree or silently stage/commit changes. Generic
+package-install commands remain blocked; a supported dependency change uses a temporary preview,
+exact lockfile/package bindings, and a fresh structured-operation approval.
 
 ## 3. AdRouterCLI versus AdRouter Agent
 
 Both clients use the Pi-derived agent foundation and can route turns through
-the same backend, but their capabilities are different.
+the same backend, but their capabilities are different. This boundary was last reconciled against
+immutable CLI tag `v0.81.0-beta.19`; matching a CLI feature means adapting its value to desktop
+invariants, not embedding the CLI or copying its local-account authority.
 
 | Area | AdRouterCLI | AdRouter Agent |
 | --- | --- | --- |
 | Interface | Terminal TUI, JSON mode, RPC mode, and scripting | Electron desktop GUI |
 | Agent surface | Full Pi coding-agent distribution | Desktop-specific Pi agent loop |
-| Built-in tools | `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls` | `read_file`, `run_command`, `apply_patch`, `search_text`, `list_files`, `git_status`, and `git_diff` |
-| Extensibility | Extensions, skills, prompt templates, themes, and custom tool selection | Fixed tool list; current runtime disables those Pi discovery features |
-| Sessions | Resume, fork, clone, branch session tree, import/export, and session directories | Durable chats and threads in the desktop SQLite journal |
+| Built-in tools | `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls` | Bounded read/list/search plus policy-selected structured file, network, dependency, script, Git, delegation, and guidance tools |
+| Extensibility | Extensions, skills, prompt templates, themes, profiles, and custom tool selection | No executable extensions/hooks/providers/themes; exact-digest project Markdown skills/prompts and Agent-native task presets only |
+| Sessions | Resume, fork, clone, branch session tree, import/export, and session directories | Durable task tree, checkpoints/forks, sanitized JSON/HTML export, and inert one-way CLI v3 active-branch import |
 | Model/provider breadth | Broad Pi provider infrastructure plus the AdRouter route | Models discovered from the connected AdRouter backend |
 | File changes | Direct Pi `edit`/`write` tools and shell commands | Hash-guarded `apply_patch` with explicit approval |
 | Shell authority | Operates within the local user's normal trust boundary; Pi itself does not provide an OS sandbox | Exact argv, command classification, workspace restrictions, sanitized environment, and OS sandbox |
 | Safety interaction | Terminal-oriented trust and tool controls | Per-operation approval cards and fail-closed policy denials |
-| Review | TUI tool output and diffs | Persistent baselines, Changes drawer, completion evidence, and guarded review actions |
+| Review | TUI tool output and diffs | Persistent baselines, Changes drawer, completion evidence, and separately reviewed GUI Git writes |
 | Economics | Ad controls such as `/ads status`, `/ads on`, and `/ads off` | Integrated sponsor surfaces and settlement/cost display in Settings and the timeline |
 | State location | `~/.adrouter/agent/` and project `.adrouter/` state | Electron user data: `adrouter.sqlite` and encrypted `configuration.json` |
 
@@ -129,8 +129,14 @@ Use the CLI when you want maximum Pi flexibility, terminal automation, custom
 extensions, or broad shell access. Use the desktop when you want a visual,
 approval-driven, workspace-confined coding workflow with durable review data.
 
-Their session stores are separate. The desktop does not import CLI session
-files, and the CLI does not read the desktop SQLite journal.
+CLI profiles can swap global/provider settings and `SYSTEM.md`. Agent task presets are deliberately
+narrower: they capture a validated Router model, thinking default, extra task instructions, and a
+capability ceiling into one new task. They do not change global files, provider credentials, or an
+existing task.
+
+Their live session stores remain separate. The desktop can preview and inertly import the active
+branch of a bounded CLI v3 JSONL session, but does not resume it automatically; the CLI does not read
+the desktop SQLite journal.
 
 ## 4. Runtime architecture
 
@@ -141,7 +147,7 @@ React renderer
 Electron main process
   ├─ OS-encrypted installation key, pending enrollment, refresh rotation, and access-token memory
   ├─ narrow exact-byte signing broker for allowlisted utility requests
-  ├─ SQLite projects, threads, turns, events, approvals, and baselines
+  ├─ SQLite projects, task/policy snapshots, trusted guidance, turns, events, approvals, and baselines
   ├─ repository metadata and native folder dialogs
   ├─ review and diff service
   └─ runtime supervisor
@@ -150,7 +156,7 @@ Electron main process
 Isolated agent utility process
   ├─ Pi Agent loop
   ├─ AdRouter provider adapter
-  ├─ fixed desktop tool set
+  ├─ fixed policy-selected desktop tool families and exact-digest guidance loader
   ├─ approval wait/resume handling
   └─ command sandbox and policy
        │ request-scoped protected headers; authenticated HTTP with NDJSON streaming
@@ -176,9 +182,10 @@ For each user message, the application performs this sequence:
 
 1. **Validate configuration.** The selected model and thinking level must exist
    in the cached router catalog and be supported by that model.
-2. **Load project context.** The runtime receives the selected project path,
-   repository instructions, user-authored project instructions, permission
-   mode, current model, and current thread history.
+2. **Load immutable task policy and project context.** The runtime receives the selected project
+   path, repository/user instructions, the task's captured preset instructions/capability ceiling,
+   current model/history, and metadata for currently trusted exact-digest skills. Skill content is
+   fetched only if the model explicitly calls the read-only guidance tool.
 3. **Create a journaled turn.** The main process records the user message and
    lifecycle state in SQLite before starting the utility process.
 4. **Build the agent session.** The runtime reconstructs model messages from
@@ -189,9 +196,9 @@ For each user message, the application performs this sequence:
    system prompt, messages, tools, and non-sensitive client metadata.
 6. **Stream the response.** The backend may stream thinking deltas, text
    deltas, tool calls, sponsor events, settlement data, completion, or errors.
-7. **Execute tools.** A safe read or Git inspection can run immediately. A
-   file mutation or command may create an approval request, which pauses the
-   agent until the user responds.
+7. **Execute policy-selected tools.** A safe read or Git inspection can run immediately. Disallowed
+   tool families are not registered, and Main rechecks structured operations before approval
+   consumption. An allowed mutation or command still pauses for a fresh exact decision.
 8. **Continue after tool results.** Approved or denied tool results are sent
    back into the agent loop. The model can inspect the result and decide what
    to do next.
@@ -320,9 +327,11 @@ display/economics channel.
    `.agent/instructions.md` when present.
 2. Review **Settings** before a sensitive task. The Agent status panel shows
    connection state, router mode, server URL, last check time, available
-   models, supported thinking levels, and whether the model catalog is stale.
-3. Select a model and thinking level in the composer. The app only offers
-   levels reported by the selected model (`none`, `medium`, or `high`).
+   models, supported thinking levels, and whether the model catalog is stale. Task presets define
+   immutable new-task defaults/capability ceilings. Project Markdown under `.adrouter/skills` and
+   `.adrouter/prompts` remains inactive until its exact digest is trusted.
+3. Select a task preset or a model and thinking level in the composer. A preset locks its model
+   defaults for creation and is copied into the task; later preset/project edits do not change it.
 4. Describe the task in a new chat. Enter sends the request; Shift+Enter adds a
    newline. The timeline streams thinking, text, tool activity, command
    output, approvals, sponsor surfaces, settlements, and final evidence.
@@ -335,7 +344,8 @@ display/economics channel.
    the path, command argv, working directory, and reason are correct. Use
    **Deny** to leave the workspace unchanged and return a denial to the agent.
 6. Review the **Changes** drawer after mutations. It contains read-only
-   agent-authored diffs compared with baselines captured before the mutation.
+   agent-authored diffs compared with baselines captured before the mutation. When the task snapshot
+   allows Git writes, separate GUI controls can prepare and approve one exact operation.
 7. Use **History** to switch between chats. Use **Stop** to cancel an active
    task; use the delete action only for a terminal chat after confirming that
    its messages and review records should be removed.
@@ -355,17 +365,22 @@ The desktop exposes a fixed, intentionally small tool surface:
 
 | Tool | Approval | Boundary |
 | --- | --- | --- |
-| `list_files` | None | Safe files beneath the workspace; at most 5,000 results. |
-| `read_file` | None | Safe text files only; bounded size; protected paths rejected. |
-| `search_text` | None | Literal search in safe text files; at most 200 matches. |
+| `list_files` | None | Safe files beneath the workspace; bounded pages/cursors, filters, scan caps, and Git-ignore support. |
+| `read_file` | None | Safe UTF-8 text only; bounded line ranges and truncation metadata; protected paths rejected. |
+| `search_text` | None | Bounded literal/regex text search with filters, pages, timeouts, binary rejection, and a terminable regex worker. |
 | `git_status` | None | Read-only Git status. |
 | `git_diff` | None | Read-only, non-staged Git diff. |
-| `apply_patch` | Every call | Exact create/modify/delete operation, expected-hash guarded, atomically applied. |
-| `run_command` | Usually | Exact argv, selected workspace as cwd, bounded timeout, sandboxed environment. |
+| `load_guidance` | None | One indexed project skill, revalidated against its trusted exact path/digest on every load. |
+| `apply_patch`, copy/move/delete/restore | Every call | Exact expected-state binding and atomic workspace-contained mutation. |
+| `fetch_url` | Every call | Bounded reviewed network request subject to the fixed network policy. |
+| dependency/script tools | Every mutation/run | Temporary preview or exact script binding; lifecycle work remains separately reviewed. |
+| structured Git tools | Every call | Agent-side Git writes use exact bindings; GUI Git writes require their own second-click decision. |
+| `run_command` | Every general command | Exact argv, selected workspace as cwd, bounded timeout, and task-policy-selected read/write sandbox. |
+| `delegate_task` | Every call | At most three visible depth-one children; children inherit policy with delegation disabled. |
 
-The project permission mode can be `workspace-write` or `read-only`. Newly
-opened projects default to `workspace-write`. In read-only mode, `apply_patch`
-refuses file mutations and command execution cannot write into the workspace.
+The task snapshot's workspace ceiling can be `workspace-write` or `read-only`. Newly opened projects
+default to writable for future tasks, but a preset can reduce it. In read-only mode all file,
+dependency, and Git mutations are disabled and allowed commands receive a read-only sandbox.
 
 ### Approval behavior
 
@@ -386,12 +401,12 @@ refuses file mutations and command execution cannot write into the workspace.
 The command tool uses argv arrays rather than an implicit shell command string.
 The policy denies or restricts:
 
-- Network clients and network-capable commands.
-- Dependency installation and package mutations such as `npm install`.
+- Generic network clients and network-capable commands; use the bounded reviewed network adapter.
+- Generic dependency/package mutations such as `npm install`; use the structured preview/apply flow.
 - Privilege escalation such as `sudo`, `su`, and `doas`.
 - Destructive filesystem commands such as `rm`, `mv`, `cp`, and `chmod`.
-- Destructive or remote Git operations such as reset, clean, checkout, commit,
-  push, and pull.
+- Destructive/unbounded Git such as reset, clean, pull, force/ref deletion, hooks, and interactive
+  credentials. Supported branch/switch/stage/commit/push flows use structured exact-state bindings.
 - Credential paths and protected files.
 - Paths outside the selected workspace, including escaping symlinks and parent
   traversal.
@@ -437,17 +452,19 @@ directory, normally:
 Important state includes:
 
 - `adrouter.sqlite`: projects, threads, turns, append-only events, approvals,
-  file baselines, command records, router outcomes, and settlement data.
-- `configuration.json`: server URL, sponsored-compute preference, cached model
-  metadata, and only the encrypted router-token ciphertext.
+  immutable task-policy snapshots, task presets, exact trusted guidance snapshots, session entries,
+  file/Git baselines, command records, router outcomes, and settlement data.
+- `configuration.json`: server URL, sponsored-compute preference, cached model metadata, and only
+  OS-encrypted installation/pending material or custom-router token ciphertext. Short-lived access
+  material remains memory-only.
 
 The selected project remains in its original location. The app does not create
 a separate worktree or copy the repository.
 
 The Changes drawer compares current bytes with the baseline captured for
 agent-authored mutations. Pre-existing user changes are not attributed to the
-agent. The drawer is for review and does not stage, commit, push, or silently
-rewrite files.
+agent. It never stages, commits, pushes, or rewrites files automatically; separate GUI Git controls
+exist only for writable tasks and require an expiring preview plus explicit allow-once resolution.
 
 If the application exits unexpectedly, active work is recovered as
 `interrupted`; it is not silently resumed. A normal Stop records `cancelled`.
@@ -579,6 +596,9 @@ The main code paths are:
 - `src/main/installation-auth.ts` and `platform-auth-crypto.ts` — enrollment, refresh, proof,
   revocation, diagnostics, and exact-byte signing.
 - `src/main/database.ts` — SQLite persistence and interrupted-run recovery.
+- `src/main/preset-service.ts` and `src/shared/task-policy.ts` — preset validation, immutable task
+  snapshots, redacted summaries, and capability mapping.
+- `src/main/guidance-service.ts` — bounded project Markdown discovery and exact-digest trust/load.
 - `src/main/runtime-supervisor.ts` — utility-process lifecycle, approvals, and
   event journaling.
 - `src/runtime/agent-session.ts` — Pi agent loop, context reconstruction,
@@ -587,7 +607,8 @@ The main code paths are:
 - `src/runtime/tools.ts` — desktop tool definitions and approval handoff.
 - `src/runtime/command-policy.ts` and `src/runtime/sandbox.ts` — command
   classification and OS sandbox configuration.
-- `src/main/review-service.ts` — agent-only baselines and review diffs.
+- `src/main/review-service.ts` and `src/main/git-workflow-service.ts` — agent-only baselines,
+  review diffs, and separately reviewed GUI Git operations.
 - `src/renderer/App.tsx` — onboarding, timeline, settings, approvals, and
   changes UI.
 

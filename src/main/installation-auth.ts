@@ -489,6 +489,7 @@ export class InstallationAuthManager {
         authenticated: false,
         mode: 'unknown',
         models: publicConfiguration.models,
+        catalog: publicConfiguration.catalog,
         modelsStale: publicConfiguration.models.length > 0,
         checkedAt: new Date(this.now()).toISOString(),
         error:
@@ -505,9 +506,16 @@ export class InstallationAuthManager {
         fetchFn: this.fetchFn,
       });
       const diagnostics = await client.diagnostics(signal);
-      if (diagnostics.authenticated && diagnostics.models.length > 0) {
-        await this.configuration.updateModels(diagnostics.models, diagnostics.checkedAt);
-      } else if (diagnostics.error?.includes('(426)')) {
+      if (diagnostics.models.length > 0 && diagnostics.catalog.compatibility === 'compatible') {
+        await this.configuration.updateModels(
+          diagnostics.models,
+          diagnostics.catalog,
+          diagnostics.checkedAt
+        );
+      } else {
+        await this.configuration.noteCatalogFailure(diagnostics.catalog, diagnostics.checkedAt);
+      }
+      if (diagnostics.error?.includes('(426)')) {
         await this.configuration.markReconnectRequired(
           diagnostics.authentication.minimumClientVersion,
           true
@@ -521,18 +529,48 @@ export class InstallationAuthManager {
         ...diagnostics,
         models: diagnostics.models.length > 0 ? diagnostics.models : latest.models,
         modelsStale: diagnostics.models.length === 0 && latest.models.length > 0,
+        catalog:
+          diagnostics.models.length > 0
+            ? diagnostics.catalog
+            : {
+                ...latest.catalog,
+                source: 'cache',
+                freshness: latest.models.length > 0 ? 'stale' : latest.catalog.freshness,
+                compatibility: diagnostics.catalog.compatibility,
+                lastAttemptAt: diagnostics.checkedAt,
+                errorCode: diagnostics.catalog.errorCode,
+              },
         authentication: latest.authentication,
       };
     } catch (error) {
+      const checkedAt = new Date(this.now()).toISOString();
+      await this.configuration.noteCatalogFailure(
+        {
+          ...publicConfiguration.catalog,
+          source: 'cache',
+          freshness: publicConfiguration.models.length > 0 ? 'stale' : 'bundled',
+          lastAttemptAt: checkedAt,
+          errorCode: 'catalog_unreachable',
+        },
+        checkedAt
+      );
+      const latest = await this.configuration.get();
       return {
         health: false,
         authenticated: false,
         mode: 'unknown',
-        models: publicConfiguration.models,
-        modelsStale: publicConfiguration.models.length > 0,
-        checkedAt: new Date(this.now()).toISOString(),
+        models: latest.models,
+        catalog: {
+          ...latest.catalog,
+          source: 'cache',
+          freshness: latest.models.length > 0 ? 'stale' : 'bundled',
+          lastAttemptAt: checkedAt,
+          errorCode: 'catalog_unreachable',
+        },
+        modelsStale: latest.models.length > 0,
+        checkedAt,
         error: error instanceof Error ? error.message : 'AdRouter authentication failed.',
-        authentication: (await this.configuration.get()).authentication,
+        authentication: latest.authentication,
       };
     }
   }
@@ -685,7 +723,11 @@ export class InstallationAuthManager {
         expiresAt: this.now() + token.expires_in * 1_000,
       };
       const diagnostics = await this.diagnosticsWithRecord(record, candidateAccess.token, signal);
-      if (!diagnostics.authenticated) {
+      if (
+        !diagnostics.authenticated ||
+        diagnostics.models.length === 0 ||
+        diagnostics.catalog.compatibility !== 'compatible'
+      ) {
         this.statusValue = safeStatus(
           pending,
           'failed',
@@ -696,6 +738,7 @@ export class InstallationAuthManager {
       await this.configuration.completeEnrollment(
         record,
         diagnostics.models,
+        diagnostics.catalog,
         diagnostics.checkedAt
       );
       this.access = candidateAccess;

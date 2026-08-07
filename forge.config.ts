@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { readdir, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
 import { MakerZIP } from '@electron-forge/maker-zip';
 import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
@@ -9,6 +9,27 @@ import { VitePlugin } from '@electron-forge/plugin-vite';
 import type { ForgeConfig } from '@electron-forge/shared-types';
 
 const enableInspectorForE2E = process.env.ADROUTER_E2E_BUILD === '1';
+
+const requireCompleteEnvironment = (name: string, fields: string[]): boolean => {
+  const present = fields.filter((field) => Boolean(process.env[field]));
+  if (present.length > 0 && present.length !== fields.length) {
+    throw new Error(`${name} requires all of: ${fields.join(', ')}.`);
+  }
+  return present.length === fields.length;
+};
+
+const protectedMacSigning = requireCompleteEnvironment('Protected macOS signing', [
+  'ADROUTER_APPLE_SIGNING_IDENTITY',
+  'ADROUTER_APPLE_TEAM_IDENTIFIER',
+  'ADROUTER_APPLE_API_KEY_PATH',
+  'ADROUTER_APPLE_API_KEY_ID',
+  'ADROUTER_APPLE_API_ISSUER',
+]);
+const protectedWindowsSigning = requireCompleteEnvironment('Protected Windows signing', [
+  'ADROUTER_WINDOWS_SIGN_TOOL',
+  'ADROUTER_WINDOWS_SIGN_ARGUMENTS_FILE',
+  'ADROUTER_WINDOWS_SIGNER_SUBJECT',
+]);
 
 async function removeEmbeddedCodeSignatures(directory: string): Promise<void> {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -43,6 +64,16 @@ async function finalizeMacSignatures(
   }
 
   const entries = await readdir(buildPath, { withFileTypes: true });
+  if (protectedMacSigning) {
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name.endsWith('.app')) continue;
+      const appPath = join(buildPath, entry.name);
+      execFileSync('xcrun', ['stapler', 'staple', appPath], { stdio: 'inherit' });
+      execFileSync('xcrun', ['stapler', 'validate', appPath], { stdio: 'inherit' });
+    }
+    return;
+  }
+
   for (const entry of entries) {
     if (!entry.isDirectory() || !entry.name.endsWith('.app')) continue;
     execFileSync('codesign', ['--force', '--deep', '--sign', '-', join(buildPath, entry.name)], {
@@ -100,7 +131,7 @@ const config: ForgeConfig = {
     beforeCopyExtraResources: [hardenMacInfoPlistHook],
     appBundleId: 'com.adrouter.agent',
     appVersion: '0.1.0',
-    buildVersion: '10012',
+    buildVersion: '10013',
     appCategoryType: 'public.app-category.developer-tools',
     appCopyright: 'Copyright 2026 AdRouter Agent contributors',
     extraResource: ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'PRIVACY.md'],
@@ -113,11 +144,35 @@ const config: ForgeConfig = {
       },
       NSHighResolutionCapable: true,
     },
-    osxSign: {
-      identity: '-',
-      identityValidation: false,
-      optionsForFile: () => ({ hardenedRuntime: false }),
-    },
+    osxSign: protectedMacSigning
+      ? {
+          identity: process.env.ADROUTER_APPLE_SIGNING_IDENTITY,
+          optionsForFile: () => ({
+            hardenedRuntime: true,
+            entitlements: resolve('entitlements.mac.plist'),
+          }),
+        }
+      : {
+          identity: '-',
+          identityValidation: false,
+          optionsForFile: () => ({ hardenedRuntime: false }),
+        },
+    ...(protectedMacSigning
+      ? {
+          osxNotarize: {
+            appleApiKey: resolve(process.env.ADROUTER_APPLE_API_KEY_PATH as string),
+            appleApiKeyId: process.env.ADROUTER_APPLE_API_KEY_ID as string,
+            appleApiIssuer: process.env.ADROUTER_APPLE_API_ISSUER as string,
+          },
+        }
+      : {}),
+    ...(protectedWindowsSigning
+      ? {
+          windowsSign: {
+            hookModulePath: resolve('scripts', 'windows-azure-sign-hook.cjs'),
+          },
+        }
+      : {}),
   },
   rebuildConfig: {},
   makers: [new MakerZIP({}, ['darwin', 'linux', 'win32'])],
