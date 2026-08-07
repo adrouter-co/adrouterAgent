@@ -19,13 +19,30 @@ const api = {
     updatePreferences: vi.fn(),
   },
   projects: { open: vi.fn(), list: vi.fn(), get: vi.fn(), update: vi.fn(), remove: vi.fn() },
+  presets: { list: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
+  bundles: { list: vi.fn(), trust: vi.fn(), revoke: vi.fn() },
+  guidance: { list: vi.fn(), trust: vi.fn(), revoke: vi.fn(), readPrompt: vi.fn() },
+  automation: {
+    endpoint: vi.fn(),
+    pairings: vi.fn(),
+    approvePairing: vi.fn(),
+    denyPairing: vi.fn(),
+    clients: vi.fn(),
+    revokeClient: vi.fn(),
+  },
   threads: {
     create: vi.fn(),
     list: vi.fn(),
+    search: vi.fn(),
     get: vi.fn(),
+    label: vi.fn(),
+    continue: vi.fn(),
+    fork: vi.fn(),
     archive: vi.fn(),
     delete: vi.fn(),
   },
+  sessions: { export: vi.fn(), import: vi.fn() },
+  git: { preview: vi.fn(), resolve: vi.fn() },
   turns: { start: vi.fn(), steer: vi.fn(), queueFollowUp: vi.fn(), stop: vi.fn() },
   approvals: { resolve: vi.fn() },
   review: {
@@ -40,6 +57,16 @@ const api = {
 };
 
 beforeEach(() => {
+  api.presets.list.mockResolvedValue([]);
+  api.bundles.list.mockResolvedValue([]);
+  api.guidance.list.mockResolvedValue([]);
+  api.automation.endpoint.mockResolvedValue({
+    protocolVersion: 1,
+    endpoint: '/tmp/adrouter.sock',
+    kind: 'unix-socket',
+  });
+  api.automation.pairings.mockResolvedValue([]);
+  api.automation.clients.mockResolvedValue([]);
   api.configuration.enrollmentStatus.mockResolvedValue({
     state: 'idle',
     userCode: null,
@@ -197,13 +224,28 @@ describe('App onboarding', () => {
         {
           id: 'deepseek-v4-flash',
           provider: 'deepseek',
+          modelClass: 'flash',
           displayName: 'DeepSeek V4 Flash',
           providerLabel: 'DeepSeek',
+          description: 'Fast general-purpose coding model.',
           thinkingLevels: ['none', 'medium', 'high'],
           defaultThinkingLevel: 'medium',
+          contextWindow: 131_072,
+          maxInputTokens: 126_976,
+          maxOutputTokens: 4_096,
           configured: true,
         },
       ],
+      catalog: {
+        schemaVersion: 1,
+        digest: `sha256:${'a'.repeat(64)}`,
+        source: 'live',
+        freshness: 'fresh',
+        compatibility: 'compatible',
+        lastValidatedAt: '2026-07-12T00:00:00.000Z',
+        lastAttemptAt: '2026-07-12T00:00:00.000Z',
+        errorCode: null,
+      },
       modelsStale: false,
       checkedAt: '2026-07-12T00:00:00.000Z',
       error: null,
@@ -219,6 +261,7 @@ describe('App onboarding', () => {
     expect(await screen.findByRole('heading', { name: 'Connected' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'About AdRouter Agent' })).toBeInTheDocument();
     expect(screen.getByText('darwin · arm64')).toBeInTheDocument();
+    expect(screen.getByText('compatible · live/fresh')).toBeInTheDocument();
     const modelsDisclosure = screen.getByText('Available models').closest('details');
     expect(modelsDisclosure).not.toHaveAttribute('open');
     await userEvent.click(screen.getByText('Available models'));
@@ -495,6 +538,214 @@ describe('App onboarding', () => {
     expect(screen.getByLabelText('Sponsored compute tier B')).toBeInTheDocument();
   });
 
+  it('inserts trusted prompts explicitly and creates a task with an immutable preset snapshot', async () => {
+    const project = {
+      id: '11111111-1111-4111-8111-111111111111',
+      path: '/tmp/project',
+      displayName: 'project',
+      instructions: '',
+      repositoryInstructions: '',
+      repositoryInstructionFiles: [],
+      permissionMode: 'workspace-write' as const,
+      delegationEnabled: false,
+      git: null,
+      createdAt: '2026-07-11T12:00:00.000Z',
+      updatedAt: '2026-07-11T12:00:00.000Z',
+    };
+    const models = [
+      {
+        id: 'model-flash',
+        provider: 'router',
+        modelClass: 'flash' as const,
+        displayName: 'Model Flash',
+        providerLabel: 'Router',
+        description: 'Fast fixture model.',
+        thinkingLevels: ['none', 'medium'] as const,
+        defaultThinkingLevel: 'medium' as const,
+        contextWindow: 131_072,
+        maxInputTokens: 126_976,
+        maxOutputTokens: 4_096,
+        configured: true,
+      },
+      {
+        id: 'model-pro',
+        provider: 'router',
+        modelClass: 'pro' as const,
+        displayName: 'Model Pro',
+        providerLabel: 'Router',
+        description: 'Pro fixture model.',
+        thinkingLevels: ['medium', 'high'] as const,
+        defaultThinkingLevel: 'high' as const,
+        contextWindow: 131_072,
+        maxInputTokens: 126_976,
+        maxOutputTokens: 4_096,
+        configured: true,
+      },
+    ];
+    const capabilityPolicy = {
+      schemaVersion: 1 as const,
+      workspaceAccess: 'read-only' as const,
+      fileMutations: false,
+      generalCommands: false,
+      networkFetch: false,
+      dependencyChanges: false,
+      gitWrites: false,
+      delegation: false,
+    };
+    const preset = {
+      schemaVersion: 1 as const,
+      id: '33333333-3333-4333-8333-333333333333',
+      name: 'Review only',
+      model: 'model-pro',
+      thinkingLevel: 'high' as const,
+      extraInstructions: 'Report findings without changing files.',
+      capabilityPolicy,
+      digest: 'a'.repeat(64),
+      createdAt: '2026-07-11T12:00:00.000Z',
+      updatedAt: '2026-07-11T12:00:00.000Z',
+    };
+    const prompt = {
+      kind: 'prompt' as const,
+      id: 'review-changes',
+      name: 'Review changes',
+      description: 'Review the current patch.',
+      path: '.adrouter/prompts/review-changes.md',
+      digest: 'b'.repeat(64),
+      bytes: 128,
+      present: true,
+      trusted: true,
+      active: true,
+      trustedDigest: 'b'.repeat(64),
+      trustReason: null,
+    };
+    const skill = {
+      ...prompt,
+      kind: 'skill' as const,
+      id: 'safe-review',
+      name: 'Safe review',
+      path: '.adrouter/skills/safe-review/SKILL.md',
+      digest: 'c'.repeat(64),
+      trusted: false,
+      active: false,
+      trustedDigest: null,
+      trustReason: 'This exact project Markdown resource is not trusted.',
+    };
+    const thread = {
+      id: '22222222-2222-4222-8222-222222222222',
+      projectId: project.id,
+      title: 'Review the current patch and report findings.',
+      model: preset.model,
+      thinkingLevel: preset.thinkingLevel,
+      status: 'idle' as const,
+      archivedAt: null,
+      createdAt: '2026-07-11T12:00:00.000Z',
+      updatedAt: '2026-07-11T12:00:00.000Z',
+    };
+    const policy = {
+      schemaVersion: 1 as const,
+      source: 'preset' as const,
+      presetId: preset.id,
+      presetName: preset.name,
+      presetDigest: preset.digest,
+      capabilityPolicy,
+      capturedAt: '2026-07-11T12:00:00.000Z',
+      snapshotDigest: 'd'.repeat(64),
+      hasExtraInstructions: true,
+      extraInstructionsBytes: 39,
+    };
+    api.configuration.get.mockResolvedValue({
+      serverUrl: 'https://router.example',
+      sponsoredCompute: true,
+      tokenStored: true,
+      configured: true,
+      models,
+      selectedModel: 'model-flash',
+      selectedThinkingLevel: 'medium',
+      lastCheckedAt: null,
+    });
+    api.configuration.status.mockResolvedValue({
+      health: true,
+      authenticated: true,
+      mode: 'live',
+      models,
+      modelsStale: false,
+      checkedAt: '2026-07-12T00:00:00.000Z',
+      error: null,
+    });
+    api.projects.list.mockResolvedValue([project]);
+    api.presets.list.mockResolvedValue([preset]);
+    api.guidance.list.mockResolvedValue([prompt, skill]);
+    api.guidance.trust.mockResolvedValue({ ...skill, trusted: true, active: true });
+    api.guidance.readPrompt.mockResolvedValue({
+      kind: prompt.kind,
+      id: prompt.id,
+      name: prompt.name,
+      description: prompt.description,
+      path: prompt.path,
+      digest: prompt.digest,
+      content: 'Review the current patch and report findings.',
+    });
+    let taskCreated = false;
+    api.threads.list.mockImplementation(async () => (taskCreated ? [thread] : []));
+    api.threads.create.mockImplementation(async () => {
+      taskCreated = true;
+      return thread;
+    });
+    api.threads.get.mockResolvedValue({
+      thread,
+      policy,
+      turns: [],
+      events: [],
+      approvals: [],
+      checkpoints: [],
+      gitBaseline: null,
+      contextBudget: null,
+    });
+    api.turns.start.mockResolvedValue({});
+    api.review.getDiff.mockResolvedValue([]);
+    api.events.subscribe.mockResolvedValue('subscription-id');
+    api.events.unsubscribe.mockResolvedValue({ ok: true });
+    Object.defineProperty(window, 'adrouter', { configurable: true, value: api });
+
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: 'Settings' }));
+    await user.click(await screen.findByText('Trusted project Markdown'));
+    await user.click(await screen.findByRole('button', { name: 'Trust exact digest' }));
+    expect(api.guidance.trust).toHaveBeenCalledWith({
+      projectId: project.id,
+      kind: 'skill',
+      id: skill.id,
+      path: skill.path,
+      digest: skill.digest,
+    });
+    await user.click(screen.getByRole('button', { name: 'Insert prompt' }));
+    const composer = await screen.findByRole('textbox', { name: 'Task message' });
+    expect(composer).toHaveValue('Review the current patch and report findings.');
+    expect(api.turns.start).not.toHaveBeenCalled();
+
+    await user.selectOptions(screen.getByLabelText('Task preset'), preset.id);
+    await waitFor(() => expect(screen.getByLabelText('Router model')).toHaveValue(preset.model));
+    expect(screen.getByLabelText('Router model')).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() =>
+      expect(api.threads.create).toHaveBeenCalledWith({
+        projectId: project.id,
+        title: 'Review the current patch and report findings.',
+        model: preset.model,
+        thinkingLevel: preset.thinkingLevel,
+        presetId: preset.id,
+      })
+    );
+    await user.click(screen.getByRole('button', { name: 'History' }));
+    expect(await screen.findByLabelText('Immutable task policy')).toHaveTextContent(
+      'Review only · read-only'
+    );
+    expect(screen.getByLabelText('Immutable task policy')).not.toHaveTextContent(
+      preset.extraInstructions
+    );
+  });
+
   it('uses composer preferences, sends with Enter, preserves Shift+Enter, and permanently deletes chats', async () => {
     const project = {
       id: '11111111-1111-4111-8111-111111111111',
@@ -523,19 +774,29 @@ describe('App onboarding', () => {
       {
         id: 'model-flash',
         provider: 'router',
+        modelClass: 'flash' as const,
         displayName: 'Model Flash',
         providerLabel: 'Router',
+        description: 'Fast fixture model.',
         thinkingLevels: ['none', 'medium'] as const,
         defaultThinkingLevel: 'medium' as const,
+        contextWindow: 131_072,
+        maxInputTokens: 126_976,
+        maxOutputTokens: 4_096,
         configured: true,
       },
       {
         id: 'model-pro',
         provider: 'router',
+        modelClass: 'pro' as const,
         displayName: 'Model Pro',
         providerLabel: 'Router',
+        description: 'Pro fixture model.',
         thinkingLevels: ['medium', 'high'] as const,
         defaultThinkingLevel: 'high' as const,
+        contextWindow: 131_072,
+        maxInputTokens: 126_976,
+        maxOutputTokens: 4_096,
         configured: true,
       },
     ];

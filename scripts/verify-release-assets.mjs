@@ -3,17 +3,20 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
+import { validateManifest } from '../packages/agent-launcher/lib/manifest.mjs';
 
 const directory = resolve(process.argv[2] ?? 'out/release');
 const requireAcceptance = process.argv.includes('--require-acceptance');
 const manifest = JSON.parse(readFileSync(join(directory, 'artifact-manifest.json'), 'utf8'));
-assert.equal(manifest.schema, 3);
-assert.equal(manifest.distributionMode, 'credential-free-portable');
+assert.ok([3, 4].includes(manifest.schema), 'release manifest schema must be 3 or 4');
+const expectedDistributionMode =
+  manifest.schema === 3 ? 'credential-free-portable' : 'signed-release-metadata';
+assert.equal(manifest.distributionMode, expectedDistributionMode);
 assert.equal(manifest.repository, 'adrouter/adrouterAgent');
 assert.match(manifest.releaseVersion, /^\d+\.\d+\.\d+(?:-beta\.\d+)?$/);
 assert.equal(manifest.releaseTag, `v${manifest.releaseVersion}`);
 assert.equal(manifest.bundleShortVersion, '0.1.0');
-assert.equal(manifest.bundleVersion, '10012');
+assert.equal(manifest.bundleVersion, '10013');
 
 const expectedNames = [
   ...['darwin-universal', 'linux-x64', 'win32-x64'].flatMap((target) => [
@@ -56,6 +59,7 @@ const embeddedManifest = JSON.parse(
   })
 );
 assert.deepEqual(embeddedManifest, manifest.launcherManifest);
+const validatedEmbeddedManifest = validateManifest(embeddedManifest);
 const embeddedPackage = JSON.parse(
   execFileSync('tar', ['-xOzf', tarball, 'package/package.json'], { encoding: 'utf8' })
 );
@@ -63,15 +67,15 @@ assert.equal(embeddedPackage.name, '@adrouter/agent');
 assert.equal(embeddedPackage.version, manifest.releaseVersion);
 assert.equal(embeddedPackage.dependencies, undefined);
 assert.equal(embeddedPackage.scripts, undefined);
-assert.equal(embeddedManifest.schema, 3);
-assert.equal(embeddedManifest.distributionMode, 'credential-free-portable');
-assert.deepEqual(embeddedManifest.artifacts.map((artifact) => artifact.key).sort(), [
+assert.equal(embeddedManifest.schema, manifest.schema);
+assert.equal(validatedEmbeddedManifest.distributionMode, expectedDistributionMode);
+assert.deepEqual(validatedEmbeddedManifest.artifacts.map((artifact) => artifact.key).sort(), [
   'darwin-universal',
   'linux-x64',
   'win32-x64',
 ]);
-assert.equal(embeddedManifest.bundleIdentifier, 'com.adrouter.agent');
-assert.deepEqual(embeddedManifest.authentication, {
+assert.equal(validatedEmbeddedManifest.bundleIdentifier, 'com.adrouter.agent');
+assert.deepEqual(validatedEmbeddedManifest.authentication, {
   fixture: 'tests/fixtures/platform-auth-v1.json',
   fixtureSha256: '93a8ec8d4eba38f9165179aa0cdfe3316f8134a882bd0426bd83339af55d17f8',
   acceptanceAsset: 'authentication-acceptance.json',

@@ -7,7 +7,8 @@ should manually install the latest release before reporting a problem.
 
 | Version | Supported |
 | --- | --- |
-| 0.1.0-beta.12 | Yes |
+| 0.1.0-beta.13 | Yes |
+| 0.1.0-beta.12 | No |
 | 0.1.0-beta.11 | No |
 | 0.1.0-beta.10 | No |
 | 0.1.0-beta.9 | No |
@@ -37,12 +38,29 @@ Node.js, the filesystem, or child processes. File mutations and general
 commands require a fresh one-time approval and remain constrained by the
 workspace sandbox.
 
-The npm launcher accepts release metadata only from its embedded manifest. It
-downloads from an allowlist of GitHub HTTPS hosts, enforces a size bound,
-checks the exact target ZIP digest, rejects unsafe archive layouts and escaping
-symlinks, and applies target-specific executable/signature checks. Linux and
-Windows portable beta artifacts are unsigned; checksums prove artifact
-integrity, not publisher identity.
+Every task stores an immutable, versioned capability snapshot when it is created. Later project or
+preset edits cannot expand that task, and policy is rechecked before an operation can consume its
+one-use approval. Project-owned Markdown is accepted only from bounded `.adrouter/skills` and
+`.adrouter/prompts` paths, rejects symlinks/binary/executable-shaped or malformed resources, and is
+inactive until its exact path and digest are trusted. Changed or revoked skills cannot fall back to
+their prior content. Prompt templates require an explicit insert action and never auto-submit.
+
+Local automation never listens on TCP. On macOS and Linux it uses a short deterministic socket
+under `/tmp`, inside a directory that must be a real mode-0700 directory owned by the current user;
+the socket must be owned by that user and mode 0600. Windows uses a current-user-DACL named pipe.
+Every paired request remains scope-bound, signed, freshness-checked, nonce-protected, and bounded.
+
+The beta.13 npm launcher uses the credential-free schema-3 manifest and pins every platform ZIP to
+its canonical GitHub URL, exact SHA-256 digest, archive layout, platform, architecture, and bundle
+identity. Downloads remain bounded, archive paths and symlinks are validated, macOS must have the
+expected ad-hoc signature, and Linux/Windows are explicitly unsigned portable candidates. The
+launcher also contains fail-closed schema-4 Ed25519 verification for a future protected release,
+but signed update application remains disabled.
+
+Managed update activation retains one prior installation until the initialized app writes the exact
+owner-state healthy marker. A missing marker after the signed deadline restores the prior receipt and
+application without elevation. The launcher never changes quarantine, Gatekeeper, AppArmor, Windows
+security settings, or user consent.
 
 Official hosted authentication uses a user-approved Ed25519 installation. The main process is the
 only process that generates, decrypts, rotates, signs with, or revokes installation material.

@@ -8,6 +8,7 @@ vi.mock('electron', () => ({ shell: { openPath: vi.fn() } }));
 import { AppDatabase } from '@/main/database';
 import { ReviewService } from '@/main/review-service';
 import { sha256 } from '@/shared/security';
+import { projectDefaultPolicySnapshot } from '@/shared/task-policy';
 
 const directories: string[] = [];
 
@@ -87,6 +88,31 @@ describe('agent-only review reverts', () => {
       conflicts: ['user.ts'],
     });
     expect(await readFile(target, 'utf8')).toBe('export const max = 48;\n');
+
+    const blockedThread = database.createThread({
+      projectId: firstThread.projectId,
+      title: 'Read-only review',
+      model: 'opaque-model',
+      thinkingLevel: 'medium',
+      policySnapshot: projectDefaultPolicySnapshot({
+        permissionMode: 'read-only',
+        delegationEnabled: false,
+      }),
+    });
+    database.recordFileMutation({
+      threadId: blockedThread.id,
+      path: 'user.ts',
+      status: 'modified',
+      beforeBase64: Buffer.from(original).toString('base64'),
+      afterBase64: Buffer.from(agentVersion).toString('base64'),
+      beforeHash: sha256(original),
+      afterHash: sha256(agentVersion),
+    });
+    await writeFile(target, agentVersion);
+    await expect(review.revertFile(blockedThread.id, 'user.ts')).rejects.toThrow(
+      'disabled by this task policy'
+    );
+    expect(await readFile(target, 'utf8')).toBe(agentVersion);
     database.close();
   });
 });

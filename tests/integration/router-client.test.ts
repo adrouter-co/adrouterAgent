@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AdRouterClient, RouterHttpError } from '@/runtime/router-client';
+import catalog from '@/shared/catalog/adrouter-model-catalog.v1.json';
+
+const hostedCatalogPayload = (): string =>
+  JSON.stringify({
+    models: catalog.models.map((model) => ({ ...model, configured: true })),
+  });
 
 const turnInput = {
   model: 'opaque-model',
@@ -34,10 +40,15 @@ describe('AdRouterClient', () => {
               {
                 id: 'opaque-model',
                 provider: 'opaque',
+                model_class: 'flash',
                 display_name: 'Opaque Model',
                 provider_label: 'Opaque Labs',
+                description: 'A strict custom model descriptor.',
                 thinking_levels: ['none', 'high'],
                 default_thinking_level: 'high',
+                context_window: 131072,
+                max_input_tokens: 126976,
+                max_output_tokens: 4096,
                 configured: true,
               },
             ],
@@ -61,13 +72,24 @@ describe('AdRouterClient', () => {
       models: [
         {
           id: 'opaque-model',
+          modelClass: 'flash',
           displayName: 'Opaque Model',
           providerLabel: 'Opaque Labs',
+          description: 'A strict custom model descriptor.',
           thinkingLevels: ['none', 'high'],
           defaultThinkingLevel: 'high',
+          contextWindow: 131072,
+          maxInputTokens: 126976,
+          maxOutputTokens: 4096,
           configured: true,
         },
       ],
+      catalog: {
+        source: 'live',
+        freshness: 'fresh',
+        compatibility: 'compatible',
+        errorCode: null,
+      },
     });
     const events = await collect(client.turn(turnInput));
 
@@ -107,28 +129,20 @@ describe('AdRouterClient', () => {
     expect(body).not.toHaveProperty('runtime_mode');
   });
 
-  it('retries transient 409/502 responses but fails closed on authentication errors', async () => {
-    const retries: string[] = [];
-    const transientFetch: typeof fetch = vi
-      .fn()
-      .mockResolvedValueOnce(new Response('busy', { status: 409 }))
-      .mockResolvedValueOnce(new Response('upstream unavailable', { status: 502 }))
-      .mockResolvedValueOnce(new Response('{"type":"done"}\n', { status: 200 }));
-    const transientClient = new AdRouterClient({
-      serverUrl: 'https://router.example',
-      authentication: { mode: 'custom_bearer', token: 'never-log-me' },
-      fetchFn: transientFetch,
-    });
+  it('never automatically replays an ambiguous paid turn failure', async () => {
+    for (const status of [409, 502]) {
+      const transientFetch: typeof fetch = vi.fn(
+        async () => new Response('ambiguous failure', { status })
+      );
+      const transientClient = new AdRouterClient({
+        serverUrl: 'https://router.example',
+        authentication: { mode: 'custom_bearer', token: 'never-log-me' },
+        fetchFn: transientFetch,
+      });
 
-    await expect(
-      collect(
-        transientClient.turn({
-          ...turnInput,
-          onRetry: (attempt, reason) => retries.push(`${attempt}:${reason}`),
-        })
-      )
-    ).resolves.toEqual([{ type: 'done', usage: {} }]);
-    expect(retries).toHaveLength(2);
+      await expect(collect(transientClient.turn(turnInput))).rejects.toMatchObject({ status });
+      expect(transientFetch).toHaveBeenCalledTimes(1);
+    }
 
     const unauthorizedClient = new AdRouterClient({
       serverUrl: 'https://router.example',
@@ -138,6 +152,59 @@ describe('AdRouterClient', () => {
     await expect(collect(unauthorizedClient.turn(turnInput))).rejects.toBeInstanceOf(
       RouterHttpError
     );
+  });
+
+  it('preserves bounded machine error codes and numeric details without branching on display text', async () => {
+    const client = new AdRouterClient({
+      serverUrl: 'https://router.example',
+      authentication: { mode: 'custom_bearer', token: 'never-log-me' },
+      fetchFn: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: 'The request is too large for this model.',
+              code: 'input_limit_exceeded',
+              details: {
+                estimated_tokens: 200_000,
+                maximum_tokens: 126_976,
+                ignored_text: 'must not become machine detail',
+              },
+            }),
+            { status: 400, headers: { 'content-type': 'application/json' } }
+          )
+      ),
+    });
+
+    await expect(collect(client.turn(turnInput))).rejects.toMatchObject({
+      status: 400,
+      code: 'input_limit_exceeded',
+      details: { estimated_tokens: 200_000, maximum_tokens: 126_976 },
+      message: 'The request is too large for this model.',
+    });
+  });
+
+  it('drops malformed and oversized router error metadata', async () => {
+    const client = new AdRouterClient({
+      serverUrl: 'https://router.example',
+      authentication: { mode: 'custom_bearer', token: 'never-log-me' },
+      fetchFn: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: 'x'.repeat(2_000),
+              code: 'INVALID CODE',
+              details: { unsafe: 'value' },
+            }),
+            { status: 400 }
+          )
+      ),
+    });
+
+    await expect(collect(client.turn(turnInput))).rejects.toMatchObject({
+      code: null,
+      details: {},
+      message: 'AdRouter returned 400.',
+    });
   });
 
   it('propagates cancellation without a retry', async () => {
@@ -214,7 +281,7 @@ describe('AdRouterClient', () => {
       const url = String(input);
       calls.push({ url, init });
       if (url.endsWith('/health')) return new Response('{}', { status: 200 });
-      if (url.endsWith('/v1/models')) return new Response('{"models":["opaque-model"]}');
+      if (url.endsWith('/v1/models')) return new Response(hostedCatalogPayload());
       return new Response('{}', { status: 200 });
     });
     const client = new AdRouterClient({

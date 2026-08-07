@@ -10,16 +10,16 @@ adrouter-agent doctor --json
 adrouter-agent
 ```
 
-Supported targets are macOS 12+ arm64/x64, Ubuntu Desktop 24.04 LTS x64, and
-Windows 11 x64 with Node.js 22.19 or newer. The launcher accepts no alternate
-download URL or checksum. It validates the embedded schema-3 manifest, bounded
-download, SHA-256 digest, archive paths, executable, managed receipt, and
-staged-update rollback before activation.
+Supported targets are macOS 12+ universal arm64/x64, Ubuntu Desktop 24.04 LTS x64, and Windows 11
+x64 with Node.js 22.19 or newer. The beta.13 candidate uses the credential-free schema-3 manifest;
+the launcher accepts no alternate artifact URL or checksum and validates bounded downloads, exact
+SHA-256 digests, archive paths, native architecture, bundle identity, and managed receipts.
 
-macOS is ad-hoc signed but not notarized. Linux and Windows portable beta
-artifacts are unsigned. Run `adrouter-agent doctor --json` for the platform
-install path, artifact key, verification result, sandbox readiness, and static
-setup guidance. The launcher never disables host security or auto-elevates.
+The beta.13 candidate remains ad-hoc/unsigned. A future schema-4 release requires
+Developer ID/notarization on macOS and Authenticode on Windows; Linux identity is provided by the
+signed manifest and exact artifact checksum. Update checks use a fixed HTTPS origin with no
+redirects. Applying an update is compiled off until exact signed acceptance is recorded. The
+launcher never disables host security or auto-elevates.
 
 Commands:
 
@@ -27,6 +27,13 @@ Commands:
 - `adrouter-agent install`: install and verify without launching.
 - `adrouter-agent doctor --json`: report installation, integrity, and sandbox
   status without credentials.
+- `adrouter-agent pair`: create a protected Ed25519 client key through the installed app helper and
+  show a comparison code for explicit GUI approval.
+- `adrouter-agent rpc METHOD --params '{}' --json`: call the bounded owner-only local RPC with a
+  paired key; mutations still pause for the same fresh approval.
+- `adrouter-agent update check --channel beta --json`: verify fixed-origin signed update metadata.
+- `adrouter-agent update apply --channel beta --confirm`: reserved behind the disabled signed
+  acceptance gate.
 - `adrouter-agent --version`: print the package/release version without a
   network request.
 

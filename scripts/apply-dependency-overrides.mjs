@@ -15,12 +15,17 @@ const replacements = [
   {
     name: 'brace-expansion',
     sourceName: 'adrouter-brace-expansion-patch',
-    version: '5.0.8',
+    version: '5.0.9',
   },
   {
     name: 'protobufjs',
     sourceName: 'adrouter-protobufjs-patch',
     version: '7.6.5',
+  },
+  {
+    name: 'undici',
+    sourceName: 'adrouter-undici-patch',
+    version: '8.9.0',
   },
 ];
 
@@ -63,5 +68,5 @@ for (const [before, after] of [
 writeFileSync(crossZipPath, crossZipSource);
 
 console.log(
-  'Applied two audited dependency overrides and the reviewed cross-zip Node 25 compatibility patch.'
+  'Applied three audited dependency overrides and the reviewed cross-zip Node 25 compatibility patch.'
 );

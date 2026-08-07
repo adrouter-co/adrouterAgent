@@ -1,6 +1,9 @@
-const ALLOWED_ADVISORY_URL = 'https://github.com/advisories/GHSA-mh99-v99m-4gvg';
-const PRODUCTION_BRACE_PATH =
-  'node_modules/@earendil-works/pi-coding-agent/node_modules/brace-expansion';
+const ALLOWED_ADVISORY_URLS = new Set([
+  'https://github.com/advisories/GHSA-mh99-v99m-4gvg',
+  'https://github.com/advisories/GHSA-rgw5-rvv9-x895',
+]);
+const PRODUCTION_BRACE_PATH = 'node_modules/brace-expansion';
+const PRODUCTION_UNDICI_PATH = 'node_modules/@earendil-works/pi-coding-agent/node_modules/undici';
 
 function fail(message) {
   throw new Error(`Build dependency audit policy failed: ${message}`);
@@ -45,8 +48,12 @@ export function evaluateBuildAudit(report, lock) {
   }
   if (!lock?.packages) fail('package-lock.json is malformed');
   const productionBrace = lock.packages[PRODUCTION_BRACE_PATH];
-  if (productionBrace?.version !== '5.0.8') {
-    fail('the production Pi brace-expansion path is not patched to 5.0.8');
+  if (productionBrace?.version !== '5.0.9') {
+    fail('the production Pi brace-expansion path is not patched to 5.0.9');
+  }
+  const productionUndici = lock.packages[PRODUCTION_UNDICI_PATH];
+  if (productionUndici?.version !== '8.9.0') {
+    fail('the production Pi undici path is not patched to 8.9.0');
   }
 
   const checked = [];
@@ -57,7 +64,7 @@ export function evaluateBuildAudit(report, lock) {
     }
     const terminals = terminalAdvisories(name, report.vulnerabilities);
     for (const advisory of terminals) {
-      if (advisory.url !== ALLOWED_ADVISORY_URL || advisory.severity !== 'high') {
+      if (!ALLOWED_ADVISORY_URLS.has(advisory.url) || advisory.severity !== 'high') {
         fail(`${name} reaches unapproved advisory ${advisory.url ?? advisory.source ?? 'unknown'}`);
       }
     }
@@ -65,5 +72,5 @@ export function evaluateBuildAudit(report, lock) {
     checked.push(name);
   }
 
-  return { allowedAdvisory: ALLOWED_ADVISORY_URL, checked };
+  return { allowedAdvisories: [...ALLOWED_ADVISORY_URLS], checked };
 }

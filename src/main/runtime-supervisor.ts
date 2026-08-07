@@ -1,70 +1,133 @@
 import { type UtilityProcess, utilityProcess } from 'electron';
-import { INSTALLATION_AUTH_PROTOCOL_VERSION, MAX_SIGNED_REQUEST_BYTES } from '../shared/constants';
+import {
+  GUIDANCE_PROTOCOL_VERSION,
+  INSTALLATION_AUTH_PROTOCOL_VERSION,
+  MAX_SIGNED_REQUEST_BYTES,
+  OPERATION_BROKER_PROTOCOL_VERSION,
+} from '../shared/constants';
 import {
   type ApprovalDecision,
   ApprovalSchema,
+  ApprovalV2Schema,
   type EventType,
   type JournalEvent,
+  type RouterModelDescriptor,
+  type SessionEntry,
   SettlementSchema,
   type TurnStatus,
 } from '../shared/contracts';
 import {
   type RuntimeAuthRequest,
   type RuntimeEvent,
+  type RuntimeGuidanceRequest,
+  type RuntimeOperationRequest,
   type RuntimePortMessage,
   RuntimePortMessageSchema,
   type RuntimeRequest,
 } from '../shared/runtime-protocol';
 import { now, safeRecord } from '../shared/security';
+import { effectiveTaskCapabilityPolicy, operationCapabilityAllowed } from '../shared/task-policy';
+import type { BundleService } from './bundle-service';
 import type { RuntimeRouterConfiguration } from './configuration-store';
 import type { AppDatabase } from './database';
+import type { GuidanceService } from './guidance-service';
 import type { InstallationAuthManager } from './installation-auth';
+import { OperationBroker } from './operation-broker';
+import { type RuntimeLease, RuntimeScheduler, resolveRuntimeLease } from './runtime-scheduler';
 
 const terminalStatuses = new Set<TurnStatus>(['completed', 'failed', 'cancelled', 'interrupted']);
+const MAX_AUTH_REQUESTS_PER_RUNTIME = 2;
 
 interface ActiveRuntime {
   threadId: string;
   turnId: string;
   child: UtilityProcess;
   closing: boolean;
+  exited: boolean;
   ready: Promise<void>;
   markReady: () => void;
   authMode: RuntimeRouterConfiguration['authMode'];
   authControllers: Map<string, AbortController>;
+  operationControllers: Map<string, AbortController>;
+  guidanceRequests: Set<string>;
+}
+
+interface PendingRuntime {
+  input: StartRuntimeInput;
+  router: RuntimeRouterConfiguration;
+  lease: RuntimeLease;
 }
 
 export interface StartRuntimeInput {
   threadId: string;
   turnId: string;
   input: string;
-  model: string;
+  model: RouterModelDescriptor;
   thinkingLevel: 'none' | 'medium' | 'high';
   runtimeMode: 'auto' | 'mock' | 'live';
-  history: Array<{
-    type: EventType;
-    turnId: string | null;
-    payload: Record<string, unknown>;
-    timestamp: string;
-  }>;
+  history: SessionEntry[];
 }
 
 export class RuntimeSupervisor {
-  private active?: ActiveRuntime;
+  private readonly active = new Map<string, ActiveRuntime>();
+  private readonly pending = new Map<string, PendingRuntime>();
+  private delegationHandler?: (
+    manifest: Parameters<OperationBroker['execute']>[0]
+  ) => Promise<Record<string, unknown>>;
 
   public constructor(
     private readonly database: AppDatabase,
     private readonly runtimePath: string,
     private readonly emitJournalEvent: (event: JournalEvent) => void,
-    private readonly installationAuth?: InstallationAuthManager
+    private readonly installationAuth?: InstallationAuthManager,
+    private readonly operationBroker = new OperationBroker(),
+    private readonly scheduler = new RuntimeScheduler(),
+    private readonly bundleService?: BundleService,
+    private readonly guidanceService?: GuidanceService
   ) {}
 
   public get activeThreadId(): string | undefined {
-    return this.active?.threadId;
+    return this.active.keys().next().value ?? this.pending.keys().next().value;
+  }
+
+  public get activeThreadIds(): string[] {
+    return [...this.active.keys(), ...this.pending.keys()];
+  }
+
+  public get hasTasks(): boolean {
+    return this.active.size > 0 || this.pending.size > 0;
+  }
+
+  public get runtimeStatus(): {
+    capacity: number;
+    active: number;
+    queued: number;
+    activeThreadIds: string[];
+  } {
+    return {
+      capacity: this.scheduler.capacity,
+      active: this.active.size,
+      queued: this.pending.size,
+      activeThreadIds: this.activeThreadIds,
+    };
+  }
+
+  public hasThread(threadId: string): boolean {
+    return this.active.has(threadId) || this.pending.has(threadId);
+  }
+
+  public setDelegationHandler(
+    handler: (
+      manifest: Parameters<OperationBroker['execute']>[0]
+    ) => Promise<Record<string, unknown>>
+  ): void {
+    if (this.delegationHandler) throw new Error('The delegation handler is already configured.');
+    this.delegationHandler = handler;
   }
 
   public async start(input: StartRuntimeInput, router: RuntimeRouterConfiguration): Promise<void> {
-    if (this.active) {
-      throw new Error('Another AdRouter Agent task is already running.');
+    if (this.hasThread(input.threadId)) {
+      throw new Error('This task already has an active or queued runtime.');
     }
     const thread = this.database.getThread(input.threadId);
     if (!thread) {
@@ -74,6 +137,47 @@ export class RuntimeSupervisor {
     if (!project) {
       throw new Error('Project not found.');
     }
+
+    const policy = this.database.getTaskPolicySnapshot(thread.id);
+    const lease = await resolveRuntimeLease(
+      input.turnId,
+      project.path,
+      effectiveTaskCapabilityPolicy(policy.capabilityPolicy).workspaceAccess
+    );
+    const pending: PendingRuntime = { input, router, lease };
+    this.pending.set(input.threadId, pending);
+    try {
+      this.scheduler.enqueue({
+        ...lease,
+        start: () => this.launch(pending),
+        cancelled: () => {
+          if (this.pending.get(input.threadId) === pending) this.pending.delete(input.threadId);
+        },
+        failed: (error) => this.handleLaunchFailure(pending, error),
+      });
+    } catch (error) {
+      this.pending.delete(input.threadId);
+      throw error;
+    }
+  }
+
+  private async launch(pending: PendingRuntime): Promise<void> {
+    const { input, router } = pending;
+    if (this.pending.get(input.threadId) !== pending) {
+      throw new Error('The queued task is no longer available.');
+    }
+    const thread = this.database.getThread(input.threadId);
+    if (!thread) throw new Error('Thread not found.');
+    const project = this.database.getProject(thread.projectId);
+    if (!project) throw new Error('Project not found.');
+    const policy = this.database.getTaskPolicySnapshot(thread.id);
+    const effectivePolicy = effectiveTaskCapabilityPolicy(policy.capabilityPolicy);
+    const bundlePrompt = this.bundleService?.promptContent(project.id) ?? {
+      instructions: '',
+      sources: [],
+    };
+    const trustedSkills = (await this.guidanceService?.runtimeSkillIndex(project.id)) ?? [];
+    this.pending.delete(input.threadId);
 
     const child = utilityProcess.fork(this.runtimePath, [], {
       serviceName: 'AdRouter Agent Runtime',
@@ -88,12 +192,15 @@ export class RuntimeSupervisor {
       turnId: input.turnId,
       child,
       closing: false,
+      exited: false,
       ready,
       markReady,
       authMode: router.authMode,
       authControllers: new Map(),
+      operationControllers: new Map(),
+      guidanceRequests: new Set(),
     };
-    this.active = active;
+    this.active.set(input.threadId, active);
 
     child.on('message', (message) => {
       void this.handlePortMessage(active, message).catch((error) =>
@@ -102,6 +209,11 @@ export class RuntimeSupervisor {
     });
     child.once('error', (error) => this.handleCrash(active, error));
     child.once('exit', (code) => {
+      active.exited = true;
+      if (active.closing) {
+        this.scheduler.release(active.turnId);
+        return;
+      }
       if (!active.closing) {
         this.handleCrash(active, new Error(`The agent runtime exited with code ${code}.`));
       }
@@ -128,7 +240,38 @@ export class RuntimeSupervisor {
           displayName: project.displayName,
           instructions: project.instructions,
           repositoryInstructions: project.repositoryInstructions,
-          permissionMode: project.permissionMode,
+          repositoryInstructionFiles: project.repositoryInstructionFiles,
+          bundleInstructions: bundlePrompt.instructions,
+          taskInstructions: policy.extraInstructions,
+          trustedSkills,
+          promptSources: [
+            ...project.repositoryInstructionFiles.map((path) => ({
+              kind: 'repository' as const,
+              label: path,
+              digest: null,
+            })),
+            ...(project.instructions
+              ? [{ kind: 'custom' as const, label: 'Project instructions', digest: null }]
+              : []),
+            ...bundlePrompt.sources,
+            ...(policy.presetName && policy.presetDigest
+              ? [
+                  {
+                    kind: 'preset' as const,
+                    label: `Task preset: ${policy.presetName}`,
+                    digest: policy.presetDigest,
+                  },
+                ]
+              : []),
+            ...trustedSkills.map((skill) => ({
+              kind: 'guidance' as const,
+              label: `${skill.path}: ${skill.name}`,
+              digest: skill.digest,
+            })),
+          ],
+          permissionMode: effectivePolicy.workspaceAccess,
+          delegationEnabled: effectivePolicy.delegation,
+          capabilityPolicy: policy.capabilityPolicy,
         },
         model: input.model,
         thinkingLevel: input.thinkingLevel,
@@ -160,12 +303,23 @@ export class RuntimeSupervisor {
     });
   }
 
+  public clearQueue(threadId: string): void {
+    this.send(this.getActive(threadId), { type: 'clear-queue' });
+  }
+
   public stop(threadId: string): void {
+    const pending = this.pending.get(threadId);
+    if (pending) {
+      this.pending.delete(threadId);
+      this.scheduler.cancel(pending.input.turnId);
+      this.finishPending(pending, 'cancelled', null);
+      return;
+    }
     const active = this.getActive(threadId);
     this.rejectPendingApprovals(active, 'The task was stopped.');
     this.send(active, { type: 'stop' });
     setTimeout(() => {
-      if (this.active === active) {
+      if (this.isCurrent(active)) {
         this.finish(active, 'cancelled', null);
       }
     }, 5_000).unref();
@@ -195,10 +349,15 @@ export class RuntimeSupervisor {
   }
 
   private getActive(threadId: string): ActiveRuntime {
-    if (!this.active || this.active.threadId !== threadId) {
+    const active = this.active.get(threadId);
+    if (!active) {
       throw new Error('This thread has no active agent runtime.');
     }
-    return this.active;
+    return active;
+  }
+
+  private isCurrent(active: ActiveRuntime): boolean {
+    return this.active.get(active.threadId) === active;
   }
 
   private send(active: ActiveRuntime, request: RuntimeRequest): void {
@@ -220,6 +379,19 @@ export class RuntimeSupervisor {
       active.authControllers.delete(message.requestId);
       return;
     }
+    if (message.kind === 'operation-request') {
+      await this.handleOperationRequest(active, message);
+      return;
+    }
+    if (message.kind === 'operation-cancel') {
+      active.operationControllers.get(message.requestId)?.abort();
+      active.operationControllers.delete(message.requestId);
+      return;
+    }
+    if (message.kind === 'guidance-request') {
+      await this.handleGuidanceRequest(active, message);
+      return;
+    }
     if (message.kind !== 'event') {
       return;
     }
@@ -231,10 +403,11 @@ export class RuntimeSupervisor {
     request: RuntimeAuthRequest
   ): Promise<void> {
     if (
-      this.active !== active ||
+      !this.isCurrent(active) ||
       active.closing ||
       active.authMode !== 'installation' ||
-      !this.installationAuth
+      !this.installationAuth ||
+      active.authControllers.size >= MAX_AUTH_REQUESTS_PER_RUNTIME
     ) {
       this.sendAuthFailure(active, request.requestId, 'Installation signing is unavailable.');
       return;
@@ -258,7 +431,7 @@ export class RuntimeSupervisor {
         nonce: request.nonce,
         signal: controller.signal,
       });
-      if (this.active === active && !active.closing && !controller.signal.aborted) {
+      if (this.isCurrent(active) && !active.closing && !controller.signal.aborted) {
         active.child.postMessage({
           kind: 'auth-response',
           protocolVersion: INSTALLATION_AUTH_PROTOCOL_VERSION,
@@ -281,10 +454,155 @@ export class RuntimeSupervisor {
   }
 
   private sendAuthFailure(active: ActiveRuntime, requestId: string, error: string): void {
-    if (this.active !== active || active.closing) return;
+    if (!this.isCurrent(active) || active.closing) return;
     active.child.postMessage({
       kind: 'auth-response',
       protocolVersion: INSTALLATION_AUTH_PROTOCOL_VERSION,
+      requestId,
+      ok: false,
+      error,
+    } satisfies RuntimePortMessage);
+  }
+
+  private async handleOperationRequest(
+    active: ActiveRuntime,
+    request: RuntimeOperationRequest
+  ): Promise<void> {
+    if (
+      !this.isCurrent(active) ||
+      active.closing ||
+      request.manifest.threadId !== active.threadId ||
+      request.manifest.turnId !== active.turnId ||
+      active.operationControllers.size >= 2
+    ) {
+      this.sendOperationFailure(active, request.requestId, 'Structured operation is unavailable.');
+      return;
+    }
+    const policy = this.database.getTaskPolicySnapshot(active.threadId);
+    if (!operationCapabilityAllowed(policy.capabilityPolicy, request.manifest.capability)) {
+      this.sendOperationFailure(
+        active,
+        request.requestId,
+        'The task capability policy does not allow this structured operation.'
+      );
+      return;
+    }
+    try {
+      this.database.consumeOperationApproval(
+        request.manifest.operationId,
+        request.manifest.binding
+      );
+    } catch {
+      this.sendOperationFailure(
+        active,
+        request.requestId,
+        'The allow-once operation approval is invalid, expired, or already consumed.'
+      );
+      return;
+    }
+    const controller = new AbortController();
+    active.operationControllers.set(request.requestId, controller);
+    try {
+      const result =
+        request.manifest.capability === 'delegation.start'
+          ? await this.executeDelegation(request.manifest, controller.signal)
+          : await this.operationBroker.execute(request.manifest, controller.signal, {
+              workspaceWriteAllowed:
+                effectiveTaskCapabilityPolicy(policy.capabilityPolicy).workspaceAccess ===
+                'workspace-write',
+            });
+      if (this.isCurrent(active) && !active.closing && !controller.signal.aborted) {
+        active.child.postMessage({
+          kind: 'operation-response',
+          protocolVersion: OPERATION_BROKER_PROTOCOL_VERSION,
+          requestId: request.requestId,
+          ok: true,
+          result,
+        } satisfies RuntimePortMessage);
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        this.sendOperationFailure(
+          active,
+          request.requestId,
+          error instanceof Error ? error.message : 'The structured operation failed.'
+        );
+      }
+    } finally {
+      active.operationControllers.delete(request.requestId);
+    }
+  }
+
+  private async executeDelegation(
+    manifest: Parameters<OperationBroker['execute']>[0],
+    signal: AbortSignal
+  ): Promise<Record<string, unknown>> {
+    if (signal.aborted) throw new Error('The delegated task request was cancelled.');
+    if (!this.delegationHandler) throw new Error('Delegated tasks are unavailable.');
+    return this.delegationHandler(manifest);
+  }
+
+  private sendOperationFailure(active: ActiveRuntime, requestId: string, error: string): void {
+    if (!this.isCurrent(active) || active.closing) return;
+    active.child.postMessage({
+      kind: 'operation-response',
+      protocolVersion: OPERATION_BROKER_PROTOCOL_VERSION,
+      requestId,
+      ok: false,
+      error: error.slice(0, 1_000),
+    } satisfies RuntimePortMessage);
+  }
+
+  private async handleGuidanceRequest(
+    active: ActiveRuntime,
+    request: RuntimeGuidanceRequest
+  ): Promise<void> {
+    if (
+      !this.isCurrent(active) ||
+      active.closing ||
+      !this.guidanceService ||
+      active.guidanceRequests.size >= 1
+    ) {
+      this.sendGuidanceFailure(active, request.requestId, 'Trusted guidance is unavailable.');
+      return;
+    }
+    const thread = this.database.getThread(active.threadId);
+    if (!thread) {
+      this.sendGuidanceFailure(active, request.requestId, 'The task is unavailable.');
+      return;
+    }
+    active.guidanceRequests.add(request.requestId);
+    try {
+      const guidance = await this.guidanceService.readSkill(
+        thread.projectId,
+        request.id,
+        request.digest
+      );
+      if (this.isCurrent(active) && !active.closing) {
+        active.child.postMessage({
+          kind: 'guidance-response',
+          protocolVersion: GUIDANCE_PROTOCOL_VERSION,
+          requestId: request.requestId,
+          ok: true,
+          content: guidance.content,
+        } satisfies RuntimePortMessage);
+      }
+    } catch {
+      this.sendGuidanceFailure(
+        active,
+        request.requestId,
+        'The exact trusted guidance changed, was removed, or was revoked.'
+      );
+    } finally {
+      active.guidanceRequests.delete(request.requestId);
+    }
+  }
+
+  private sendGuidanceFailure(active: ActiveRuntime, requestId: string, error: string): void {
+    if (!this.isCurrent(active) || active.closing) return;
+    active.child.postMessage({
+      kind: 'guidance-response',
+      protocolVersion: GUIDANCE_PROTOCOL_VERSION,
       requestId,
       ok: false,
       error,
@@ -295,7 +613,7 @@ export class RuntimeSupervisor {
     active: ActiveRuntime,
     runtimeEvent: RuntimeEvent
   ): Promise<void> {
-    if (this.active !== active) {
+    if (!this.isCurrent(active)) {
       return;
     }
     const payload = safeRecord(runtimeEvent.payload);
@@ -308,7 +626,9 @@ export class RuntimeSupervisor {
         decision: null,
         resolvedAt: null,
       });
-      this.database.createApproval(approval);
+      this.database.createApproval(
+        approval.version === 2 ? ApprovalV2Schema.parse(approval) : approval
+      );
     }
     if (runtimeEvent.type === 'file.change') {
       this.database.recordFileMutation({
@@ -361,8 +681,56 @@ export class RuntimeSupervisor {
     this.emitLastEvent(threadId);
   }
 
+  private handleLaunchFailure(pending: PendingRuntime, error: unknown): void {
+    const active = this.active.get(pending.input.threadId);
+    if (active?.turnId === pending.input.turnId) {
+      this.handleCrash(active, error);
+      return;
+    }
+    if (this.pending.get(pending.input.threadId) === pending) {
+      this.pending.delete(pending.input.threadId);
+    }
+    const turn = this.database.getTurn(pending.input.turnId);
+    if (!turn || terminalStatuses.has(turn.status)) return;
+    const event = this.database.appendEvent(
+      pending.input.threadId,
+      pending.input.turnId,
+      'runtime.crash',
+      {
+        error: error instanceof Error ? error.message : String(error),
+        timestamp: now(),
+      }
+    );
+    this.emitJournalEvent(event);
+    this.finishPending(
+      pending,
+      'failed',
+      'The isolated agent runtime could not be started safely.'
+    );
+  }
+
+  private finishPending(
+    pending: PendingRuntime,
+    status: Extract<TurnStatus, 'failed' | 'cancelled' | 'interrupted'>,
+    error: string | null
+  ): void {
+    const { threadId, turnId } = pending.input;
+    const turn = this.database.getTurn(turnId);
+    if (!turn || terminalStatuses.has(turn.status)) return;
+    this.database.updateTurnStatus(turnId, status, error);
+    this.emitLastEvent(threadId);
+    this.setThreadStatus(threadId, status === 'failed' ? 'failed' : 'idle');
+    const evidence = this.database.appendEvent(
+      threadId,
+      turnId,
+      'final.evidence',
+      this.database.buildEvidence(threadId, turnId)
+    );
+    this.emitJournalEvent(evidence);
+  }
+
   private finish(active: ActiveRuntime, status: TurnStatus, error: string | null): void {
-    if (this.active !== active) {
+    if (!this.isCurrent(active)) {
       return;
     }
     this.rejectPendingApprovals(
@@ -387,8 +755,11 @@ export class RuntimeSupervisor {
     active.closing = true;
     for (const controller of active.authControllers.values()) controller.abort();
     active.authControllers.clear();
+    for (const controller of active.operationControllers.values()) controller.abort();
+    active.operationControllers.clear();
     active.child.kill();
-    this.active = undefined;
+    this.active.delete(active.threadId);
+    if (active.exited) this.scheduler.release(active.turnId);
   }
 
   private rejectPendingApprovals(active: ActiveRuntime, reason: string): void {
@@ -403,7 +774,7 @@ export class RuntimeSupervisor {
   }
 
   private handleCrash(active: ActiveRuntime, error: unknown): void {
-    if (this.active !== active) {
+    if (!this.isCurrent(active)) {
       return;
     }
     const event = this.database.appendEvent(active.threadId, active.turnId, 'runtime.crash', {

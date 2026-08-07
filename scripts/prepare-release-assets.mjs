@@ -13,6 +13,7 @@ import { basename, join, resolve } from 'node:path';
 import { buildLauncherPackage } from './build-launcher-package.mjs';
 
 const version = process.argv[2];
+const credentialFreeBeta = process.env.ADROUTER_CREDENTIAL_FREE_BETA === '1';
 const packageJson = JSON.parse(readFileSync(resolve('package.json'), 'utf8'));
 if (
   !version ||
@@ -78,6 +79,7 @@ const appSboms = artifacts.map((artifact) => {
 const launcher = buildLauncherPackage({
   artifacts: artifacts.map((artifact) => ({ key: artifact.key, zipPath: artifact.destination })),
   outputDirectory: releaseDirectory,
+  credentialFreeBeta,
 });
 const npmSbom = execFileSync(
   'npm',
@@ -110,14 +112,14 @@ writeFileSync(
   join(releaseDirectory, 'artifact-manifest.json'),
   `${JSON.stringify(
     {
-      schema: 3,
-      distributionMode: 'credential-free-portable',
+      schema: credentialFreeBeta ? 3 : 4,
+      distributionMode: credentialFreeBeta ? 'credential-free-portable' : 'signed-release-metadata',
       repository: 'adrouter/adrouterAgent',
       sourceCommit: process.env.GITHUB_SHA ?? null,
       releaseVersion: version,
       releaseTag: `v${version}`,
       bundleShortVersion: '0.1.0',
-      bundleVersion: '10012',
+      bundleVersion: '10013',
       launcherManifest: launcher.manifest,
       files: records,
     },

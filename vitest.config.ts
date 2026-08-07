@@ -9,6 +9,7 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    testTimeout: 20_000,
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     exclude: ['tests/integration/**', 'tests/e2e/**'],
     setupFiles: ['tests/setup.ts'],

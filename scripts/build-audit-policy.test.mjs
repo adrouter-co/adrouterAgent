@@ -32,9 +32,8 @@ function fixture() {
     },
     lock: {
       packages: {
-        'node_modules/@earendil-works/pi-coding-agent/node_modules/brace-expansion': {
-          version: '5.0.8',
-        },
+        'node_modules/brace-expansion': { version: '5.0.9' },
+        'node_modules/@earendil-works/pi-coding-agent/node_modules/undici': { version: '8.9.0' },
         'node_modules/dev-tool/node_modules/brace-expansion': { version: '1.1.12', dev: true },
         'node_modules/dev-tool/node_modules/minimatch': { version: '3.1.2', dev: true },
       },
@@ -73,8 +72,13 @@ test('rejects an affected production node', () => {
 
 test('rejects a missing production Pi patch', () => {
   const { report, lock } = fixture();
-  lock.packages[
-    'node_modules/@earendil-works/pi-coding-agent/node_modules/brace-expansion'
-  ].version = '2.0.1';
-  assert.throws(() => evaluateBuildAudit(report, lock), /not patched to 5.0.8/);
+  lock.packages['node_modules/brace-expansion'].version = '2.0.1';
+  assert.throws(() => evaluateBuildAudit(report, lock), /not patched to 5.0.9/);
+});
+
+test('rejects a missing production Pi undici patch', () => {
+  const { report, lock } = fixture();
+  lock.packages['node_modules/@earendil-works/pi-coding-agent/node_modules/undici'].version =
+    '8.8.0';
+  assert.throws(() => evaluateBuildAudit(report, lock), /undici path is not patched to 8.9.0/);
 });

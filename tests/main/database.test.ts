@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AppDatabase } from '@/main/database';
+import { createOperationManifest } from '@/runtime/operation-manifest';
 import { rebuildThreadProjection } from '@/shared/projection';
 
 const directories: string[] = [];
@@ -59,6 +60,42 @@ describe('append-only event database', () => {
       repositoryInstructions: 'Legacy repository instructions.',
       repositoryInstructionFiles: ['legacy imported instructions'],
     });
+    database.close();
+  });
+
+  it('backfills missing task policies once and keeps later project-default changes immutable', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'adrouter-db-policy-'));
+    directories.push(directory);
+    const path = join(directory, 'agent.sqlite');
+    let database = new AppDatabase(path);
+    const project = database.createProject({
+      path: '/tmp/policy-project',
+      displayName: 'policy-project',
+      instructions: '',
+      permissionMode: 'workspace-write',
+      delegationEnabled: true,
+      git: null,
+    });
+    const thread = database.createThread({
+      projectId: project.id,
+      title: 'Legacy policy task',
+      model: 'auto',
+      thinkingLevel: 'medium',
+    });
+    database.close();
+
+    const raw = new DatabaseSync(path);
+    raw.prepare('UPDATE threads SET policy_snapshot = NULL WHERE id = ?').run(thread.id);
+    raw.close();
+    database = new AppDatabase(path);
+    const backfilled = database.getTaskPolicySnapshot(thread.id);
+    expect(backfilled).toMatchObject({
+      source: 'project-defaults',
+      capabilityPolicy: { workspaceAccess: 'workspace-write', delegation: true },
+    });
+    database.updateProject(project.id, { permissionMode: 'read-only', delegationEnabled: false });
+    expect(database.getTaskPolicySnapshot(thread.id)).toEqual(backfilled);
+    expect(database.getThreadDetail(thread.id).policy).not.toHaveProperty('extraInstructions');
     database.close();
   });
 
@@ -128,7 +165,7 @@ describe('append-only event database', () => {
     ).toEqual(['deny']);
     expect(database.recoverInterruptedRuns().map((candidate) => candidate.id)).toContain(turn.id);
     expect(database.getTurn(turn.id)?.status).toBe('interrupted');
-    expect(database.getThread(thread.id)?.status).toBe('idle');
+    expect(database.getThread(thread.id)?.status).toBe('interrupted');
     database.close();
   });
 
@@ -190,6 +227,158 @@ describe('append-only event database', () => {
       pass: false,
       testsExecuted: [{ argv: ['npm', 'test'], passed: false }],
     });
+    database.close();
+  });
+
+  it('consumes a bound v2 approval exactly once and rejects thread-wide approval', async () => {
+    const database = await createDatabase();
+    const project = database.createProject({
+      path: '/tmp/approval-project',
+      displayName: 'approval-project',
+      instructions: '',
+      permissionMode: 'workspace-write',
+      git: null,
+    });
+    const thread = database.createThread({
+      projectId: project.id,
+      title: 'Approval',
+      model: 'auto',
+      thinkingLevel: 'medium',
+    });
+    const turn = database.createTurn(thread.id, 'Approve one operation');
+    const manifest = createOperationManifest({
+      capability: 'file.delete',
+      threadId: thread.id,
+      turnId: turn.id,
+      workspace: '/tmp/approval-project',
+      targets: [{ path: 'old.txt', kind: 'file', beforeHash: 'a'.repeat(64) }],
+    });
+    database.createApproval({
+      version: 2,
+      id: manifest.operationId,
+      threadId: thread.id,
+      turnId: turn.id,
+      kind: 'structured-operation',
+      argv: null,
+      path: 'old.txt',
+      cwd: manifest.workspace,
+      risk: 'high',
+      reason: 'Delete the exact reviewed file.',
+      operationManifest: manifest,
+      expiresAt: manifest.expiresAt,
+      decision: null,
+      createdAt: manifest.createdAt,
+      resolvedAt: null,
+    });
+
+    expect(() => database.resolveApproval(manifest.operationId, 'allow-thread')).toThrow(
+      'allowed once'
+    );
+    database.resolveApproval(manifest.operationId, 'allow-once');
+    expect(database.consumeOperationApproval(manifest.operationId, manifest.binding)).toMatchObject(
+      { id: manifest.operationId, version: 2 }
+    );
+    expect(() => database.consumeOperationApproval(manifest.operationId, manifest.binding)).toThrow(
+      'already consumed'
+    );
+    database.close();
+  });
+
+  it('projects only sponsor-free model context and records safe between-call checkpoints', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'adrouter-session-db-'));
+    directories.push(directory);
+    const path = join(directory, 'agent.sqlite');
+    let database = new AppDatabase(path);
+    const project = database.createProject({
+      path: '/tmp/session-project',
+      displayName: 'session-project',
+      instructions: '',
+      permissionMode: 'workspace-write',
+      git: null,
+    });
+    const thread = database.createThread({
+      projectId: project.id,
+      title: 'Durable context',
+      model: 'deepseek-v4-flash',
+      thinkingLevel: 'medium',
+    });
+    const turn = database.createTurn(thread.id, 'Preserve the API');
+    database.appendEvent(thread.id, turn.id, 'message.user', {
+      role: 'user',
+      text: 'Preserve the API',
+    });
+    database.appendEvent(thread.id, turn.id, 'sponsor.update', {
+      sponsor: { brandName: 'Must remain display only' },
+    });
+    database.appendEvent(thread.id, turn.id, 'message.complete', {
+      role: 'assistant',
+      text: 'I will inspect it.',
+      content: [{ type: 'text', text: 'I will inspect it.' }],
+      model: 'deepseek-v4-flash',
+      usage: {
+        input: 100,
+        output: 20,
+        cacheRead: 2,
+        cacheWrite: 0,
+        totalTokens: 122,
+        cost: { total: 99 },
+      },
+    });
+    database.appendEvent(thread.id, turn.id, 'tool.result', {
+      name: 'read_file',
+      toolCallId: 'call-1',
+      output: '{"content":"ok"}',
+      isError: false,
+    });
+    database.appendEvent(thread.id, turn.id, 'compaction', {
+      outcome: 'completed',
+      summary: 'Preserve the API and continue from the inspected file.',
+      droppedMessages: 1,
+      tokensBefore: 120_000,
+      tokensAfter: 32_000,
+      modelAssisted: true,
+      retainedMessages: [
+        {
+          role: 'compactionSummary',
+          summary: 'Preserve the API and continue from the inspected file.',
+          tokensBefore: 120_000,
+          timestamp: Date.now(),
+        },
+      ],
+    });
+    database.appendEvent(thread.id, turn.id, 'session.checkpoint', {
+      safe: true,
+      completedToolResults: 1,
+    });
+
+    const entries = database.listSessionEntries(thread.id);
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'user_message',
+      'assistant_message',
+      'tool_result',
+      'compaction',
+    ]);
+    expect(JSON.stringify(entries)).not.toMatch(/sponsor|settlement|"cost"/i);
+    expect(entries[1]?.payload.usage).toEqual({
+      input: 100,
+      output: 20,
+      cacheRead: 2,
+      cacheWrite: 0,
+      totalTokens: 122,
+    });
+    expect(database.listSessionCheckpoints(thread.id)).toEqual([
+      expect.objectContaining({
+        threadId: thread.id,
+        turnId: turn.id,
+        entryOrdinal: 4,
+        safe: true,
+      }),
+    ]);
+
+    database.close();
+    database = new AppDatabase(path);
+    expect(database.listSessionEntries(thread.id)).toHaveLength(4);
+    expect(database.listSessionCheckpoints(thread.id)).toHaveLength(1);
     database.close();
   });
 

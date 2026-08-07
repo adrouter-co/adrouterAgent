@@ -18,7 +18,12 @@ const safeString = (value, pattern, label) => {
   );
 };
 
-const resultKeys = [
+export const ACCEPTANCE_ARTIFACT_COUNT = 4;
+export const ACCEPTANCE_COHORT_COUNT = 2;
+export const LEGACY_ACCEPTANCE_SCHEMA = 1;
+export const SIGNED_ACCEPTANCE_SCHEMA = 2;
+
+export const resultKeys = [
   'enrollment',
   'profile',
   'turn',
@@ -30,6 +35,12 @@ const resultKeys = [
   'revocation',
   'upgradePolicy',
   'localSecretCleanup',
+];
+export const signedResultKeys = [
+  ...resultKeys,
+  'manifestSignature',
+  'platformSignature',
+  'healthyStartRollback',
 ];
 
 export const validateAcceptance = (value, manifest) => {
@@ -53,7 +64,11 @@ export const validateAcceptance = (value, manifest) => {
     ],
     'acceptance'
   );
-  assert.equal(value.schema, 1);
+  assert.ok(
+    [LEGACY_ACCEPTANCE_SCHEMA, SIGNED_ACCEPTANCE_SCHEMA].includes(value.schema),
+    'acceptance schema must be 1 or 2'
+  );
+  const signedAcceptance = value.schema === SIGNED_ACCEPTANCE_SCHEMA;
   assert.equal(value.clientKind, 'desktop');
   assert.equal(value.repository, 'adrouter/adrouterAgent');
   assert.equal(value.package, '@adrouter/agent');
@@ -63,7 +78,7 @@ export const validateAcceptance = (value, manifest) => {
   assert.equal(value.redactionAttestation, true);
 
   assert.ok(
-    Array.isArray(value.artifacts) && value.artifacts.length === 4,
+    Array.isArray(value.artifacts) && value.artifacts.length === ACCEPTANCE_ARTIFACT_COUNT,
     'exactly four artifacts are required'
   );
   const artifactNames = new Set();
@@ -76,21 +91,41 @@ export const validateAcceptance = (value, manifest) => {
   }
 
   assert.ok(
-    Array.isArray(value.cohorts) && value.cohorts.length === 2,
+    Array.isArray(value.cohorts) && value.cohorts.length === ACCEPTANCE_COHORT_COUNT,
     'exactly two acceptance cohorts are required'
   );
   const primary = value.cohorts.find((cohort) => cohort.environmentClass === 'primary-operator');
-  const second = value.cohorts.find((cohort) => cohort.environmentClass === 'second-os');
-  assert.ok(primary && second, 'primary-operator and second-os cohorts are required');
-  assert.notEqual(primary.os, second.os, 'the second cohort must use a distinct operating system');
-  const windows = value.cohorts.find((cohort) => cohort.os === 'windows');
-  assert.ok(windows, 'a physical Windows 11 x64 acceptance cohort is required');
-  assert.equal(windows.architecture, 'x64', 'the Windows acceptance cohort must use x64');
-  assert.match(
-    windows.runtimeVersion,
-    /^Windows 11(?:[ ._+-].*)?$/,
-    'the Windows acceptance cohort must identify Windows 11'
-  );
+  if (signedAcceptance) {
+    const windowsX64 = value.cohorts.find(
+      (cohort) => cohort.environmentClass === 'physical-windows-x64'
+    );
+    assert.ok(
+      primary && windowsX64,
+      'signed acceptance requires primary and physical Windows 11 x64 cohorts'
+    );
+    assert.equal(windowsX64.os, 'windows');
+    assert.equal(windowsX64.architecture, 'x64');
+    assert.match(windowsX64.runtimeVersion, /^Windows 11(?:[ ._+-].*)?$/);
+  } else {
+    const second = value.cohorts.find((cohort) => cohort.environmentClass === 'second-os');
+    assert.ok(primary && second, 'primary-operator and second-os cohorts are required');
+    assert.notEqual(
+      primary.os,
+      second.os,
+      'the second cohort must use a distinct operating system'
+    );
+    assert.equal(
+      second.os,
+      'windows',
+      'the physical Windows 11 x64 acceptance cohort must use Windows'
+    );
+    assert.equal(second.architecture, 'x64', 'the Windows acceptance cohort must use x64');
+    assert.match(
+      second.runtimeVersion,
+      /^Windows 11(?:[ ._+-].*)?$/,
+      'the Windows acceptance cohort must identify Windows 11'
+    );
+  }
   for (const cohort of value.cohorts) {
     exactKeys(
       cohort,
@@ -106,18 +141,29 @@ export const validateAcceptance = (value, manifest) => {
       ],
       'cohort'
     );
-    assert.ok(['primary-operator', 'second-os'].includes(cohort.environmentClass));
+    assert.ok(
+      (signedAcceptance
+        ? ['primary-operator', 'physical-windows-x64']
+        : ['primary-operator', 'second-os']
+      ).includes(cohort.environmentClass)
+    );
     assert.ok(['macos', 'ubuntu', 'windows'].includes(cohort.os));
     assert.ok(['arm64', 'x64'].includes(cohort.architecture));
     assert.equal(cohort.storageClassification, 'os_encrypted');
     safeString(cohort.runtimeVersion, /^[A-Za-z0-9][A-Za-z0-9 ._+-]{0,99}$/, 'runtimeVersion');
     safeString(cohort.recorder, /^[A-Za-z0-9][A-Za-z0-9 ._@-]{0,99}$/, 'recorder');
     assert.ok(Number.isFinite(Date.parse(cohort.testedAt)), 'testedAt must be an ISO timestamp');
-    exactKeys(cohort.results, resultKeys, 'results');
-    for (const key of resultKeys) assert.equal(cohort.results[key], true, `${key} did not pass`);
+    const expectedResults = signedAcceptance ? signedResultKeys : resultKeys;
+    exactKeys(cohort.results, expectedResults, 'results');
+    for (const key of expectedResults) {
+      assert.equal(cohort.results[key], true, `${key} did not pass`);
+    }
   }
 
   if (manifest) {
+    if (manifest.schema === 4) {
+      assert.equal(value.schema, 2, 'schema-4 releases require signed acceptance schema 2');
+    }
     assert.equal(value.candidateVersion, manifest.releaseVersion);
     assert.equal(value.releaseTag, manifest.releaseTag);
     assert.equal(value.sourceCommit, manifest.sourceCommit);

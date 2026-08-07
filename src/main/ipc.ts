@@ -15,14 +15,21 @@ import {
   ThreadDetailSchema,
 } from '../shared/contracts';
 import { createId } from '../shared/security';
+import type { BundleService } from './bundle-service';
 import type { ConfigurationStore } from './configuration-store';
 import type { AppDatabase } from './database';
+import type { GitWorkflowService } from './git-workflow-service';
+import type { GuidanceService } from './guidance-service';
 import type { InstallationAuthManager } from './installation-auth';
+import type { LocalRpcServer } from './local-rpc-server';
+import type { PresetService } from './preset-service';
 import type { RepositoryService } from './repository-service';
 import type { ReviewService } from './review-service';
 import type { RuntimeSupervisor } from './runtime-supervisor';
+import type { SessionService } from './session-service';
+import type { TaskService } from './task-service';
 
-const PUBLIC_RELEASE_VERSION = '0.1.0-beta.12';
+const PUBLIC_RELEASE_VERSION = '0.1.0-beta.13';
 
 interface Subscription {
   id: string;
@@ -99,18 +106,32 @@ export interface IpcDependencies {
   review: ReviewService;
   supervisor: RuntimeSupervisor;
   installationAuth: InstallationAuthManager;
+  bundles: BundleService;
+  guidance: GuidanceService;
+  presets: PresetService;
+  tasks: TaskService;
+  automation: LocalRpcServer;
+  sessions: SessionService;
+  gitWorkflows: GitWorkflowService;
 }
 
 export const registerIpcHandlers = (dependencies: IpcDependencies): EventSubscriptions => {
-  const { configuration, database, installationAuth, repositories, review, supervisor } =
-    dependencies;
+  const {
+    automation,
+    bundles,
+    configuration,
+    database,
+    installationAuth,
+    gitWorkflows,
+    guidance,
+    repositories,
+    review,
+    sessions,
+    supervisor,
+    tasks,
+    presets,
+  } = dependencies;
   const subscriptions = new EventSubscriptions();
-  const publishLastEvent = (threadId: string): void => {
-    const event = database.listEvents(threadId).at(-1);
-    if (event) {
-      subscriptions.publish(event);
-    }
-  };
 
   register('configuration.get', () => configuration.get());
   register('configuration.save', (raw) =>
@@ -121,8 +142,8 @@ export const registerIpcHandlers = (dependencies: IpcDependencies): EventSubscri
   );
   register('configuration.status', () => installationAuth.diagnostics());
   register('configuration.signOut', () => {
-    if (supervisor.activeThreadId) {
-      throw new Error('Stop the active agent task before signing out.');
+    if (supervisor.hasTasks) {
+      throw new Error('Stop all active or queued agent tasks before signing out.');
     }
     return installationAuth.signOut();
   });
@@ -178,6 +199,7 @@ export const registerIpcHandlers = (dependencies: IpcDependencies): EventSubscri
       displayName: input.displayName,
       instructions: input.instructions,
       permissionMode: input.permissionMode,
+      delegationEnabled: input.delegationEnabled,
     });
   });
   register('projects.remove', (raw) => {
@@ -185,87 +207,151 @@ export const registerIpcHandlers = (dependencies: IpcDependencies): EventSubscri
     return { ok: true };
   });
 
-  register('threads.create', (raw) => {
+  register('presets.list', () => presets.list());
+  register('presets.create', (raw) =>
+    presets.create(IpcSchemas['presets.create'].input.parse(raw))
+  );
+  register('presets.update', (raw) =>
+    presets.update(IpcSchemas['presets.update'].input.parse(raw))
+  );
+  register('presets.delete', (raw) => {
+    presets.delete(IpcSchemas['presets.delete'].input.parse(raw).id);
+    return { ok: true } as const;
+  });
+
+  register('bundles.list', (raw) => {
+    const input = IpcSchemas['bundles.list'].input.parse(raw);
+    return bundles.list(input.projectId);
+  });
+  register('bundles.trust', (raw) => {
+    const input = IpcSchemas['bundles.trust'].input.parse(raw);
+    return bundles.trust(input.projectId, input.bundleId, input.version, input.digest);
+  });
+  register('bundles.revoke', (raw) => {
+    const input = IpcSchemas['bundles.revoke'].input.parse(raw);
+    return bundles.revoke(input.projectId, input.bundleId);
+  });
+
+  register('guidance.list', (raw) => {
+    const input = IpcSchemas['guidance.list'].input.parse(raw);
+    return guidance.list(input.projectId);
+  });
+  register('guidance.trust', (raw) => {
+    const input = IpcSchemas['guidance.trust'].input.parse(raw);
+    return guidance.trust(input.projectId, input.kind, input.id, input.path, input.digest);
+  });
+  register('guidance.revoke', (raw) => {
+    const input = IpcSchemas['guidance.revoke'].input.parse(raw);
+    return guidance.revoke(input.projectId, input.kind, input.id);
+  });
+  register('guidance.readPrompt', (raw) => {
+    const input = IpcSchemas['guidance.readPrompt'].input.parse(raw);
+    return guidance.readPrompt(input.projectId, input.id, input.digest);
+  });
+
+  register('automation.endpoint', () => ({
+    protocolVersion: 1 as const,
+    endpoint: automation.endpoint,
+    kind: process.platform === 'win32' ? ('named-pipe' as const) : ('unix-socket' as const),
+  }));
+  register('automation.pairings', () => automation.listPendingPairings());
+  register('automation.approvePairing', (raw) =>
+    automation.approvePairing(IpcSchemas['automation.approvePairing'].input.parse(raw).pairingId)
+  );
+  register('automation.denyPairing', (raw) =>
+    automation.denyPairing(IpcSchemas['automation.denyPairing'].input.parse(raw).pairingId)
+  );
+  register('automation.clients', () => database.listAutomationClients());
+  register('automation.revokeClient', (raw) =>
+    database.revokeAutomationClient(IpcSchemas['automation.revokeClient'].input.parse(raw).clientId)
+  );
+
+  register('threads.create', async (raw) => {
     const input = IpcSchemas['threads.create'].input.parse(raw);
+    const policySnapshot = input.presetId
+      ? await presets.resolveSnapshot(input.presetId, {
+          model: input.model,
+          thinkingLevel: input.thinkingLevel,
+        })
+      : undefined;
     return database.createThread({
       projectId: input.projectId,
       title: input.title,
       model: input.model,
       thinkingLevel: input.thinkingLevel,
+      ...(policySnapshot ? { policySnapshot } : {}),
     });
   });
   register('threads.list', (raw) =>
     database.listThreads(IpcSchemas['threads.list'].input.parse(raw).projectId)
   );
+  register('threads.search', (raw) => {
+    const input = IpcSchemas['threads.search'].input.parse(raw);
+    return database.searchThreads(input.projectId, input.query);
+  });
   register('threads.get', (raw) =>
     ThreadDetailSchema.parse(
       database.getThreadDetail(IpcSchemas['threads.get'].input.parse(raw).id)
     )
   );
+  register('threads.label', (raw) => {
+    const input = IpcSchemas['threads.label'].input.parse(raw);
+    return database.labelThread(input.id, input.label);
+  });
+  register('threads.continue', (raw) => {
+    const id = IpcSchemas['threads.continue'].input.parse(raw).id;
+    if (supervisor.hasThread(id)) throw new Error('The task runtime is still active.');
+    return database.continueInterruptedThread(id);
+  });
+  register('threads.fork', (raw) => {
+    const input = IpcSchemas['threads.fork'].input.parse(raw);
+    return sessions.fork(input.checkpointId, input.title);
+  });
   register('threads.archive', (raw) =>
     database.archiveThread(IpcSchemas['threads.archive'].input.parse(raw).id)
   );
   register('threads.delete', (raw) => {
     const id = IpcSchemas['threads.delete'].input.parse(raw).id;
-    if (supervisor.activeThreadId === id) throw new Error('A running chat cannot be deleted.');
+    if (supervisor.hasThread(id)) throw new Error('A running or queued task cannot be deleted.');
     database.deleteThread(id);
     return { ok: true };
   });
 
+  register('sessions.export', (raw) => {
+    const input = IpcSchemas['sessions.export'].input.parse(raw);
+    return sessions.export(input.threadId, input.includeBilling);
+  });
+  register('sessions.exportHtml', (raw) => {
+    const input = IpcSchemas['sessions.exportHtml'].input.parse(raw);
+    return sessions.exportHtml(input.threadId);
+  });
+  register('sessions.previewImport', (raw) => {
+    const input = IpcSchemas['sessions.previewImport'].input.parse(raw);
+    return sessions.previewImport(input.projectId, input.sourceName, input.content);
+  });
+  register('sessions.confirmImport', (raw) => {
+    const input = IpcSchemas['sessions.confirmImport'].input.parse(raw);
+    return sessions.confirmImport(input.previewId, input.presetId);
+  });
+  register('sessions.copyLast', (raw) => {
+    const input = IpcSchemas['sessions.copyLast'].input.parse(raw);
+    clipboard.writeText(sessions.lastAssistantText(input.threadId));
+    return { ok: true } as const;
+  });
+  register('sessions.import', (raw) => {
+    const input = IpcSchemas['sessions.import'].input.parse(raw);
+    return sessions.import(input.projectId, input.session, input.presetId);
+  });
+  register('git.preview', (raw) =>
+    gitWorkflows.preview(IpcSchemas['git.preview'].input.parse(raw))
+  );
+  register('git.resolve', (raw) => {
+    const input = IpcSchemas['git.resolve'].input.parse(raw);
+    return gitWorkflows.resolve(input.operationId, input.decision);
+  });
+
   register('turns.start', async (raw) => {
-    const input = IpcSchemas['turns.start'].input.parse(raw);
-    if (supervisor.activeThreadId) {
-      throw new Error('Only one agent task can run at a time.');
-    }
-    const thread = database.getThread(input.threadId);
-    if (!thread) {
-      throw new Error('Thread not found.');
-    }
-    const history = database.listEvents(input.threadId).map((event) => ({
-      type: event.type,
-      turnId: event.turnId,
-      payload: event.payload,
-      timestamp: event.timestamp,
-    }));
-    const storedConfiguration = await configuration.get();
-    const selectedModel = storedConfiguration.models.find((model) => model.id === input.model);
-    if (!selectedModel) throw new Error('The selected model is not available from AdRouter.');
-    if (!selectedModel.thinkingLevels.includes(input.thinkingLevel)) {
-      throw new Error('The selected thinking level is not supported by this model.');
-    }
-    const router = await configuration.getRuntimeConfiguration();
-    database.updateThreadPreferences(input.threadId, input.model, input.thinkingLevel);
-    const turn = database.createTurn(input.threadId, input.input, input.model, input.thinkingLevel);
-    const queuedEvent = database.listEvents(input.threadId).at(-1);
-    database.updateTurnStatus(turn.id, 'preparing');
-    const preparingEvent = database.listEvents(input.threadId).at(-1);
-    const userEvent = database.appendEvent(input.threadId, turn.id, 'message.user', {
-      role: 'user',
-      text: input.input,
-    });
-    database.updateThreadStatus(input.threadId, 'running');
-    const threadRunningEvent = database.listEvents(input.threadId).at(-1);
-    for (const event of [queuedEvent, preparingEvent, userEvent, threadRunningEvent]) {
-      if (event) {
-        subscriptions.publish(event);
-      }
-    }
-    try {
-      await supervisor.start({ ...input, turnId: turn.id, history }, router);
-    } catch (error) {
-      database.updateTurnStatus(
-        turn.id,
-        'failed',
-        error instanceof Error ? error.message : String(error)
-      );
-      database.updateThreadStatus(input.threadId, 'failed');
-      throw error;
-    }
-    const savedTurn = database.getTurn(turn.id);
-    if (!savedTurn) {
-      throw new Error('Turn could not be loaded after creation.');
-    }
-    return savedTurn;
+    return tasks.start(IpcSchemas['turns.start'].input.parse(raw));
   });
   register('turns.steer', (raw) => {
     const input = IpcSchemas['turns.steer'].input.parse(raw);
@@ -277,26 +363,21 @@ export const registerIpcHandlers = (dependencies: IpcDependencies): EventSubscri
     supervisor.queueFollowUp(input.threadId, input.input);
     return { ok: true };
   });
+  register('turns.compact', async (raw) => {
+    return tasks.compact(IpcSchemas['turns.compact'].input.parse(raw).threadId);
+  });
+  register('turns.clearQueue', (raw) => {
+    supervisor.clearQueue(IpcSchemas['turns.clearQueue'].input.parse(raw).threadId);
+    return { ok: true };
+  });
   register('turns.stop', (raw) => {
-    supervisor.stop(IpcSchemas['turns.stop'].input.parse(raw).threadId);
+    tasks.stop(IpcSchemas['turns.stop'].input.parse(raw).threadId);
     return { ok: true };
   });
 
   register('approvals.resolve', (raw) => {
     const input = IpcSchemas['approvals.resolve'].input.parse(raw);
-    supervisor.assertApprovalActive(input.approvalId);
-    const approval = database.resolveApproval(input.approvalId, input.decision);
-    const event = database.appendEvent(approval.threadId, approval.turnId, 'approval.resolved', {
-      approvalId: approval.id,
-      decision: approval.decision,
-    });
-    subscriptions.publish(event);
-    database.updateTurnStatus(approval.turnId, 'running');
-    publishLastEvent(approval.threadId);
-    database.updateThreadStatus(approval.threadId, 'running');
-    publishLastEvent(approval.threadId);
-    supervisor.resolveApproval(approval.id, input.decision);
-    return ApprovalSchema.parse(approval);
+    return ApprovalSchema.parse(tasks.resolveApproval(input.approvalId, input.decision));
   });
 
   register('review.getDiff', (raw) => {

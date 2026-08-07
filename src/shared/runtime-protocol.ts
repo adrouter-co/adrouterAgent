@@ -1,13 +1,24 @@
 import { z } from 'zod';
-import { INSTALLATION_AUTH_PROTOCOL_VERSION, MAX_SIGNED_REQUEST_BYTES } from './constants';
+import {
+  GUIDANCE_PROTOCOL_VERSION,
+  INSTALLATION_AUTH_PROTOCOL_VERSION,
+  MAX_SIGNED_REQUEST_BYTES,
+  OPERATION_BROKER_PROTOCOL_VERSION,
+} from './constants';
 import {
   ApprovalDecisionSchema,
   EventTypeSchema,
   IdSchema,
   JsonObjectSchema,
+  OperationManifestV1Schema,
   PermissionModeSchema,
+  PromptSourceSchema,
+  RouterModelDescriptorSchema,
   RuntimeModeSchema,
+  SessionEntrySchema,
+  TaskCapabilityPolicyV1Schema,
   ThinkingLevelSchema,
+  TrustedSkillIndexSchema,
 } from './contracts';
 
 const RuntimeRouterSchema = z.discriminatedUnion('authMode', [
@@ -32,22 +43,22 @@ export const RuntimeStartSchema = z.object({
     displayName: z.string().min(1),
     instructions: z.string(),
     repositoryInstructions: z.string(),
+    repositoryInstructionFiles: z.array(z.string().min(1).max(500)).max(20),
+    bundleInstructions: z.string().max(256 * 1024),
+    taskInstructions: z.string().max(32 * 1024),
+    trustedSkills: z.array(TrustedSkillIndexSchema).max(32),
+    promptSources: z.array(PromptSourceSchema).max(128),
     permissionMode: PermissionModeSchema,
+    delegationEnabled: z.boolean(),
+    capabilityPolicy: TaskCapabilityPolicyV1Schema,
   }),
-  model: z.string().min(1),
+  model: RouterModelDescriptorSchema,
   thinkingLevel: ThinkingLevelSchema,
   runtimeMode: RuntimeModeSchema,
   sponsoredCompute: z.boolean(),
   router: RuntimeRouterSchema,
   input: z.string().min(1),
-  history: z.array(
-    z.object({
-      type: EventTypeSchema,
-      turnId: IdSchema.nullable(),
-      payload: JsonObjectSchema,
-      timestamp: z.string().datetime({ offset: true }),
-    })
-  ),
+  history: z.array(SessionEntrySchema),
   allowedCommands: z.array(z.array(z.string().min(1)).min(1)),
 });
 
@@ -56,6 +67,7 @@ export const RuntimeQueueSchema = z.object({
   type: z.literal('queue-follow-up'),
   input: z.string().min(1),
 });
+export const RuntimeClearQueueSchema = z.object({ type: z.literal('clear-queue') });
 export const RuntimeStopSchema = z.object({ type: z.literal('stop') });
 export const RuntimeApprovalSchema = z.object({
   type: z.literal('approval'),
@@ -67,6 +79,7 @@ export const RuntimeRequestSchema = z.discriminatedUnion('type', [
   RuntimeStartSchema,
   RuntimeSteerSchema,
   RuntimeQueueSchema,
+  RuntimeClearQueueSchema,
   RuntimeStopSchema,
   RuntimeApprovalSchema,
 ]);
@@ -148,6 +161,53 @@ export const RuntimeAuthCancelSchema = z.object({
   requestId: IdSchema,
 });
 
+export const RuntimeOperationRequestSchema = z.object({
+  kind: z.literal('operation-request'),
+  protocolVersion: z.literal(OPERATION_BROKER_PROTOCOL_VERSION),
+  requestId: IdSchema,
+  manifest: OperationManifestV1Schema,
+});
+export type RuntimeOperationRequest = z.infer<typeof RuntimeOperationRequestSchema>;
+
+export const RuntimeOperationResponseSchema = z.object({
+  kind: z.literal('operation-response'),
+  protocolVersion: z.literal(OPERATION_BROKER_PROTOCOL_VERSION),
+  requestId: IdSchema,
+  ok: z.boolean(),
+  result: JsonObjectSchema.optional(),
+  error: z.string().min(1).max(1_000).optional(),
+});
+export type RuntimeOperationResponse = z.infer<typeof RuntimeOperationResponseSchema>;
+
+export const RuntimeOperationCancelSchema = z.object({
+  kind: z.literal('operation-cancel'),
+  protocolVersion: z.literal(OPERATION_BROKER_PROTOCOL_VERSION),
+  requestId: IdSchema,
+});
+
+export const RuntimeGuidanceRequestSchema = z.object({
+  kind: z.literal('guidance-request'),
+  protocolVersion: z.literal(GUIDANCE_PROTOCOL_VERSION),
+  requestId: IdSchema,
+  id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/),
+  digest: z.string().regex(/^[0-9a-f]{64}$/),
+});
+export type RuntimeGuidanceRequest = z.infer<typeof RuntimeGuidanceRequestSchema>;
+
+export const RuntimeGuidanceResponseSchema = z.object({
+  kind: z.literal('guidance-response'),
+  protocolVersion: z.literal(GUIDANCE_PROTOCOL_VERSION),
+  requestId: IdSchema,
+  ok: z.boolean(),
+  content: z
+    .string()
+    .min(1)
+    .max(64 * 1024)
+    .optional(),
+  error: z.string().min(1).max(500).optional(),
+});
+export type RuntimeGuidanceResponse = z.infer<typeof RuntimeGuidanceResponseSchema>;
+
 export const RuntimePortMessageSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('request'), request: RuntimeRequestSchema }),
   z.object({ kind: z.literal('event'), event: RuntimeEventSchema }),
@@ -155,5 +215,10 @@ export const RuntimePortMessageSchema = z.discriminatedUnion('kind', [
   RuntimeAuthRequestSchema,
   RuntimeAuthResponseSchema,
   RuntimeAuthCancelSchema,
+  RuntimeOperationRequestSchema,
+  RuntimeOperationResponseSchema,
+  RuntimeOperationCancelSchema,
+  RuntimeGuidanceRequestSchema,
+  RuntimeGuidanceResponseSchema,
 ]);
 export type RuntimePortMessage = z.infer<typeof RuntimePortMessageSchema>;

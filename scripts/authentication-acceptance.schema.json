@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://adrouter.co/schemas/authentication-acceptance-v1.json",
+  "$id": "https://adrouter.co/schemas/authentication-acceptance-v2.json",
   "title": "AdRouter exact-client authentication acceptance",
   "type": "object",
   "additionalProperties": false,
@@ -17,7 +17,7 @@
     "redactionAttestation"
   ],
   "properties": {
-    "schema": { "const": 1 },
+    "schema": { "enum": [1, 2] },
     "clientKind": { "const": "desktop" },
     "repository": { "const": "adrouter/adrouterAgent" },
     "package": { "const": "@adrouter/agent" },
@@ -25,18 +25,27 @@
       "type": "string",
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-beta\\.[0-9]+)?$"
     },
-    "releaseTag": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+(-beta\\.[0-9]+)?$" },
+    "releaseTag": {
+      "type": "string",
+      "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+(-beta\\.[0-9]+)?$"
+    },
     "sourceCommit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
     "artifacts": {
       "type": "array",
       "minItems": 4,
       "maxItems": 4,
+      "uniqueItems": true,
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": ["name", "sha256"],
         "properties": {
-          "name": { "type": "string", "minLength": 1, "maxLength": 240 },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,239}$"
+          },
           "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
         }
       }
@@ -45,16 +54,6 @@
       "type": "array",
       "minItems": 2,
       "maxItems": 2,
-      "contains": {
-        "type": "object",
-        "required": ["os", "architecture", "runtimeVersion"],
-        "properties": {
-          "os": { "const": "windows" },
-          "architecture": { "const": "x64" },
-          "runtimeVersion": { "type": "string", "pattern": "^Windows 11(?:[ ._+-].*)?$" }
-        }
-      },
-      "minContains": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -69,29 +68,28 @@
           "results"
         ],
         "properties": {
-          "environmentClass": { "enum": ["primary-operator", "second-os"] },
+          "environmentClass": {
+            "enum": ["primary-operator", "second-os", "physical-windows-x64"]
+          },
           "os": { "enum": ["macos", "ubuntu", "windows"] },
           "architecture": { "enum": ["arm64", "x64"] },
-          "runtimeVersion": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "runtimeVersion": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._+-]{0,99}$"
+          },
           "storageClassification": { "const": "os_encrypted" },
           "testedAt": { "type": "string", "format": "date-time" },
-          "recorder": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "recorder": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._@-]{0,99}$"
+          },
           "results": {
             "type": "object",
             "additionalProperties": false,
-            "required": [
-              "enrollment",
-              "profile",
-              "turn",
-              "streamCompletion",
-              "tokenRotation",
-              "replayRejected",
-              "tamperRejected",
-              "tokenWithoutKeyRejected",
-              "revocation",
-              "upgradePolicy",
-              "localSecretCleanup"
-            ],
             "properties": {
               "enrollment": { "const": true },
               "profile": { "const": true },
@@ -103,12 +101,169 @@
               "tokenWithoutKeyRejected": { "const": true },
               "revocation": { "const": true },
               "upgradePolicy": { "const": true },
-              "localSecretCleanup": { "const": true }
+              "localSecretCleanup": { "const": true },
+              "manifestSignature": { "const": true },
+              "platformSignature": { "const": true },
+              "healthyStartRollback": { "const": true }
             }
           }
         }
       }
     },
     "redactionAttestation": { "const": true }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "schema": { "const": 1 } },
+        "required": ["schema"]
+      },
+      "then": {
+        "properties": {
+          "cohorts": {
+            "items": {
+              "properties": {
+                "environmentClass": { "enum": ["primary-operator", "second-os"] },
+                "results": {
+                  "required": [
+                    "enrollment",
+                    "profile",
+                    "turn",
+                    "streamCompletion",
+                    "tokenRotation",
+                    "replayRejected",
+                    "tamperRejected",
+                    "tokenWithoutKeyRejected",
+                    "revocation",
+                    "upgradePolicy",
+                    "localSecretCleanup"
+                  ],
+                  "not": {
+                    "anyOf": [
+                      { "required": ["manifestSignature"] },
+                      { "required": ["platformSignature"] },
+                      { "required": ["healthyStartRollback"] }
+                    ]
+                  }
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": { "environmentClass": { "const": "second-os" } },
+                    "required": ["environmentClass"]
+                  },
+                  "then": {
+                    "properties": {
+                      "os": { "const": "windows" },
+                      "architecture": { "const": "x64" },
+                      "runtimeVersion": {
+                        "type": "string",
+                        "pattern": "^Windows 11(?:[ ._+-].*)?$"
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "allOf": [
+              {
+                "contains": {
+                  "properties": { "environmentClass": { "const": "primary-operator" } },
+                  "required": ["environmentClass"]
+                },
+                "minContains": 1,
+                "maxContains": 1
+              },
+              {
+                "contains": {
+                  "properties": { "environmentClass": { "const": "second-os" } },
+                  "required": ["environmentClass"]
+                },
+                "minContains": 1,
+                "maxContains": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "schema": { "const": 2 } },
+        "required": ["schema"]
+      },
+      "then": {
+        "properties": {
+          "cohorts": {
+            "items": {
+              "properties": {
+                "environmentClass": {
+                  "enum": ["primary-operator", "physical-windows-x64"]
+                },
+                "results": {
+                  "required": [
+                    "enrollment",
+                    "profile",
+                    "turn",
+                    "streamCompletion",
+                    "tokenRotation",
+                    "replayRejected",
+                    "tamperRejected",
+                    "tokenWithoutKeyRejected",
+                    "revocation",
+                    "upgradePolicy",
+                    "localSecretCleanup",
+                    "manifestSignature",
+                    "platformSignature",
+                    "healthyStartRollback"
+                  ]
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "environmentClass": { "const": "physical-windows-x64" }
+                    },
+                    "required": ["environmentClass"]
+                  },
+                  "then": {
+                    "properties": {
+                      "os": { "const": "windows" },
+                      "architecture": { "const": "x64" },
+                      "runtimeVersion": {
+                        "type": "string",
+                        "pattern": "^Windows 11(?:[ ._+-].*)?$"
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "allOf": [
+              {
+                "contains": {
+                  "properties": { "environmentClass": { "const": "primary-operator" } },
+                  "required": ["environmentClass"]
+                },
+                "minContains": 1,
+                "maxContains": 1
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "environmentClass": { "const": "physical-windows-x64" }
+                  },
+                  "required": ["environmentClass"]
+                },
+                "minContains": 1,
+                "maxContains": 1
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
 }

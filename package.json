@@ -1,7 +1,7 @@
 {
   "name": "adrouter-agent",
   "productName": "AdRouter Agent",
-  "version": "0.1.0-beta.12",
+  "version": "0.1.0-beta.13",
   "description": "A secure, local-first desktop coding agent routed through AdRouter.",
   "license": "Apache-2.0",
   "private": true,
@@ -31,6 +31,8 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "node scripts/run-e2e.mjs",
     "test:launcher": "node --test packages/agent-launcher/test/*.test.mjs scripts/*.test.mjs",
+    "catalog:check": "node scripts/check-model-catalog.mjs",
+    "bundles:check": "node scripts/check-bundle-catalog.mjs",
     "audit:build": "node scripts/check-build-audit.mjs",
     "smoke:live": "node scripts/live-router-smoke.mjs",
     "verify:dist": "node scripts/verify-dist.mjs",
@@ -40,7 +42,7 @@
     "build:launcher": "node scripts/build-launcher-package.mjs",
     "check:launcher-package": "node scripts/check-launcher-package.mjs",
     "check:dependency-overrides": "node scripts/check-dependency-overrides.mjs",
-    "check:public": "node scripts/verify-source-parity.mjs && node scripts/check-dependency-overrides.mjs && node scripts/check-public-boundary.mjs && node scripts/check-docs.mjs && node scripts/check-workflows.mjs",
+    "check:public": "npm run catalog:check && npm run bundles:check && node scripts/verify-source-parity.mjs && node scripts/check-dependency-overrides.mjs && node scripts/check-public-boundary.mjs && node scripts/check-docs.mjs && node scripts/check-workflows.mjs",
     "update:source-parity": "node scripts/update-source-parity.mjs",
     "verify:release-readiness": "npm run check:public && npm run test:launcher && npm run check:launcher-package",
     "check": "npm run lint && npm run typecheck && npm run test && npm run test:integration && npm run check:public && npm run test:launcher"
@@ -76,8 +78,9 @@
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.2.0",
     "acorn": "8.17.0",
-    "adrouter-brace-expansion-patch": "npm:brace-expansion@5.0.8",
+    "adrouter-brace-expansion-patch": "npm:brace-expansion@5.0.9",
     "adrouter-protobufjs-patch": "npm:protobufjs@7.6.5",
+    "adrouter-undici-patch": "npm:undici@8.9.0",
     "electron": "43.1.0",
     "jsdom": "29.1.1",
     "typescript": "5.9.3",
@@ -91,10 +94,12 @@
   "overrides": {
     "@earendil-works/pi-coding-agent": {
       ".": "$@earendil-works/pi-coding-agent",
-      "brace-expansion": "5.0.8",
-      "protobufjs": "7.6.5"
+      "brace-expansion": "5.0.9",
+      "protobufjs": "7.6.5",
+      "undici": "8.9.0"
     },
     "dompurify": "3.4.12",
+    "fast-uri": "3.1.5",
     "tar": "7.5.22",
     "tmp": "0.2.7"
   }

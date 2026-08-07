@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { buildLauncherPackage } from './build-launcher-package.mjs';
+import { createTestReleaseSigning } from './test-release-signing.mjs';
 
 const rootPackage = JSON.parse(readFileSync(resolve('package.json'), 'utf8'));
 const launcher = JSON.parse(
@@ -33,6 +34,7 @@ try {
     artifacts,
     outputDirectory: temporary,
     stagingRoot: join(temporary, 'staging'),
+    signing: createTestReleaseSigning(),
   });
   const listing = execFileSync('tar', ['-tzf', packed.tarball], { encoding: 'utf8' })
     .split('\n')
@@ -42,9 +44,16 @@ try {
     'package/LICENSE',
     'package/README.md',
     'package/bin/adrouter-agent.mjs',
+    'package/lib/automation.mjs',
+    'package/lib/canonical-json.mjs',
     'package/lib/cli.mjs',
     'package/lib/installer.mjs',
+    'package/lib/manifest.d.mts',
     'package/lib/manifest.mjs',
+    'package/lib/trusted-release-keys.d.mts',
+    'package/lib/trusted-release-keys.mjs',
+    'package/lib/update.d.mts',
+    'package/lib/update.mjs',
     'package/package.json',
     'package/release-manifest.json',
   ].sort();
