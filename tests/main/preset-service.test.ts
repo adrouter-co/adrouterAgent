@@ -17,6 +17,8 @@ const model: RouterModelDescriptor = {
   description: 'Preset fixture model.',
   thinkingLevels: ['medium', 'high'],
   defaultThinkingLevel: 'medium',
+  inputModalities: ['text'],
+  toolCalling: true,
   contextWindow: 131_072,
   maxInputTokens: 126_976,
   maxOutputTokens: 4_096,

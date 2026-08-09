@@ -13,6 +13,7 @@ import {
   OFFICIAL_ADROUTER_WEB_ORIGINS,
 } from '../shared/constants';
 import type { EnrollmentStatus, RouterConfiguration, RouterDiagnostics } from '../shared/contracts';
+import { bundledCatalogModels } from '../shared/model-catalog';
 import { allowRouterUrl, type ConfigurationStore } from './configuration-store';
 import {
   INSTALLATION_SCOPES,
@@ -723,27 +724,32 @@ export class InstallationAuthManager {
         expiresAt: this.now() + token.expires_in * 1_000,
       };
       const diagnostics = await this.diagnosticsWithRecord(record, candidateAccess.token, signal);
-      if (
-        !diagnostics.authenticated ||
-        diagnostics.models.length === 0 ||
-        diagnostics.catalog.compatibility !== 'compatible'
-      ) {
+      if (!diagnostics.authenticated) {
         this.statusValue = safeStatus(
           pending,
           'failed',
-          'Approval completed, but the signed profile check failed. Reconnect this Agent.'
+          'Approval completed, but AdRouter rejected the signed profile request. Try connecting again.'
         );
         return 'failed';
       }
+      const models = diagnostics.models.length > 0 ? diagnostics.models : bundledCatalogModels();
       await this.configuration.completeEnrollment(
         record,
-        diagnostics.models,
+        models,
         diagnostics.catalog,
         diagnostics.checkedAt
       );
       this.access = candidateAccess;
       this.persistenceCompromised = false;
-      this.statusValue = safeStatus(pending, 'approved', 'This Agent is connected.');
+      this.statusValue = safeStatus(
+        pending,
+        'approved',
+        diagnostics.catalog.compatibility === 'incompatible'
+          ? 'This Agent is approved. Update it before starting a task.'
+          : diagnostics.models.length === 0
+            ? 'This Agent is connected. Live model discovery will retry automatically.'
+            : 'This Agent is connected.'
+      );
       return 'approved';
     }
     const parsed = OAuthErrorSchema.safeParse(await this.readJson(response).catch(() => ({})));

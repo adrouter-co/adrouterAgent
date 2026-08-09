@@ -146,6 +146,12 @@ export const RouterModelDescriptorSchema = z
     description: z.string().min(1).max(1_000),
     thinkingLevels: z.array(ThinkingLevelSchema).min(1).max(3),
     defaultThinkingLevel: ThinkingLevelSchema,
+    inputModalities: z
+      .array(z.enum(['text', 'image']))
+      .min(1)
+      .max(2)
+      .default(['text']),
+    toolCalling: z.boolean().default(true),
     contextWindow: z.number().int().positive(),
     maxInputTokens: z.number().int().positive(),
     maxOutputTokens: z.number().int().positive(),
@@ -175,7 +181,7 @@ export const CatalogErrorCodeSchema = z.enum([
   'catalog_incompatible',
 ]);
 export const RouterCatalogStatusSchema = z.object({
-  schemaVersion: z.literal(1).nullable(),
+  schemaVersion: z.union([z.literal(1), z.literal(2)]).nullable(),
   digest: z
     .string()
     .regex(/^sha256:[0-9a-f]{64}$/)

@@ -212,7 +212,7 @@ export function buildLauncherPackage({
       repository: 'adrouter/adrouterAgent',
       bundleIdentifier: 'com.adrouter.agent',
       bundleShortVersion: '0.1.0',
-      bundleVersion: '10013',
+      bundleVersion: '10014',
       authentication: {
         fixture: 'tests/fixtures/platform-auth-v1.json',
         fixtureSha256: '93a8ec8d4eba38f9165179aa0cdfe3316f8134a882bd0426bd83339af55d17f8',

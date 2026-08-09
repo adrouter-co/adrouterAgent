@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AdRouterClient, RouterHttpError } from '@/runtime/router-client';
-import catalog from '@/shared/catalog/adrouter-model-catalog.v1.json';
+import catalog from '@/shared/catalog/adrouter-model-catalog.v2.json';
 
 const hostedCatalogPayload = (): string =>
   JSON.stringify({
+    schema_version: catalog.schema_version,
+    catalog_digest: catalog.catalog_digest,
     models: catalog.models.map((model) => ({ ...model, configured: true })),
   });
 
@@ -78,6 +80,8 @@ describe('AdRouterClient', () => {
           description: 'A strict custom model descriptor.',
           thinkingLevels: ['none', 'high'],
           defaultThinkingLevel: 'high',
+          inputModalities: ['text'],
+          toolCalling: true,
           contextWindow: 131072,
           maxInputTokens: 126976,
           maxOutputTokens: 4096,

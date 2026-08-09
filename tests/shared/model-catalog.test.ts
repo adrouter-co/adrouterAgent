@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import catalog from '@/shared/catalog/adrouter-model-catalog.v1.json';
+import catalog from '@/shared/catalog/adrouter-model-catalog.v2.json';
 import {
   ADROUTER_CATALOG_DIGEST,
   bundledCatalogModels,
+  computeCatalogDigest,
   type ModelCatalogError,
   validateLiveCatalog,
 } from '@/shared/model-catalog';
 
 const livePayload = (): unknown => ({
+  schema_version: catalog.schema_version,
+  catalog_digest: catalog.catalog_digest,
   models: catalog.models.map((model) => ({ ...model, configured: true })),
 });
 
@@ -23,7 +26,7 @@ const expectCatalogError = (operation: () => unknown, code: ModelCatalogError['c
 };
 
 describe('canonical AdRouter model catalog', () => {
-  it('matches the exact ordered eight-model hosted contract', () => {
+  it('matches the exact ordered tool-capable hosted contract', () => {
     const validated = validateLiveCatalog(livePayload(), true);
 
     expect(validated.digest).toBe(ADROUTER_CATALOG_DIGEST);
@@ -34,8 +37,6 @@ describe('canonical AdRouter model catalog', () => {
       'mimo-v2.5-pro',
       'agnes-2.0-flash',
       'agnes-2.5-flash',
-      'agnes-2.5-pro',
-      'agnes-2.5-pro-alpha',
     ]);
     expect(bundledCatalogModels()).toEqual(
       validated.models.map((model) => ({ ...model, configured: false }))
@@ -49,19 +50,30 @@ describe('canonical AdRouter model catalog', () => {
     expectCatalogError(() => validateLiveCatalog(payload, true), 'catalog_incompatible');
   });
 
-  it('requires every descriptor field and rejects unknown keys', () => {
+  it('requires every v2 descriptor field while accepting digest-bound additive fields', () => {
     const missing = livePayload() as { models: Array<Record<string, unknown>> };
     delete missing.models[0]?.max_output_tokens;
     expectCatalogError(() => validateLiveCatalog(missing, false), 'catalog_invalid');
 
-    const extra = livePayload() as { models: Array<Record<string, unknown>> };
+    const extra = livePayload() as {
+      schema_version: 2;
+      catalog_digest: string;
+      models: Array<Record<string, unknown>>;
+      response_note?: string;
+    };
     extra.models[0] = { ...extra.models[0], inferred_reasoning: true };
-    expectCatalogError(() => validateLiveCatalog(extra, false), 'catalog_invalid');
+    extra.response_note = 'safe additive envelope field';
+    extra.catalog_digest = computeCatalogDigest({
+      schema_version: 2,
+      models: extra.models.map(({ configured: _configured, ...model }) => model),
+    });
+    expect(validateLiveCatalog(extra, true).models).toHaveLength(6);
   });
 
-  it('allows a strict server-scoped custom catalog without hosted ID inference', () => {
-    const payload = livePayload() as { models: Array<Record<string, unknown>> };
-    payload.models = [{ ...payload.models[0], id: 'custom-flash' }];
+  it('allows a legacy server-scoped custom catalog without hosted ID inference', () => {
+    const payload = {
+      models: [{ ...catalog.models[0], id: 'custom-flash', configured: true }],
+    };
 
     const validated = validateLiveCatalog(payload, false);
     expect(validated.models).toHaveLength(1);
@@ -72,5 +84,10 @@ describe('canonical AdRouter model catalog', () => {
       maxOutputTokens: 65_536,
     });
     expect(validated.digest).not.toBe(ADROUTER_CATALOG_DIGEST);
+  });
+
+  it('classifies a legacy official envelope as incompatible instead of corrupt', () => {
+    const payload = { models: catalog.models.map((model) => ({ ...model, configured: true })) };
+    expectCatalogError(() => validateLiveCatalog(payload, true), 'catalog_incompatible');
   });
 });

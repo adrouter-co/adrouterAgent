@@ -6,6 +6,7 @@ import { ConfigurationStore, type CredentialCipher } from '@/main/configuration-
 import { InstallationAuthManager } from '@/main/installation-auth';
 import type { InstallationRecord, PendingEnrollmentRecord } from '@/main/installation-records';
 import { generateInstallationKeyPair } from '@/main/platform-auth-crypto';
+import catalog from '@/shared/catalog/adrouter-model-catalog.v2.json';
 import { bundledCatalogModels, bundledCatalogStatus } from '@/shared/model-catalog';
 
 const directories: string[] = [];
@@ -325,6 +326,93 @@ describe('InstallationAuthManager', () => {
       });
     }
     await manager.cancelEnrollment();
+  });
+
+  it('persists an approved installation after validating the hosted v2 catalog and signed profile', async () => {
+    const { store } = await createStore();
+    let enrollmentRequests = 0;
+    const fetchFn: typeof fetch = vi.fn(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/v1/device/authorizations')) {
+        enrollmentRequests += 1;
+        if (enrollmentRequests === 1) {
+          return new Response('', { status: 401, headers: { 'DPoP-Nonce': 'enroll-nonce' } });
+        }
+        return new Response(
+          JSON.stringify({
+            device_code: deviceCode,
+            user_code: 'ABCD-EFGH',
+            verification_uri: 'https://app-staging.adrouter.co/connect',
+            verification_uri_complete: 'https://app-staging.adrouter.co/connect?code=ABCD-EFGH',
+            expires_in: 600,
+            interval: 5,
+          }),
+          { status: 201, headers: { 'content-type': 'application/json' } }
+        );
+      }
+      if (url.endsWith('/v1/oauth/token')) {
+        return new Response(
+          JSON.stringify({
+            access_token: accessToken,
+            token_type: 'DPoP',
+            expires_in: 600,
+            refresh_token: refreshToken,
+            refresh_expires_in: 2_592_000,
+            installation_id: installationId,
+            client_kind: 'desktop',
+            scope: 'agent:turn profile:read',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        );
+      }
+      if (url.endsWith('/health')) return new Response('{}', { status: 200 });
+      if (url.endsWith('/v1/models')) {
+        return new Response(
+          JSON.stringify({
+            schema_version: catalog.schema_version,
+            catalog_digest: catalog.catalog_digest,
+            models: catalog.models.map((model) => ({ ...model, configured: true })),
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        );
+      }
+      if (url.endsWith('/v1/profile')) return new Response('{}', { status: 200 });
+      throw new Error(`Unexpected authentication request: ${url}`);
+    });
+    const manager = new InstallationAuthManager(store, '0.1.0-beta.14', { fetchFn });
+
+    await manager.startEnrollment({
+      serverUrl: 'https://api-staging.adrouter.co',
+      sponsoredCompute: true,
+      displayName: 'AdRouter Agent',
+    });
+    await manager.continueEnrollment();
+    const pending = await store.getPendingEnrollment();
+    if (!pending) throw new Error('Expected encrypted pending enrollment.');
+    const pollOnce = Reflect.get(manager, 'pollOnce') as (
+      record: PendingEnrollmentRecord,
+      signal: AbortSignal
+    ) => Promise<string>;
+
+    await expect(pollOnce.call(manager, pending, new AbortController().signal)).resolves.toBe(
+      'approved'
+    );
+    await expect(store.get()).resolves.toMatchObject({
+      configured: true,
+      models: [
+        { id: 'deepseek-v4-flash', toolCalling: true },
+        { id: 'deepseek-v4-pro', toolCalling: true },
+        { id: 'mimo-v2.5', toolCalling: true },
+        { id: 'mimo-v2.5-pro', toolCalling: true },
+        { id: 'agnes-2.0-flash', toolCalling: true },
+        { id: 'agnes-2.5-flash', toolCalling: true },
+      ],
+      catalog: { schemaVersion: 2, compatibility: 'compatible' },
+      authentication: { state: 'connected' },
+    });
+    await expect(store.getPendingEnrollment()).resolves.toBeUndefined();
+    await expect(store.getInstallationRecord()).resolves.toMatchObject({ installationId });
+    manager.dispose();
   });
 
   it('persists refresh rotation before returning one single-flight access token', async () => {

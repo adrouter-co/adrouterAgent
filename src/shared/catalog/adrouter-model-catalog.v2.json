@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "catalog_digest": "sha256:75b5c38f6f037ac2d5105b0e780bf449d00e0c851dcb749232503c3782b32b70",
+  "schema_version": 2,
+  "catalog_digest": "sha256:ee5aba34ad122c6864045cbedc1b982ceefebeb3cfaaa5f15ab90ad34a82cb8b",
   "models": [
     {
       "id": "deepseek-v4-flash",
@@ -11,6 +11,8 @@
       "description": "Fast DeepSeek coding model for interactive development.",
       "thinking_levels": ["none", "medium", "high"],
       "default_thinking_level": "medium",
+      "input_modalities": ["text"],
+      "tool_calling": true,
       "context_window": 1048576,
       "max_input_tokens": 917504,
       "max_output_tokens": 65536
@@ -24,6 +26,8 @@
       "description": "DeepSeek coding model for complex development tasks.",
       "thinking_levels": ["none", "medium", "high"],
       "default_thinking_level": "medium",
+      "input_modalities": ["text"],
+      "tool_calling": true,
       "context_window": 1048576,
       "max_input_tokens": 851968,
       "max_output_tokens": 131072
@@ -37,6 +41,8 @@
       "description": "Fast MiMo coding model for interactive development.",
       "thinking_levels": ["none", "high"],
       "default_thinking_level": "high",
+      "input_modalities": ["text", "image"],
+      "tool_calling": true,
       "context_window": 1048576,
       "max_input_tokens": 917504,
       "max_output_tokens": 65536
@@ -50,6 +56,8 @@
       "description": "MiMo coding model for complex development tasks.",
       "thinking_levels": ["none", "high"],
       "default_thinking_level": "high",
+      "input_modalities": ["text"],
+      "tool_calling": true,
       "context_window": 1048576,
       "max_input_tokens": 851968,
       "max_output_tokens": 131072
@@ -63,6 +71,8 @@
       "description": "Fast Agnes 2.0 coding model for interactive development.",
       "thinking_levels": ["none", "high"],
       "default_thinking_level": "none",
+      "input_modalities": ["text", "image"],
+      "tool_calling": true,
       "context_window": 524288,
       "max_input_tokens": 458752,
       "max_output_tokens": 65536
@@ -76,6 +86,8 @@
       "description": "Fast Agnes 2.5 coding model for interactive development.",
       "thinking_levels": ["none", "high"],
       "default_thinking_level": "none",
+      "input_modalities": ["text", "image"],
+      "tool_calling": true,
       "context_window": 524288,
       "max_input_tokens": 458752,
       "max_output_tokens": 65536
@@ -89,6 +101,8 @@
       "description": "Agnes 2.5 reasoning model for complex development tasks.",
       "thinking_levels": ["high"],
       "default_thinking_level": "high",
+      "input_modalities": ["text", "image"],
+      "tool_calling": false,
       "context_window": 1048576,
       "max_input_tokens": 851968,
       "max_output_tokens": 131072
@@ -102,6 +116,8 @@
       "description": "Alpha Agnes 2.5 reasoning model for complex development tasks.",
       "thinking_levels": ["high"],
       "default_thinking_level": "high",
+      "input_modalities": ["text", "image"],
+      "tool_calling": false,
       "context_window": 1048576,
       "max_input_tokens": 786432,
       "max_output_tokens": 196608

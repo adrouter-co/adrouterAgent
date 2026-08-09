@@ -22,6 +22,17 @@ const EXPECTED_MODES = {
   'agnes-2.5-pro-alpha': [['high'], 'high', 'agnes', 'pro'],
 };
 
+const EXPECTED_CAPABILITIES = {
+  'deepseek-v4-flash': [['text'], true],
+  'deepseek-v4-pro': [['text'], true],
+  'mimo-v2.5': [['text', 'image'], true],
+  'mimo-v2.5-pro': [['text'], true],
+  'agnes-2.0-flash': [['text', 'image'], true],
+  'agnes-2.5-flash': [['text', 'image'], true],
+  'agnes-2.5-pro': [['text', 'image'], false],
+  'agnes-2.5-pro-alpha': [['text', 'image'], false],
+};
+
 const EXPECTED_LIMITS = {
   'deepseek-v4-flash': [1_048_576, 917_504, 65_536],
   'deepseek-v4-pro': [1_048_576, 851_968, 131_072],
@@ -40,12 +51,14 @@ const MODEL_KEYS = [
   'description',
   'display_name',
   'id',
+  'input_modalities',
   'max_input_tokens',
   'max_output_tokens',
   'model_class',
   'provider',
   'provider_label',
   'thinking_levels',
+  'tool_calling',
 ];
 
 const fail = (message) => {
@@ -83,7 +96,7 @@ export const computeCatalogDigest = (payload) =>
 export const validateCatalog = (input) => {
   const catalog = record(input, 'catalog');
   exactKeys(catalog, TOP_LEVEL_KEYS, 'catalog');
-  if (catalog.schema_version !== 1) fail('schema_version must equal 1');
+  if (catalog.schema_version !== 2) fail('schema_version must equal 2');
   if (!Array.isArray(catalog.models) || catalog.models.length !== EXPECTED_MODEL_IDS.length) {
     fail(`models must contain exactly ${EXPECTED_MODEL_IDS.length} entries`);
   }
@@ -110,6 +123,13 @@ export const validateCatalog = (input) => {
     if (model.default_thinking_level !== expected[1]) {
       fail(`${id}.default_thinking_level does not match the hosted contract`);
     }
+    const capabilities = EXPECTED_CAPABILITIES[id];
+    if (JSON.stringify(model.input_modalities) !== JSON.stringify(capabilities[0])) {
+      fail(`${id}.input_modalities do not match the hosted contract`);
+    }
+    if (model.tool_calling !== capabilities[1]) {
+      fail(`${id}.tool_calling must equal ${capabilities[1]}`);
+    }
     const limits = EXPECTED_LIMITS[id];
     for (const [field, limit] of [
       ['context_window', limits[0]],
@@ -119,7 +139,7 @@ export const validateCatalog = (input) => {
       if (model[field] !== limit) fail(`${id}.${field} must equal ${limit}`);
     }
   }
-  const digest = computeCatalogDigest({ schema_version: 1, models: catalog.models });
+  const digest = computeCatalogDigest({ schema_version: 2, models: catalog.models });
   if (catalog.catalog_digest !== digest) fail(`catalog_digest mismatch; expected ${digest}`);
   return catalog;
 };
@@ -136,6 +156,7 @@ const stringArray = (values) => `[${values.map(quote).join(', ')}]`;
 export const renderGeneratedCatalog = (catalog) => {
   validateCatalog(catalog);
   const models = catalog.models
+    .filter((model) => model.tool_calling)
     .map(
       (model) => `  {
     id: ${quote(model.id)},
@@ -146,6 +167,8 @@ export const renderGeneratedCatalog = (catalog) => {
     description: ${quote(model.description)},
     thinkingLevels: ${stringArray(model.thinking_levels)},
     defaultThinkingLevel: ${quote(model.default_thinking_level)},
+    inputModalities: ${stringArray(model.input_modalities)},
+    toolCalling: ${model.tool_calling},
     contextWindow: ${model.context_window.toLocaleString('en-US').replace(/,/g, '_')},
     maxInputTokens: ${model.max_input_tokens.toLocaleString('en-US').replace(/,/g, '_')},
     maxOutputTokens: ${model.max_output_tokens.toLocaleString('en-US').replace(/,/g, '_')},
@@ -153,7 +176,7 @@ export const renderGeneratedCatalog = (catalog) => {
   },`
     )
     .join('\n');
-  return `// Generated from src/shared/catalog/adrouter-model-catalog.v1.json.
+  return `// Generated from src/shared/catalog/adrouter-model-catalog.v2.json.
 // Do not edit manually; update the canonical artifact and run the catalog check.
 
 import type { RouterModelDescriptor } from '../contracts';

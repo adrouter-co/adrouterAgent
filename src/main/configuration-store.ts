@@ -557,7 +557,7 @@ export class ConfigurationStore {
       throw new Error('AdRouter configuration is corrupted. Reconnect this Agent.');
     }
     const metadata = this.parseMetadata(parsed.installationMetadata);
-    return {
+    const configuration: PersistedConfiguration = {
       version: 5,
       serverUrl: allowRouterUrl(parsed.serverUrl),
       sponsoredCompute: parsed.sponsoredCompute,
@@ -572,6 +572,21 @@ export class ConfigurationStore {
       selectedThinkingLevel: parsed.selectedThinkingLevel as ThinkingLevel,
       lastCheckedAt: parsed.lastCheckedAt,
     };
+    if (
+      classifyRouterOrigin(configuration.serverUrl) === 'official' &&
+      configuration.catalog.schemaVersion !== bundledCatalogStatus().schemaVersion
+    ) {
+      const bundledModels = bundledCatalogModels();
+      const upgraded = {
+        ...configuration,
+        models: bundledModels,
+        catalog: bundledCatalogStatus(),
+        ...this.selectPreferences(configuration, bundledModels),
+      };
+      await this.write(upgraded);
+      return upgraded;
+    }
+    return configuration;
   }
 
   private migrateLegacy(parsed: Record<string, unknown>): PersistedConfiguration {

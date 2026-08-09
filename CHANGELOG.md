@@ -2,6 +2,17 @@
 
 All notable changes to AdRouter Agent are documented here.
 
+## [0.1.0-beta.14] - 2026-08-10
+
+### Fixed
+
+- Accepted the Router's signed catalog v2 envelope, including input-modality and tool-calling
+  capability fields, so an approved installation no longer fails during its signed profile check.
+- Persisted a valid approved installation even when model discovery is temporarily unavailable,
+  using the bundled compatible catalog until automatic refresh succeeds.
+- Kept incompatible catalogs as an update-required state instead of discarding the approved key,
+  and exposed only models that currently pass coding tool-call qualification.
+
 ## [0.1.0-beta.13] - 2026-08-07
 
 ### Added
@@ -263,6 +274,7 @@ All notable changes to AdRouter Agent are documented here.
 - Updates are downloaded and installed manually.
 - A reachable AdRouter server and valid bearer token are required.
 
+[0.1.0-beta.14]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.14
 [0.1.0-beta.13]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.13
 [0.1.0-beta.12]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.12
 [0.1.0-beta.11]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.11

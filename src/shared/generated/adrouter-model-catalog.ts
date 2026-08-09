@@ -1,11 +1,11 @@
-// Generated from src/shared/catalog/adrouter-model-catalog.v1.json.
+// Generated from src/shared/catalog/adrouter-model-catalog.v2.json.
 // Do not edit manually; update the canonical artifact and run the catalog check.
 
 import type { RouterModelDescriptor } from '../contracts';
 
-export const ADROUTER_CATALOG_SCHEMA_VERSION = 1 as const;
+export const ADROUTER_CATALOG_SCHEMA_VERSION = 2 as const;
 export const ADROUTER_CATALOG_DIGEST =
-  'sha256:75b5c38f6f037ac2d5105b0e780bf449d00e0c851dcb749232503c3782b32b70' as const;
+  'sha256:ee5aba34ad122c6864045cbedc1b982ceefebeb3cfaaa5f15ab90ad34a82cb8b' as const;
 
 export const BUNDLED_ADROUTER_MODELS: readonly RouterModelDescriptor[] = [
   {
@@ -17,6 +17,8 @@ export const BUNDLED_ADROUTER_MODELS: readonly RouterModelDescriptor[] = [
     description: 'Fast DeepSeek coding model for interactive development.',
     thinkingLevels: ['none', 'medium', 'high'],
     defaultThinkingLevel: 'medium',
+    inputModalities: ['text'],
+    toolCalling: true,
     contextWindow: 1_048_576,
     maxInputTokens: 917_504,
     maxOutputTokens: 65_536,
@@ -31,6 +33,8 @@ export const BUNDLED_ADROUTER_MODELS: readonly RouterModelDescriptor[] = [
     description: 'DeepSeek coding model for complex development tasks.',
     thinkingLevels: ['none', 'medium', 'high'],
     defaultThinkingLevel: 'medium',
+    inputModalities: ['text'],
+    toolCalling: true,
     contextWindow: 1_048_576,
     maxInputTokens: 851_968,
     maxOutputTokens: 131_072,
@@ -45,6 +49,8 @@ export const BUNDLED_ADROUTER_MODELS: readonly RouterModelDescriptor[] = [
     description: 'Fast MiMo coding model for interactive development.',
     thinkingLevels: ['none', 'high'],
     defaultThinkingLevel: 'high',
+    inputModalities: ['text', 'image'],
+    toolCalling: true,
     contextWindow: 1_048_576,
     maxInputTokens: 917_504,
     maxOutputTokens: 65_536,
@@ -59,6 +65,8 @@ export const BUNDLED_ADROUTER_MODELS: readonly RouterModelDescriptor[] = [
     description: 'MiMo coding model for complex development tasks.',
     thinkingLevels: ['none', 'high'],
     defaultThinkingLevel: 'high',
+    inputModalities: ['text'],
+    toolCalling: true,
     contextWindow: 1_048_576,
     maxInputTokens: 851_968,
     maxOutputTokens: 131_072,
@@ -73,6 +81,8 @@ export const BUNDLED_ADROUTER_MODELS: readonly RouterModelDescriptor[] = [
     description: 'Fast Agnes 2.0 coding model for interactive development.',
     thinkingLevels: ['none', 'high'],
     defaultThinkingLevel: 'none',
+    inputModalities: ['text', 'image'],
+    toolCalling: true,
     contextWindow: 524_288,
     maxInputTokens: 458_752,
     maxOutputTokens: 65_536,
@@ -87,37 +97,11 @@ export const BUNDLED_ADROUTER_MODELS: readonly RouterModelDescriptor[] = [
     description: 'Fast Agnes 2.5 coding model for interactive development.',
     thinkingLevels: ['none', 'high'],
     defaultThinkingLevel: 'none',
+    inputModalities: ['text', 'image'],
+    toolCalling: true,
     contextWindow: 524_288,
     maxInputTokens: 458_752,
     maxOutputTokens: 65_536,
-    configured: false,
-  },
-  {
-    id: 'agnes-2.5-pro',
-    provider: 'agnes',
-    modelClass: 'pro',
-    displayName: 'Agnes 2.5 Pro',
-    providerLabel: 'Agnes',
-    description: 'Agnes 2.5 reasoning model for complex development tasks.',
-    thinkingLevels: ['high'],
-    defaultThinkingLevel: 'high',
-    contextWindow: 1_048_576,
-    maxInputTokens: 851_968,
-    maxOutputTokens: 131_072,
-    configured: false,
-  },
-  {
-    id: 'agnes-2.5-pro-alpha',
-    provider: 'agnes',
-    modelClass: 'pro',
-    displayName: 'Agnes 2.5 Pro Alpha',
-    providerLabel: 'Agnes',
-    description: 'Alpha Agnes 2.5 reasoning model for complex development tasks.',
-    thinkingLevels: ['high'],
-    defaultThinkingLevel: 'high',
-    contextWindow: 1_048_576,
-    maxInputTokens: 786_432,
-    maxOutputTokens: 196_608,
     configured: false,
   },
 ] as const;

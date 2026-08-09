@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 
 const tracked = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
   encoding: 'utf8',
@@ -20,6 +20,7 @@ const privateKeyMarker = ['BEGIN', 'PRIVATE', 'KEY'].join(' ');
 const retiredStagingCredential = ['ADROUTER', 'STAGING', 'API', 'KEY'].join('_');
 const canonicalPlatformAuthFixture = 'tests/fixtures/platform-auth-v1.json';
 for (const filename of tracked) {
+  if (!existsSync(filename)) continue;
   for (const pattern of forbiddenNames) {
     assert.ok(!pattern.test(filename), `public boundary includes forbidden file ${filename}`);
   }

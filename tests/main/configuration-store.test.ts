@@ -28,6 +28,8 @@ const customModel: RouterModelDescriptor = {
   description: 'Strict custom model fixture.',
   thinkingLevels: ['medium', 'high'],
   defaultThinkingLevel: 'medium',
+  inputModalities: ['text'],
+  toolCalling: true,
   contextWindow: 131_072,
   maxInputTokens: 126_976,
   maxOutputTokens: 4_096,
@@ -160,6 +162,36 @@ describe('ConfigurationStore', () => {
       models: bundledCatalogModels(),
       catalog: bundledCatalogStatus(),
       authentication: { mode: 'unconfigured', state: 'none' },
+    });
+  });
+
+  it('upgrades a persisted official v1 catalog without discarding authentication state', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'adrouter-config-'));
+    directories.push(directory);
+    const path = join(directory, 'configuration.json');
+    await writeFile(
+      path,
+      JSON.stringify(
+        versionFiveConfiguration({
+          serverUrl: 'https://api-staging.adrouter.co',
+          authMode: 'unconfigured',
+          encryptedToken: null,
+        })
+      )
+    );
+
+    const store = new ConfigurationStore(path, testCipher);
+    await expect(store.get()).resolves.toMatchObject({
+      serverUrl: 'https://api-staging.adrouter.co',
+      models: bundledCatalogModels(),
+      catalog: bundledCatalogStatus(),
+      selectedModel: 'deepseek-v4-flash',
+    });
+    const persisted = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+    expect(persisted).toMatchObject({
+      version: 5,
+      serverUrl: 'https://api-staging.adrouter.co',
+      catalog: { schemaVersion: 2 },
     });
   });
 

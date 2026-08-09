@@ -8,38 +8,64 @@ import {
 } from './generated/adrouter-model-catalog';
 
 const ThinkingLevelSchema = z.enum(['none', 'medium', 'high']);
+const InputModalitySchema = z.enum(['text', 'image']);
 
-const LiveModelSchema = z
+const liveModelSchema = (capabilitiesRequired: boolean) =>
+  z
+    .object({
+      id: z.string().trim().min(1).max(300),
+      provider: z.string().trim().min(1).max(120),
+      model_class: z.enum(['flash', 'pro']),
+      display_name: z.string().trim().min(1).max(200),
+      provider_label: z.string().trim().min(1).max(120),
+      description: z.string().trim().min(1).max(1_000),
+      thinking_levels: z.array(ThinkingLevelSchema).min(1).max(3),
+      default_thinking_level: ThinkingLevelSchema,
+      input_modalities: capabilitiesRequired
+        ? z.array(InputModalitySchema).min(1).max(2)
+        : z.array(InputModalitySchema).min(1).max(2).optional().default(['text']),
+      tool_calling: capabilitiesRequired ? z.boolean() : z.boolean().optional().default(true),
+      context_window: z.number().int().positive(),
+      max_input_tokens: z.number().int().positive(),
+      max_output_tokens: z.number().int().positive(),
+      configured: z.boolean(),
+    })
+    .passthrough()
+    .superRefine((model, context) => {
+      if (new Set(model.thinking_levels).size !== model.thinking_levels.length) {
+        context.addIssue({ code: 'custom', message: 'thinking_levels must be unique' });
+      }
+      if (!model.thinking_levels.includes(model.default_thinking_level)) {
+        context.addIssue({ code: 'custom', message: 'default thinking level must be advertised' });
+      }
+      if (model.max_input_tokens + model.max_output_tokens > model.context_window) {
+        context.addIssue({
+          code: 'custom',
+          message: 'model token limits exceed the context window',
+        });
+      }
+    });
+
+const LiveModelSchema = liveModelSchema(true);
+const LegacyLiveModelSchema = liveModelSchema(false);
+
+const LiveModelsSchema = z
   .object({
-    id: z.string().trim().min(1).max(300),
-    provider: z.string().trim().min(1).max(120),
-    model_class: z.enum(['flash', 'pro']),
-    display_name: z.string().trim().min(1).max(200),
-    provider_label: z.string().trim().min(1).max(120),
-    description: z.string().trim().min(1).max(1_000),
-    thinking_levels: z.array(ThinkingLevelSchema).min(1).max(3),
-    default_thinking_level: ThinkingLevelSchema,
-    context_window: z.number().int().positive(),
-    max_input_tokens: z.number().int().positive(),
-    max_output_tokens: z.number().int().positive(),
-    configured: z.boolean(),
+    schema_version: z.literal(2),
+    catalog_digest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    models: z.array(LiveModelSchema).min(1).max(100),
   })
-  .strict()
-  .superRefine((model, context) => {
-    if (new Set(model.thinking_levels).size !== model.thinking_levels.length) {
-      context.addIssue({ code: 'custom', message: 'thinking_levels must be unique' });
-    }
-    if (!model.thinking_levels.includes(model.default_thinking_level)) {
-      context.addIssue({ code: 'custom', message: 'default thinking level must be advertised' });
-    }
-    if (model.max_input_tokens + model.max_output_tokens > model.context_window) {
-      context.addIssue({ code: 'custom', message: 'model token limits exceed the context window' });
+  .passthrough()
+  .superRefine((catalog, context) => {
+    const ids = catalog.models.map((model) => model.id);
+    if (new Set(ids).size !== ids.length) {
+      context.addIssue({ code: 'custom', message: 'model IDs must be unique' });
     }
   });
 
-const LiveModelsSchema = z
-  .object({ models: z.array(LiveModelSchema).min(1).max(100) })
-  .strict()
+const LegacyLiveModelsSchema = z
+  .object({ models: z.array(LegacyLiveModelSchema).min(1).max(100) })
+  .passthrough()
   .superRefine((catalog, context) => {
     const ids = catalog.models.map((model) => model.id);
     if (new Set(ids).size !== ids.length) {
@@ -62,7 +88,9 @@ export const computeCatalogDigest = (payload: unknown): string =>
     .update(JSON.stringify(sorted(payload)), 'utf8')
     .digest('hex')}`;
 
-const toDescriptor = (model: z.infer<typeof LiveModelSchema>): RouterModelDescriptor => ({
+type LiveModel = z.infer<typeof LiveModelSchema>;
+
+const toDescriptor = (model: LiveModel): RouterModelDescriptor => ({
   id: model.id,
   provider: model.provider,
   modelClass: model.model_class,
@@ -71,14 +99,19 @@ const toDescriptor = (model: z.infer<typeof LiveModelSchema>): RouterModelDescri
   description: model.description,
   thinkingLevels: [...model.thinking_levels],
   defaultThinkingLevel: model.default_thinking_level,
+  inputModalities: [...model.input_modalities],
+  toolCalling: model.tool_calling,
   contextWindow: model.context_window,
   maxInputTokens: model.max_input_tokens,
   maxOutputTokens: model.max_output_tokens,
   configured: model.configured,
 });
 
-const digestPayload = (models: z.infer<typeof LiveModelSchema>[]) => ({
-  schema_version: ADROUTER_CATALOG_SCHEMA_VERSION,
+const digestPayload = (
+  models: Array<LiveModel | z.infer<typeof LegacyLiveModelSchema>>,
+  schemaVersion: 1 | 2
+) => ({
+  schema_version: schemaVersion,
   models: models.map(({ configured: _configured, ...model }) => model),
 });
 
@@ -93,7 +126,7 @@ export class ModelCatalogError extends Error {
 }
 
 export interface ValidatedLiveCatalog {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   digest: string;
   models: RouterModelDescriptor[];
 }
@@ -102,21 +135,46 @@ export const validateLiveCatalog = (
   value: unknown,
   requireOfficialCatalog: boolean
 ): ValidatedLiveCatalog => {
-  const parsed = LiveModelsSchema.safeParse(value);
-  if (!parsed.success) {
+  const version =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>).schema_version
+      : undefined;
+  if (requireOfficialCatalog || version !== undefined) {
+    if (version !== 2) {
+      throw new ModelCatalogError(
+        'catalog_incompatible',
+        'The hosted model catalog requires a newer compatible AdRouter Agent.'
+      );
+    }
+    const parsed = LiveModelsSchema.safeParse(value);
+    if (!parsed.success) {
+      throw new ModelCatalogError('catalog_invalid', 'AdRouter returned an invalid model catalog.');
+    }
+    const digest = computeCatalogDigest(digestPayload(parsed.data.models, 2));
+    if (parsed.data.catalog_digest !== digest) {
+      throw new ModelCatalogError(
+        'catalog_incompatible',
+        'The hosted model catalog digest could not be verified.'
+      );
+    }
+    return {
+      schemaVersion: 2,
+      digest,
+      models: parsed.data.models.filter((model) => model.tool_calling).map(toDescriptor),
+    };
+  }
+
+  const legacy = LegacyLiveModelsSchema.safeParse(value);
+  if (!legacy.success) {
     throw new ModelCatalogError('catalog_invalid', 'AdRouter returned an invalid model catalog.');
   }
-  const digest = computeCatalogDigest(digestPayload(parsed.data.models));
-  if (requireOfficialCatalog && digest !== ADROUTER_CATALOG_DIGEST) {
-    throw new ModelCatalogError(
-      'catalog_incompatible',
-      'The hosted model catalog requires a newer compatible AdRouter Agent.'
-    );
-  }
+  const digest = computeCatalogDigest(digestPayload(legacy.data.models, 1));
   return {
-    schemaVersion: ADROUTER_CATALOG_SCHEMA_VERSION,
+    schemaVersion: 1,
     digest,
-    models: parsed.data.models.map(toDescriptor),
+    models: legacy.data.models
+      .filter((model) => model.tool_calling)
+      .map((model) => toDescriptor(model as LiveModel)),
   };
 };
 
@@ -124,6 +182,7 @@ export const bundledCatalogModels = (): RouterModelDescriptor[] =>
   BUNDLED_ADROUTER_MODELS.map((model) => ({
     ...model,
     thinkingLevels: [...model.thinkingLevels],
+    inputModalities: [...model.inputModalities],
   }));
 
 export const bundledCatalogStatus = (): RouterCatalogStatus => ({
