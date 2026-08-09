@@ -7,7 +7,8 @@ should manually install the latest release before reporting a problem.
 
 | Version | Supported |
 | --- | --- |
-| 0.1.0-beta.14 | Yes |
+| 0.1.0-beta.15 | Yes |
+| 0.1.0-beta.14 | No |
 | 0.1.0-beta.13 | No |
 | 0.1.0-beta.12 | No |
 | 0.1.0-beta.11 | No |
@@ -51,7 +52,7 @@ under `/tmp`, inside a directory that must be a real mode-0700 directory owned b
 the socket must be owned by that user and mode 0600. Windows uses a current-user-DACL named pipe.
 Every paired request remains scope-bound, signed, freshness-checked, nonce-protected, and bounded.
 
-The beta.14 npm launcher uses the credential-free schema-3 manifest and pins every platform ZIP to
+The beta.15 npm launcher uses the credential-free schema-3 manifest and pins every platform ZIP to
 its canonical GitHub URL, exact SHA-256 digest, archive layout, platform, architecture, and bundle
 identity. Downloads remain bounded, archive paths and symlinks are validated, macOS must have the
 expected ad-hoc signature, and Linux/Windows are explicitly unsigned portable candidates. The

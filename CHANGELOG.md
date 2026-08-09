@@ -2,6 +2,14 @@
 
 All notable changes to AdRouter Agent are documented here.
 
+## [0.1.0-beta.15] - 2026-08-10
+
+### Security
+
+- Updated the production DOMPurify override to 3.4.13 and the build-time Nano ID override to
+  3.3.18 so the immutable candidate is not affected by GHSA-55q2-fjhq-7xh7 through Monaco Editor
+  or GHSA-2v37-7h3g-55p8 through Vite/PostCSS.
+
 ## [0.1.0-beta.14] - 2026-08-10
 
 ### Fixed
@@ -274,6 +282,7 @@ All notable changes to AdRouter Agent are documented here.
 - Updates are downloaded and installed manually.
 - A reachable AdRouter server and valid bearer token are required.
 
+[0.1.0-beta.15]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.15
 [0.1.0-beta.14]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.14
 [0.1.0-beta.13]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.13
 [0.1.0-beta.12]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.12
