@@ -722,7 +722,8 @@ git status --short --branch
   `verify:dist` all pass. The full source gate passed 39 unit files (155 tests), three integration
   files (13 tests), 47 launcher tests, source parity, public-boundary, documentation, and workflow
   policy checks.
-- Protected CI/native build: not run.
+- Protected CI/native build: broker compilation passes; the next Windows test rerun will validate
+  the corrected rename-buffer contract.
 - Candidate publication and anonymous verification: not run.
 
 ### Findings / Notes
@@ -731,8 +732,12 @@ git status --short --branch
   `.bin/node-gyp` shim. The next run reached toolchain discovery but the transitive Electron
   node-gyp 10.2 did not recognize the current Visual Studio 2026 runner. The third run used exact
   node-gyp 12.3.0 and compiled both broker C files, then exposed a target-wide `CompileAs=C`
-  override that also affected node-gyp's generated C++ delay-load hook. The override is removed;
-  the protected Windows rerun remains the acceptance gate.
+  override that also affected node-gyp's generated C++ delay-load hook. The fourth run compiled
+  successfully and exposed `ERROR_INVALID_PARAMETER` in all broker replacement tests. Microsoft
+  requires a rename buffer of at least the full `FILE_RENAME_INFO` structure plus the filename;
+  the broker used only the filename-field offset plus the filename. The allocation now follows the
+  documented contract while retaining the bound parent-directory handle. The protected Windows
+  rerun remains the acceptance gate.
 - Physical Windows 11 downloaded-artifact acceptance and channel finalization remain out of scope.
 
 ---

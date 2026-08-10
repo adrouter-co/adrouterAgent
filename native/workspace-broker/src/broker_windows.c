@@ -505,7 +505,9 @@ int broker_write(const char *root, const char *relative_path,
   }
   if (ok) {
     size_t name_bytes = wcslen(bound.name) * sizeof(wchar_t);
-    size_t structure_bytes = offsetof(FILE_RENAME_INFO, FileName) + name_bytes;
+    /* Windows requires the buffer to include the full fixed structure in
+       addition to the variable-length file name. */
+    size_t structure_bytes = sizeof(FILE_RENAME_INFO) + name_bytes;
     FILE_RENAME_INFO *rename = (FILE_RENAME_INFO *)calloc(1, structure_bytes);
     if (rename == NULL) {
       ok = fail_message(error, error_size, "Unable to allocate workspace rename state.");
