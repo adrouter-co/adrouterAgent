@@ -464,6 +464,23 @@ button:disabled {
 .approval-card p {
   margin: 9px 0;
 }
+.approval-reason {
+  max-width: 100%;
+  margin: 12px 0;
+  padding: 12px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid color-mix(in srgb, var(--amber), transparent 62%);
+  border-radius: 9px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--approval-flat), white 34%);
+  font:
+    12px / 1.55 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
 .approval-card small {
   color: var(--muted);
 }
@@ -1106,6 +1123,14 @@ body,
   scrollbar-gutter: stable;
   gap: 18px;
 }
+.timeline-content {
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
 .timeline-item {
   width: min(100%, var(--chat-content-max));
   max-width: 100%;
@@ -1185,6 +1210,12 @@ body,
   border-radius: 8px;
   color: var(--muted);
   background: rgba(255, 255, 255, 0.42);
+}
+.sponsor-surface.banner-top {
+  width: min(100%, calc(var(--chat-content-max) - 40px));
+  margin-right: auto;
+  margin-left: 12px;
+  align-self: flex-start;
 }
 .thinking-message {
   color: #4f5f7e;
@@ -2177,8 +2208,13 @@ html[data-theme="dark"] .approval-card .eyebrow,
 html[data-theme="dark"] .approval-card h2,
 html[data-theme="dark"] .approval-card code,
 html[data-theme="dark"] .approval-card p,
+html[data-theme="dark"] .approval-card .approval-reason,
 html[data-theme="dark"] .approval-card small {
   color: #ffffff;
+}
+html[data-theme="dark"] .approval-card .approval-reason {
+  border-color: #5b616d;
+  background: #1f232a;
 }
 html[data-theme="dark"] .settings-sign-out-button {
   color: #ffffff;

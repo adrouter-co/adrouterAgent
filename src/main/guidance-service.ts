@@ -1,6 +1,10 @@
-import { constants } from 'node:fs';
-import { access, lstat, open, readdir, realpath } from 'node:fs/promises';
-import { basename, extname, relative, resolve, sep } from 'node:path';
+import { realpath } from 'node:fs/promises';
+import { posix } from 'node:path';
+import {
+  inspectWorkspacePath,
+  listBoundWorkspaceFiles,
+  readBoundWorkspaceFile,
+} from '../runtime/workspace-broker';
 import {
   type GuidanceContent,
   GuidanceContentSchema,
@@ -35,18 +39,6 @@ const hasAsciiControlCharacter = (value: string): boolean =>
     const code = character.charCodeAt(0);
     return code <= 0x1f || code === 0x7f;
   });
-
-const exists = async (path: string): Promise<boolean> => {
-  try {
-    await access(path, constants.F_OK);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const normalizeRelative = (root: string, path: string): string =>
-  relative(root, path).split(sep).join('/');
 
 const parseScalar = (raw: string): string => {
   const value = raw.trim();
@@ -303,79 +295,50 @@ export class GuidanceService {
     let scanned = 0;
     let aggregateBytes = 0;
 
-    const walk = async (directory: string, kind: GuidanceKind): Promise<void> => {
-      const directoryStat = await lstat(directory);
-      if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) {
+    for (const [kind, relativeRoot] of [
+      ['skill', '.adrouter/skills'],
+      ['prompt', '.adrouter/prompts'],
+    ] as const) {
+      let inspected: ReturnType<typeof inspectWorkspacePath>;
+      try {
+        inspected = inspectWorkspacePath(root, relativeRoot);
+      } catch {
         throw new Error('Project guidance directories must be regular, non-symlink directories.');
       }
-      for (const entry of await readdir(directory, { withFileTypes: true })) {
-        scanned += 1;
-        if (scanned > MAX_SCANNED_ENTRIES) {
-          throw new Error(
-            `Project guidance discovery is limited to ${MAX_SCANNED_ENTRIES} entries.`
-          );
-        }
-        const absolute = resolve(directory, entry.name);
-        const relativePath = normalizeRelative(root, absolute);
-        if (relativePath.startsWith('../') || relativePath === '..') {
-          throw new Error('Project guidance escaped the selected workspace.');
-        }
-        if (entry.isSymbolicLink()) {
-          throw new Error(`Project guidance rejects symlink ${relativePath}.`);
-        }
-        if (entry.isDirectory()) {
-          await walk(absolute, kind);
-          continue;
-        }
-        if (!entry.isFile()) {
-          throw new Error(`Project guidance rejects non-regular entry ${relativePath}.`);
-        }
+      if (inspected.kind === 'missing') continue;
+      if (inspected.kind !== 'directory') {
+        throw new Error('Project guidance directories must be regular, non-symlink directories.');
+      }
+      const listing = listBoundWorkspaceFiles(root, relativeRoot, MAX_SCANNED_ENTRIES - scanned);
+      scanned += listing.files.length;
+      if (listing.rejected) {
+        throw new Error('Project guidance rejects symlink and non-regular entries.');
+      }
+      if (listing.truncated || scanned > MAX_SCANNED_ENTRIES) {
+        throw new Error(`Project guidance discovery is limited to ${MAX_SCANNED_ENTRIES} entries.`);
+      }
+      for (const relativePath of listing.files) {
+        const filename = posix.basename(relativePath);
         const candidate =
           kind === 'skill'
-            ? entry.name === 'SKILL.md'
-            : extname(entry.name).toLowerCase() === '.md';
+            ? filename === 'SKILL.md'
+            : posix.extname(filename).toLowerCase() === '.md';
         if (!candidate) continue;
         if (
           resources.filter((resource) => resource.kind === kind).length >= MAX_RESOURCES_PER_KIND
         ) {
           throw new Error(`Project ${kind}s are limited to ${MAX_RESOURCES_PER_KIND} resources.`);
         }
-        const fileStat = await lstat(absolute);
-        if (fileStat.isSymbolicLink() || !fileStat.isFile()) {
-          throw new Error(`Project guidance ${relativePath} must be a regular file.`);
-        }
-        if (fileStat.size < 1 || fileStat.size > MAX_RESOURCE_BYTES) {
-          throw new Error(`Project guidance ${relativePath} must be 1-64 KiB.`);
-        }
-        if ((await realpath(absolute)) !== absolute) {
-          throw new Error(`Project guidance ${relativePath} cannot traverse a symlink.`);
-        }
         let bytes: Buffer;
         try {
-          const flags =
-            process.platform === 'win32'
-              ? constants.O_RDONLY
-              : constants.O_RDONLY | constants.O_NOFOLLOW;
-          const handle = await open(absolute, flags);
-          try {
-            const openedStat = await handle.stat();
-            if (
-              !openedStat.isFile() ||
-              openedStat.dev !== fileStat.dev ||
-              openedStat.ino !== fileStat.ino ||
-              openedStat.size < 1 ||
-              openedStat.size > MAX_RESOURCE_BYTES
-            ) {
-              throw new Error('changed');
-            }
-            bytes = await handle.readFile();
-          } finally {
-            await handle.close();
-          }
+          bytes = readBoundWorkspaceFile(root, relativePath, MAX_RESOURCE_BYTES);
         } catch {
           throw new Error(
             `Project guidance ${relativePath} changed or traversed a symlink during review.`
           );
+        }
+        if (bytes.byteLength < 1) {
+          throw new Error(`Project guidance ${relativePath} must be 1-64 KiB.`);
         }
         if (bytes.includes(0)) throw new Error(`Project guidance ${relativePath} is binary.`);
         let content: string;
@@ -388,15 +351,21 @@ export class GuidanceService {
           throw new Error(`Project guidance ${relativePath} cannot start with a shebang.`);
         }
         const parsed = parseMarkdown(content, kind === 'skill');
+        const withinRoot = relativePath.slice(`${relativeRoot}/`.length);
+        const skillDirectory = posix.dirname(withinRoot);
         const fallbackPath =
           kind === 'skill'
-            ? normalizeRelative(resolve(root, '.adrouter/skills'), resolve(directory))
-            : normalizeRelative(resolve(root, '.adrouter/prompts'), absolute).replace(/\.md$/i, '');
+            ? skillDirectory === '.'
+              ? 'skills'
+              : skillDirectory
+            : withinRoot.replace(/\.md$/i, '');
         const metadata = validateMetadata(
           kind,
           parsed,
           fallbackPath.replaceAll('/', '-'),
-          kind === 'skill' ? basename(directory) : basename(absolute, extname(absolute))
+          kind === 'skill'
+            ? posix.basename(skillDirectory === '.' ? relativeRoot : skillDirectory)
+            : posix.basename(withinRoot, posix.extname(withinRoot))
         );
         aggregateBytes += bytes.byteLength;
         if (aggregateBytes > MAX_AGGREGATE_BYTES) {
@@ -413,15 +382,6 @@ export class GuidanceService {
           })
         );
       }
-    };
-
-    for (const [kind, relativeRoot] of [
-      ['skill', '.adrouter/skills'],
-      ['prompt', '.adrouter/prompts'],
-    ] as const) {
-      const directory = resolve(root, relativeRoot);
-      if (!(await exists(directory))) continue;
-      await walk(directory, kind);
     }
 
     const ids = new Set<string>();

@@ -53,6 +53,10 @@ still requires later downloaded-artifact acceptance and separate authorization.
 - Current repository instructions define normal concurrency as one task and official release
   targets as macOS universal, Ubuntu 24.04 x64, and Windows 11 x64. Existing queue/lease machinery
   stays, but the default and public claims must match those constraints.
+- GitHub protected environments can hold candidate publication until their review rules pass, and
+  npm trusted publishing binds the public package to the reviewed GitHub workflow through OIDC.
+- Public beta.16 and tag `v0.1.0-beta.16` are immutable, so the security candidate must use the
+  unused next identity `0.1.0-beta.17` and must not move `beta` or `latest`.
 
 ## Constraints
 
@@ -70,8 +74,9 @@ still requires later downloaded-artifact acceptance and separate authorization.
 - Preserve Node.js 25.9.0 for the app and Node.js 22.19+ with zero runtime dependencies for the npm
   launcher. Add no dependencies unless unavoidable; none are planned.
 - Preserve public APIs and persisted data with additive versioned migrations/readers.
-- Publish only the explicitly authorized unsigned/ad-hoc beta.13 GitHub prerelease and npm
-  `candidate`; do not move `beta`/`latest`, sign/notarize, mutate hosted data, or finalize.
+- Step G records the historical beta.13 path. For current Step H, publish only the explicitly
+  authorized unsigned/ad-hoc beta.17 GitHub prerelease and npm `candidate`; do not move
+  `beta`/`latest`, sign/notarize, mutate hosted data, or finalize.
 
 ## Out of Scope
 
@@ -571,6 +576,92 @@ updates unchanged until downloaded-artifact acceptance is complete.
 
 ---
 
+## Step H: Security-only beta.17 candidate
+
+### Status
+
+`in_progress`
+
+### Objective
+
+Extract the validated desktop security fixes from the mixed local worktree, integrate them with
+current remote `main`, and publish immutable `0.1.0-beta.17` GitHub/npm candidate artifacts while
+preserving unrelated work and leaving the canonical checkout clean.
+
+### Tasks
+
+- [ ] Scan the current diff for secrets and preserve every tracked/untracked byte on a clearly
+      named local-only preservation branch before changing the branch base.
+- [ ] Fetch current remote state, create a security branch from `origin/main`, and port only the
+      descriptor-bound workspace broker, case-insensitive protected-path checks, trusted Git
+      resolution, bounded Router/NDJSON handling, focused tests, and required packaging/provenance
+      inputs.
+- [ ] Prepare unused `0.1.0-beta.17` metadata and review the final diff against `origin/main` for
+      unrelated renderer, guidance, review, or parity changes.
+- [ ] Run the complete pinned source, release-readiness, packaged-Electron, macOS distribution, and
+      native broker verification gates; require protected Windows compilation in GitHub Actions.
+- [ ] Push a release PR, merge only after required checks, tag the exact protected-main commit, and
+      verify the immutable draft inventory.
+- [ ] Dispatch `publish-candidate`, approve the protected environment when requested, verify the
+      GitHub prerelease and npm `candidate`, and confirm `beta`/`latest` still resolve to beta.16.
+- [ ] Leave the checkout clean and record the preservation branch, exact SHA/tag, workflow runs,
+      public integrity, and deferred physical Windows/finalization gates.
+
+### Relevant Files
+
+- `src/runtime/workspace.ts`, `src/runtime/workspace-broker.ts`, `src/runtime/structured-files.ts`
+- `src/runtime/tools.ts`, `src/runtime/platform.ts`, `src/runtime/router-client.ts`, `src/runtime/ndjson.ts`
+- `native/`, `scripts/build-workspace-broker.mjs`, source-parity/provenance inputs, focused tests
+- `package.json`, `package-lock.json`, `packages/agent-launcher/`, `.github/workflows/`, release docs
+
+### Expected Changes
+
+- create: a local-only preservation branch and a protected security candidate branch/tag
+- modify: security runtime, broker packaging, focused tests, version/release metadata, and this plan
+- delete: no user-owned work, public artifacts, or prior immutable tags
+
+### Do Not Modify
+
+- unrelated renderer, guidance/review-service, feature-parity, or presentation behavior
+- npm `beta`/`latest`, prior GitHub releases/tags/assets, hosted Router state, or signing policy
+- ignored credentials, `adrouter_release/.protected/`, generated `out/`, or packaged release output
+
+### Commands
+
+```bash
+npm ci
+npm run check
+npm run verify:release-readiness
+npm run test:e2e
+npm run make:mac
+npm run verify:dist
+git diff --check
+git status --short --branch
+```
+
+### Acceptance Criteria
+
+- [ ] The candidate diff contains only validated security fixes and required release metadata.
+- [ ] Unrelated local work is recoverable byte-for-byte from the documented preservation branch.
+- [ ] All local gates pass under Node.js 25.9.0 and protected Windows builds verify the broker.
+- [ ] `v0.1.0-beta.17`, GitHub prerelease, and npm `candidate` identify one exact commit/artifact set.
+- [ ] npm `beta` and `latest` remain `0.1.0-beta.16`.
+- [ ] The canonical working directory is clean at handoff.
+
+### Validation Results
+
+- Local gates: not run for the extracted candidate.
+- Protected CI/native build: not run.
+- Candidate publication and anonymous verification: not run.
+
+### Findings / Notes
+
+- Current local `main` is ahead one/behind six with mixed source work. It is preservation input, not
+  a releasable source identity.
+- Physical Windows 11 downloaded-artifact acceptance and channel finalization remain out of scope.
+
+---
+
 ## Follow-up Work
 
 - Verify the hosted Router's exact `/v1/models` catalog and installation-auth contract during the
@@ -596,3 +687,4 @@ updates unchanged until downloaded-artifact acceptance is complete.
 | 2026-08-04 | Keep normal capacity at one and official targets at macOS universal, Ubuntu x64, and Windows x64. | These are explicit repository invariants. | Queue/lease/signing infrastructure remains, but unsupported defaults and ARM64 release claims are removed. |
 | 2026-08-07 | Adapt CLI beta.19 profiles as immutable Agent task presets, not global profile switching. | Desktop tasks need reproducible policy without replacing user-level settings or widening provider authority. | Presets are copied into versioned task snapshots and later edits cannot expand existing tasks. |
 | 2026-08-07 | Support only exact-digest project Markdown skills/prompts. | CLI's global/package/script-capable skill surface is outside the Agent's trust and sandbox boundaries. | Skills use metadata-first on-demand loading; prompts require an explicit insert and neither can add executable behavior. |
+| 2026-08-11 | Extract a security-only beta.17 candidate from current remote main and preserve mixed local work separately. | Publishing the aggregate dirty tree would bundle unrelated work and would not be reproducible. | The candidate remains narrow while all prior local bytes stay recoverable and the checkout can finish clean. |

@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { App } from '@/renderer/App';
+import { App, formatApprovalReason } from '@/renderer/App';
 
 const api = {
   configuration: {
@@ -91,6 +91,31 @@ afterEach(() => {
   document.documentElement.removeAttribute('data-theme');
   document.documentElement.classList.remove('theme-transitioning');
   document.documentElement.style.colorScheme = '';
+});
+
+describe('approval preview formatting', () => {
+  it('pretty-prints legacy mutation JSON and safely wraps an incomplete preview', () => {
+    const legacy = {
+      kind: 'file-mutation',
+      path: 'src/status.ts',
+      reason: `Review this exact workspace mutation before it runs: ${JSON.stringify({
+        operation: 'modify',
+        path: 'src/status.ts',
+        replacements: [{ original: 'old\nvalue', replacement: 'new\nvalue' }],
+      })}`,
+    } as Parameters<typeof formatApprovalReason>[0];
+    expect(formatApprovalReason(legacy)).toContain('Operation: Modify file');
+    expect(formatApprovalReason(legacy)).toContain('Before:\nold\nvalue');
+    expect(formatApprovalReason(legacy)).toContain('After:\nnew\nvalue');
+
+    const incomplete = {
+      ...legacy,
+      reason: 'Review this exact workspace mutation before it runs: {"operation":"modify","path":',
+    };
+    expect(formatApprovalReason(incomplete)).toContain(
+      'Legacy preview (could not be fully decoded):'
+    );
+  });
 });
 
 describe('App onboarding', () => {
@@ -504,10 +529,37 @@ describe('App onboarding', () => {
       payload: { text: 'Answer C' },
     };
     await waitFor(() => expect(emitEvent).toBeTypeOf('function'));
+    const timelineLog = screen.getByRole('log', { name: 'Agent activity timeline' });
+    let timelineScrollHeight = 900;
+    Object.defineProperties(timelineLog, {
+      scrollHeight: { configurable: true, get: () => timelineScrollHeight },
+      clientHeight: { configurable: true, get: () => 200 },
+    });
+    timelineLog.scrollTop = 650;
+    fireEvent.scroll(timelineLog);
     act(() => emitEvent?.(completedEvent));
     await waitFor(() =>
       expect(screen.getAllByLabelText('Sponsored compute tier C')).toHaveLength(2)
     );
+    await waitFor(() => expect(timelineLog.scrollTop).toBe(timelineScrollHeight));
+
+    timelineLog.scrollTop = 100;
+    fireEvent.scroll(timelineLog);
+    timelineScrollHeight = 1_100;
+    await act(async () => {
+      emitEvent?.({
+        id: '99999999-0000-4000-8000-000000000001',
+        threadId: thread.id,
+        turnId: turnIds[3],
+        sequence: sequence + 2,
+        type: 'thinking.delta',
+        timestamp: '2026-07-11T12:00:02.000Z',
+        payload: { text: ' Manual-scroll probe.' },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(screen.getByText(/Manual-scroll probe/)).toBeInTheDocument();
+    expect(timelineLog.scrollTop).toBe(100);
     expect(screen.getAllByText(/Sponsored compute · 1 round/)).toHaveLength(3);
     const sponsorPanel = screen
       .getByRole('button', { name: 'Dismiss sponsored banner' })

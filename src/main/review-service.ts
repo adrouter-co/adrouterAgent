@@ -1,35 +1,17 @@
-import { randomUUID } from 'node:crypto';
-import { constants } from 'node:fs';
-import { access, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
-import { basename, dirname, resolve } from 'node:path';
 import { shell } from 'electron';
 import { resolveWorkspacePath } from '../runtime/workspace';
+import {
+  deleteBoundWorkspaceFile,
+  inspectWorkspacePath,
+  readBoundWorkspaceFile,
+  replaceBoundWorkspaceFile,
+} from '../runtime/workspace-broker';
 import type { DiffFile } from '../shared/contracts';
 import { sha256 } from '../shared/security';
 import { effectiveTaskCapabilityPolicy } from '../shared/task-policy';
 import type { AppDatabase } from './database';
 
-const pathExists = async (path: string): Promise<boolean> => {
-  try {
-    await access(path, constants.F_OK);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const writeAtomically = async (path: string, bytes: Uint8Array): Promise<void> => {
-  await mkdir(dirname(path), { recursive: true });
-  const temporary = resolve(dirname(path), `.${basename(path)}.adrouter-revert-${randomUUID()}`);
-  try {
-    await writeFile(temporary, bytes, { mode: 0o600 });
-    await rename(temporary, path);
-  } finally {
-    if (await pathExists(temporary)) {
-      await unlink(temporary);
-    }
-  }
-};
+const MAX_REVIEW_FILE_BYTES = 10 * 1024 * 1024;
 
 export class ReviewService {
   public constructor(private readonly database: AppDatabase) {}
@@ -52,8 +34,14 @@ export class ReviewService {
       const target = await resolveWorkspacePath(project.path, baseline.path, {
         allowMissing: true,
       });
-      const exists = await pathExists(target.absolute);
-      const currentBytes = exists ? await readFile(target.absolute) : null;
+      const inspected = inspectWorkspacePath(target.root, target.relative);
+      if (inspected.kind === 'directory') {
+        throw new Error('Review baselines accept only regular files.');
+      }
+      const currentBytes =
+        inspected.kind === 'file'
+          ? readBoundWorkspaceFile(target.root, target.relative, MAX_REVIEW_FILE_BYTES)
+          : null;
       const original = baseline.original_bytes
         ? Buffer.from(baseline.original_bytes, 'base64').toString('utf8')
         : '';
@@ -96,8 +84,14 @@ export class ReviewService {
       throw new Error('No agent baseline exists for this file.');
     }
     const target = await resolveWorkspacePath(project.path, path, { allowMissing: true });
-    const exists = await pathExists(target.absolute);
-    const current = exists ? await readFile(target.absolute) : null;
+    const inspected = inspectWorkspacePath(target.root, target.relative);
+    if (inspected.kind === 'directory') {
+      throw new Error('Review baselines accept only regular files.');
+    }
+    const current =
+      inspected.kind === 'file'
+        ? readBoundWorkspaceFile(target.root, target.relative, MAX_REVIEW_FILE_BYTES)
+        : null;
     const currentHash = current ? sha256(current) : null;
     if (currentHash !== baseline.latest_agent_hash) {
       this.database.updateBaselineStatus(threadId, path, 'conflict', baseline.latest_agent_hash);
@@ -105,11 +99,16 @@ export class ReviewService {
     }
 
     if (baseline.original_bytes === null) {
-      if (exists) {
-        await unlink(target.absolute);
+      if (current) {
+        deleteBoundWorkspaceFile(target.root, target.relative, current);
       }
     } else {
-      await writeAtomically(target.absolute, Buffer.from(baseline.original_bytes, 'base64'));
+      replaceBoundWorkspaceFile(
+        target.root,
+        target.relative,
+        current,
+        Buffer.from(baseline.original_bytes, 'base64')
+      );
     }
     this.database.updateBaselineStatus(threadId, path, 'reverted', baseline.original_hash);
     this.database.appendEvent(threadId, null, 'diff.change', { path, status: 'reverted' });

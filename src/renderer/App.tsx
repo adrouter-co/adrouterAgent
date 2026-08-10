@@ -68,6 +68,61 @@ const threadDepth = (thread: Thread, threads: Thread[]): number => {
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : 'Something went wrong.';
 
+const LEGACY_MUTATION_REASON_PREFIX = 'Review this exact workspace mutation before it runs:';
+
+export const formatApprovalReason = (approval: Approval): string => {
+  if (
+    (approval.kind !== 'file-mutation' && approval.kind !== 'file-delete') ||
+    !approval.reason.startsWith(LEGACY_MUTATION_REASON_PREFIX)
+  ) {
+    return approval.reason;
+  }
+
+  const serialized = approval.reason.slice(LEGACY_MUTATION_REASON_PREFIX.length).trim();
+  try {
+    const parsed = JSON.parse(serialized) as Record<string, unknown>;
+    const operation =
+      parsed.operation === 'delete'
+        ? 'Delete file'
+        : parsed.operation === 'create'
+          ? 'Create file'
+          : 'Modify file';
+    const path = typeof parsed.path === 'string' ? parsed.path : approval.path;
+    const lines = [
+      'Review this workspace mutation before it runs.',
+      '',
+      `Operation: ${operation}`,
+      `File: ${path || 'Requested file'}`,
+    ];
+    if (typeof parsed.createContent === 'string') {
+      lines.push('', 'Content:', parsed.createContent || '[Empty file]');
+    } else if (Array.isArray(parsed.replacements)) {
+      const replacements = parsed.replacements.filter(
+        (replacement): replacement is Record<string, unknown> =>
+          Boolean(replacement) && typeof replacement === 'object'
+      );
+      lines.push('', `Replacements: ${replacements.length}`);
+      for (const [index, replacement] of replacements.entries()) {
+        const before =
+          typeof replacement.original === 'string' ? replacement.original : '[Unavailable]';
+        const after =
+          typeof replacement.replacement === 'string'
+            ? replacement.replacement || '[Empty text]'
+            : '[Unavailable]';
+        lines.push('', `Replacement ${index + 1}`, 'Before:', before, '', 'After:', after);
+      }
+    }
+    return lines.join('\n');
+  } catch {
+    return [
+      'Review this workspace mutation before it runs.',
+      '',
+      'Legacy preview (could not be fully decoded):',
+      serialized,
+    ].join('\n');
+  }
+};
+
 const asSponsor = (event?: JournalEvent): Sponsor | undefined => {
   if (event?.type !== 'sponsor.update') {
     return undefined;
@@ -186,9 +241,11 @@ export function App(): JSX.Element {
   const [signOutNotice, setSignOutNotice] = useState<string>();
   const [composerClearance, setComposerClearance] = useState(190);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const timelineContentRef = useRef<HTMLDivElement>(null);
   const composerStackRef = useRef<HTMLDivElement>(null);
   const sessionImportRef = useRef<HTMLInputElement>(null);
   const followTimeline = useRef(true);
+  const timelineFollowFrame = useRef<number | null>(null);
   const newTaskRequested = useRef(false);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
@@ -229,6 +286,19 @@ export function App(): JSX.Element {
   }, [models, routerStatus]);
   const selectedModel = selectableModels.find((candidate) => candidate.id === model);
 
+  const scrollTimelineToLatest = useCallback((force = false): void => {
+    if (!force && !followTimeline.current) return;
+    if (timelineFollowFrame.current !== null) {
+      cancelAnimationFrame(timelineFollowFrame.current);
+    }
+    timelineFollowFrame.current = requestAnimationFrame(() => {
+      timelineFollowFrame.current = null;
+      const element = timelineRef.current;
+      if (!element || (!force && !followTimeline.current)) return;
+      element.scrollTop = element.scrollHeight;
+    });
+  }, []);
+
   const refreshRouterStatus = useCallback(async (): Promise<void> => {
     if (typeof window.adrouter.configuration.status !== 'function') return;
     setStatusBusy(true);
@@ -258,22 +328,31 @@ export function App(): JSX.Element {
   }, [configured]);
 
   useEffect(() => {
-    const element = timelineRef.current;
-    if (composerClearance > 0 && lastEventId && element && followTimeline.current) {
-      requestAnimationFrame(() => {
-        if (followTimeline.current) element.scrollTop = element.scrollHeight;
-      });
-    }
-  }, [composerClearance, lastEventId]);
+    if (composerClearance > 0 && lastEventId) scrollTimelineToLatest();
+  }, [composerClearance, lastEventId, scrollTimelineToLatest]);
+
+  useEffect(() => {
+    const content = timelineContentRef.current;
+    if (!configured || !content || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => scrollTimelineToLatest());
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [configured, scrollTimelineToLatest]);
 
   useEffect(() => {
     if (!selectedThreadId) return;
     followTimeline.current = true;
-    requestAnimationFrame(() => {
-      const element = timelineRef.current;
-      if (element) element.scrollTop = element.scrollHeight;
-    });
-  }, [selectedThreadId]);
+    scrollTimelineToLatest(true);
+  }, [selectedThreadId, scrollTimelineToLatest]);
+
+  useEffect(
+    () => () => {
+      if (timelineFollowFrame.current !== null) {
+        cancelAnimationFrame(timelineFollowFrame.current);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     setInstructionDraft(selectedProject?.instructions ?? '');
@@ -947,6 +1026,7 @@ export function App(): JSX.Element {
     if (!composer.trim() || !selectedProject || !selectedModel) {
       return;
     }
+    followTimeline.current = true;
     const text = composer.trim();
     if (bottomSponsor) {
       setDismissedBottomSponsors((current) => new Set(current).add(bottomSponsor.eventId));
@@ -1145,23 +1225,25 @@ export function App(): JSX.Element {
                 element.scrollHeight - element.scrollTop - element.clientHeight < 80;
             }}
           >
-            {error && (
-              <div className="error-banner" role="alert">
-                {error}
-              </div>
-            )}
-            {!selectedThread && (
-              <EmptyTimeline
-                hasProject={Boolean(selectedProject)}
-                onSuggestion={(suggestion) => {
-                  setComposer(suggestion);
-                  requestAnimationFrame(() => document.getElementById('task-composer')?.focus());
-                }}
-              />
-            )}
-            {timeline.map((item) => (
-              <TimelineEntry item={item} key={item.id} />
-            ))}
+            <div className="timeline-content" ref={timelineContentRef}>
+              {error && (
+                <div className="error-banner" role="alert">
+                  {error}
+                </div>
+              )}
+              {!selectedThread && (
+                <EmptyTimeline
+                  hasProject={Boolean(selectedProject)}
+                  onSuggestion={(suggestion) => {
+                    setComposer(suggestion);
+                    requestAnimationFrame(() => document.getElementById('task-composer')?.focus());
+                  }}
+                />
+              )}
+              {timeline.map((item) => (
+                <TimelineEntry item={item} key={item.id} />
+              ))}
+            </div>
           </div>
           <div className="composer-dock">
             <div className="composer-stack" ref={composerStackRef}>
@@ -3041,6 +3123,8 @@ function ApprovalCard({
   onResolve: (approval: Approval, decision: 'allow-once' | 'deny') => Promise<void>;
 }): JSX.Element {
   const manifest = approval.operationManifest;
+  const reason = formatApprovalReason(approval);
+  const isFileMutation = approval.kind === 'file-mutation' || approval.kind === 'file-delete';
   const target =
     manifest?.targets.map((candidate) => candidate.path).join(' → ') ||
     manifest?.network?.url ||
@@ -3060,7 +3144,7 @@ function ApprovalCard({
               : 'Edit file'}
       </h2>
       <code>{target}</code>
-      <p>{approval.reason}</p>
+      {isFileMutation ? <pre className="approval-reason">{reason}</pre> : <p>{reason}</p>}
       {manifest && (
         <small>
           Immutable binding: {manifest.binding.slice(0, 16)}… · expires{' '}

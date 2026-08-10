@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AdRouterClient, RouterHttpError } from '@/runtime/router-client';
+import {
+  AdRouterClient,
+  MAX_ROUTER_RESPONSE_BYTES,
+  RouterHttpError,
+} from '@/runtime/router-client';
 import catalog from '@/shared/catalog/adrouter-model-catalog.v2.json';
 
 const hostedCatalogPayload = (): string =>
@@ -345,5 +349,31 @@ describe('AdRouterClient', () => {
 
     await expect(collect(client.turn(turnInput))).rejects.toThrow(/invalid proof nonce/);
     expect(authorize).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects and cancels a Router stream advertised above the aggregate byte limit', async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull() {
+        // The content-length preflight should reject before consuming bytes.
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const client = new AdRouterClient({
+      serverUrl: 'https://router.example',
+      authentication: { mode: 'custom_bearer', token: 'never-log-me' },
+      fetchFn: vi.fn(
+        async () =>
+          new Response(body, {
+            status: 200,
+            headers: { 'content-length': String(MAX_ROUTER_RESPONSE_BYTES + 1) },
+          })
+      ),
+    });
+
+    await expect(collect(client.turn(turnInput))).rejects.toThrow(/8[,.]?388[,.]?608-byte limit/);
+    expect(cancelled).toBe(true);
   });
 });

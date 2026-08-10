@@ -1,8 +1,10 @@
 import { execFile as execFileCallback } from 'node:child_process';
-import { lstat, readFile, realpath, stat } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { BrowserWindow, dialog, type OpenDialogOptions } from 'electron';
+import { resolveTrustedGitExecutable } from '../runtime/platform';
+import { readBoundWorkspaceFile } from '../runtime/workspace-broker';
 import type { Project } from '../shared/contracts';
 import type { AppDatabase } from './database';
 
@@ -11,11 +13,17 @@ const MAX_INSTRUCTIONS_BYTES = 100_000;
 const MAX_INSTRUCTION_TOTAL_BYTES = 256_000;
 
 const git = async (workspace: string, args: string[]): Promise<string> => {
-  const { stdout } = await execFile('git', ['-C', workspace, ...args], {
-    encoding: 'utf8',
-    timeout: 10_000,
-    windowsHide: true,
-  });
+  const executable = resolveTrustedGitExecutable(workspace);
+  if (!executable) throw new Error('A trusted system Git executable is unavailable.');
+  const { stdout } = await execFile(
+    executable,
+    ['-C', workspace, '-c', 'core.fsmonitor=false', ...args],
+    {
+      encoding: 'utf8',
+      timeout: 10_000,
+      windowsHide: true,
+    }
+  );
   return stdout.trim();
 };
 
@@ -36,16 +44,10 @@ const contained = (root: string, candidate: string): boolean => {
   );
 };
 
-const readInstruction = async (workspace: string, path: string): Promise<string> => {
+const readInstruction = (workspace: string, relativePath: string): string => {
   try {
-    const metadata = await lstat(path);
-    if (!metadata.isFile() || metadata.isSymbolicLink()) return '';
-    const resolved = await realpath(path);
-    if (!contained(workspace, resolved)) return '';
-    const bytes = await readFile(path);
-    if (bytes.length > MAX_INSTRUCTIONS_BYTES || bytes.includes(0)) {
-      return '';
-    }
+    const bytes = readBoundWorkspaceFile(workspace, relativePath, MAX_INSTRUCTIONS_BYTES);
+    if (bytes.includes(0)) return '';
     return bytes.toString('utf8').trim();
   } catch {
     return '';
@@ -70,14 +72,13 @@ export const loadWorkspaceInstructions = async (
   }
   const candidates = directories.flatMap((directory) =>
     ['AGENTS.md', 'CLAUDE.md', '.agent/instructions.md'].map((name) => ({
-      absolutePath: resolve(directory, name),
       relativePath: relative(workspace, resolve(directory, name)).split(sep).join('/'),
     }))
   );
   const loaded: Array<{ relativePath: string; content: string }> = [];
   let totalBytes = 0;
   for (const candidate of candidates) {
-    const content = await readInstruction(workspace, candidate.absolutePath);
+    const content = readInstruction(workspace, candidate.relativePath);
     if (!content) continue;
     const bytes = Buffer.byteLength(content, 'utf8');
     if (totalBytes + bytes > MAX_INSTRUCTION_TOTAL_BYTES) break;
@@ -112,7 +113,7 @@ export class RepositoryService {
         ? await (async () => {
             const [branch, status, remote] = await Promise.all([
               optionalGit(workspace, ['branch', '--show-current']),
-              optionalGit(workspace, ['status', '--porcelain']),
+              optionalGit(workspace, ['status', '--porcelain', '--ignore-submodules=all']),
               optionalGit(workspace, ['remote', 'get-url', 'origin']),
             ]);
             return {

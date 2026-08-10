@@ -169,12 +169,28 @@ test.describe('packaged functional agent', () => {
       await expect(page.getByLabel('Sponsored compute tier C')).toHaveCount(2);
       await page.getByText('Thinking', { exact: true }).click();
       await expect(page.getByText('Checking the requested file.')).toBeVisible();
+      const inlineBanner = page.locator('.sponsor-surface.banner-top').first();
+      const thinkingBlock = page.locator('.thinking-message').first();
+      const [bannerBox, thinkingBox] = await Promise.all([
+        inlineBanner.boundingBox(),
+        thinkingBlock.boundingBox(),
+      ]);
+      expect(bannerBox).not.toBeNull();
+      expect(thinkingBox).not.toBeNull();
+      expect(Math.abs((bannerBox?.width ?? 0) - (thinkingBox?.width ?? 0))).toBeLessThanOrEqual(1);
+      expect(Math.abs((bannerBox?.x ?? 0) - (thinkingBox?.x ?? 0))).toBeLessThanOrEqual(1);
       await expect(page.getByRole('heading', { name: 'Edit file' })).toBeVisible();
       await page.getByRole('switch', { name: 'Switch to dark theme' }).click();
       const approvalCard = page.locator('.approval-card');
+      const approvalReason = approvalCard.locator('.approval-reason');
+      await expect(approvalReason).toContainText('Operation: Modify file');
+      await expect(approvalReason).toContainText('File: status.txt');
+      expect(await approvalReason.textContent()).toContain('Before:\nstatus=old');
+      expect(await approvalReason.textContent()).toContain('After:\nstatus=new');
       await expect(approvalCard).toHaveCSS('background-color', 'rgb(37, 41, 48)');
       await expect(approvalCard).toHaveCSS('color', 'rgb(255, 255, 255)');
       await expect(approvalCard.locator('code')).toHaveCSS('color', 'rgb(255, 255, 255)');
+      await expect(approvalReason).toHaveCSS('color', 'rgb(255, 255, 255)');
       await expect(approvalCard.locator('small')).toHaveCSS('color', 'rgb(255, 255, 255)');
       await page.getByRole('button', { name: 'Deny' }).click();
       await expect.poll(() => readFile(join(workspace, 'status.txt'), 'utf8')).toBe('status=old\n');
@@ -185,6 +201,15 @@ test.describe('packaged functional agent', () => {
       await expect(
         page.getByText('The approved edit and verification command completed.')
       ).toBeVisible();
+      await expect
+        .poll(() =>
+          page
+            .locator('.timeline')
+            .evaluate((element) =>
+              Math.abs(element.scrollHeight - element.scrollTop - element.clientHeight)
+            )
+        )
+        .toBeLessThanOrEqual(1);
       await expect(page.getByLabel('Sponsored compute tier C')).toHaveCount(1);
       await page.getByText('Run command').click();
       await expect(

@@ -41,6 +41,13 @@ Node.js, the filesystem, or child processes. File mutations and general
 commands require a fresh one-time approval and remain constrained by the
 workspace sandbox.
 
+Workspace reads, listings, regular-file replacements, review reverts, and deletes are performed by
+the packaged native workspace broker. It binds the canonical workspace and every path component to
+directory handles, rejects symbolic links, reparse points, and hard links, and has no pathname-based
+fallback. Structured directory copy, move, delete, and restore fail closed until equivalent
+descriptor-bound tree operations are available. Silent Git inspection resolves a canonical Git
+binary from fixed system locations instead of the project-controlled `PATH`.
+
 Every task stores an immutable, versioned capability snapshot when it is created. Later project or
 preset edits cannot expand that task, and policy is rechecked before an operation can consume its
 one-use approval. Project-owned Markdown is accepted only from bounded `.adrouter/skills` and

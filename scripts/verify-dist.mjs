@@ -97,6 +97,22 @@ for (const app of apps) {
       throw new Error(`Missing packaged legal resource: ${resource}`);
     }
   }
+  const brokerPath = join(
+    resourcesPath,
+    'vendor',
+    'workspace-broker',
+    'darwin-universal',
+    'adrouter_workspace_broker.node'
+  );
+  if (!existsSync(brokerPath)) {
+    throw new Error('Missing descriptor-bound universal macOS workspace broker.');
+  }
+  const brokerArchitectures = execFileSync('lipo', ['-archs', brokerPath], {
+    encoding: 'utf8',
+  });
+  if (!brokerArchitectures.includes('arm64') || !brokerArchitectures.includes('x86_64')) {
+    throw new Error(`Workspace broker has unexpected architectures: ${brokerArchitectures.trim()}`);
+  }
   const packagedFiles = asar.listPackage(asarPath);
   if (
     packagedFiles.some(

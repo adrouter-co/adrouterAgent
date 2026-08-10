@@ -143,9 +143,24 @@ export interface ParsedNdjson {
   errors: string[];
 }
 
+export const MAX_ROUTER_LINE_BYTES = 1024 * 1024;
+export const MAX_ROUTER_EVENTS = 8_192;
+export const MAX_ROUTER_TOOL_CALLS = 128;
+export const MAX_ROUTER_TOOL_ARGUMENT_BYTES = 1024 * 1024;
+
+export class RouterStreamLimitError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = 'RouterStreamLimitError';
+  }
+}
+
 export class NdjsonParser {
   private readonly decoder = new TextDecoder();
   private remainder = '';
+  private eventCount = 0;
+  private toolArgumentBytes = 0;
+  private readonly toolCalls = new Map<string, string>();
 
   public push(chunk: Uint8Array): ParsedNdjson {
     this.remainder += this.decoder.decode(chunk, { stream: true });
@@ -160,6 +175,9 @@ export class NdjsonParser {
   private drain(flush: boolean): ParsedNdjson {
     const lines = this.remainder.split(/\r?\n/);
     this.remainder = flush ? '' : (lines.pop() ?? '');
+    if (!flush && Buffer.byteLength(this.remainder, 'utf8') > MAX_ROUTER_LINE_BYTES) {
+      throw new RouterStreamLimitError('AdRouter returned an event larger than 1 MiB.');
+    }
     const events: RouterStreamEvent[] = [];
     const errors: string[] = [];
 
@@ -168,18 +186,29 @@ export class NdjsonParser {
       if (!line) {
         continue;
       }
+      if (Buffer.byteLength(rawLine, 'utf8') > MAX_ROUTER_LINE_BYTES) {
+        throw new RouterStreamLimitError('AdRouter returned an event larger than 1 MiB.');
+      }
+      this.eventCount += 1;
+      if (this.eventCount > MAX_ROUTER_EVENTS) {
+        throw new RouterStreamLimitError('AdRouter returned more than 8,192 stream events.');
+      }
       const payload = line.startsWith('data:') ? line.slice(5).trim() : line;
       if (payload === '[DONE]') {
         events.push({ type: 'done', usage: {} });
         continue;
       }
+      let event: RouterStreamEvent;
       try {
-        events.push(RouterStreamEventSchema.parse(JSON.parse(payload)));
+        event = RouterStreamEventSchema.parse(JSON.parse(payload));
       } catch (error) {
         errors.push(
           `Malformed router event: ${error instanceof Error ? error.message : String(error)}`
         );
+        continue;
       }
+      this.accountToolCall(event);
+      events.push(event);
     }
 
     if (flush && this.remainder.trim()) {
@@ -187,5 +216,37 @@ export class NdjsonParser {
     }
 
     return { events, errors };
+  }
+
+  private accountToolCall(event: RouterStreamEvent): void {
+    if (event.type !== 'tool_call') return;
+    if (
+      typeof event.id !== 'string' ||
+      !event.id ||
+      typeof event.name !== 'string' ||
+      !event.name
+    ) {
+      throw new RouterStreamLimitError('AdRouter returned a tool call without a stable identity.');
+    }
+    const signature = JSON.stringify({ name: event.name, arguments: event.arguments });
+    const previous = this.toolCalls.get(event.id);
+    if (previous !== undefined) {
+      if (previous !== signature) {
+        throw new RouterStreamLimitError(
+          `AdRouter returned conflicting tool calls with ID ${event.id}.`
+        );
+      }
+      return;
+    }
+    if (this.toolCalls.size >= MAX_ROUTER_TOOL_CALLS) {
+      throw new RouterStreamLimitError('AdRouter returned more than 128 unique tool calls.');
+    }
+    this.toolArgumentBytes += Buffer.byteLength(JSON.stringify(event.arguments), 'utf8');
+    if (this.toolArgumentBytes > MAX_ROUTER_TOOL_ARGUMENT_BYTES) {
+      throw new RouterStreamLimitError(
+        'AdRouter returned more than 1 MiB of aggregate tool arguments.'
+      );
+    }
+    this.toolCalls.set(event.id, signature);
   }
 }

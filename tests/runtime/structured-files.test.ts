@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -119,5 +119,22 @@ describe('structured file operations', () => {
         })
       ).rejects.toThrow(/Symlinks|symbolic links/);
     }
+  });
+
+  it('fails closed for directory mutations until they are descriptor-bound', async () => {
+    const root = await workspace();
+    await mkdir(join(root, 'directory'));
+    await writeFile(join(root, 'directory', 'source.txt'), 'reviewed\n');
+
+    await expect(
+      createStructuredFileManifest({
+        capability: 'file.copy',
+        threadId,
+        turnId,
+        workspaceRoot: root,
+        source: 'directory',
+        destination: 'copy',
+      })
+    ).rejects.toThrow('Directory copy, move, delete, and restore are disabled');
   });
 });

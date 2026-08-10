@@ -1,21 +1,17 @@
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import {
-  access,
-  lstat,
-  mkdir,
-  readdir,
-  readFile,
-  realpath,
-  rename,
-  stat,
-  unlink,
-  writeFile,
-} from 'node:fs/promises';
-import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { access, lstat, realpath } from 'node:fs/promises';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { sha256 } from '../shared/security';
+import { resolveTrustedGitExecutable } from './platform';
+import {
+  deleteBoundWorkspaceFile,
+  inspectWorkspacePath,
+  listBoundWorkspaceFiles,
+  readBoundWorkspaceFile,
+  replaceBoundWorkspaceFile,
+} from './workspace-broker';
 
 export const MAX_TEXT_FILE_BYTES = 1024 * 1024;
 const MAX_LISTED_FILES = 5_000;
@@ -55,9 +51,10 @@ export interface TextFile {
   content: string;
   hash: string;
   size: number;
+  bytes: Buffer;
 }
 
-export interface TextFileRange extends Omit<TextFile, 'content'> {
+export interface TextFileRange extends Omit<TextFile, 'content' | 'bytes'> {
   content: string;
   startLine: number;
   endLine: number;
@@ -133,8 +130,11 @@ const normalizeRelative = (input: string): string => {
 };
 
 export const isProtectedPath = (input: string): boolean => {
-  const segments = input.split(/[\\/]+/).filter(Boolean);
-  const fileName = segments.at(-1)?.toLowerCase() ?? '';
+  const segments = input
+    .split(/[\\/]+/)
+    .filter(Boolean)
+    .map((segment) => segment.toLocaleLowerCase('en-US'));
+  const fileName = segments.at(-1) ?? '';
 
   return (
     segments.some(
@@ -221,15 +221,12 @@ export const readWorkspaceTextFile = async (
   input: string
 ): Promise<TextFile> => {
   const path = await resolveWorkspacePath(workspaceRoot, input);
-  const fileStat = await stat(path.absolute);
-  if (!fileStat.isFile()) {
-    throw new WorkspaceAccessError('Only regular files may be read.');
+  let bytes: Buffer;
+  try {
+    bytes = readBoundWorkspaceFile(path.root, path.relative, MAX_TEXT_FILE_BYTES);
+  } catch (error) {
+    throw new WorkspaceAccessError(error instanceof Error ? error.message : String(error));
   }
-  if (fileStat.size > MAX_TEXT_FILE_BYTES) {
-    throw new WorkspaceAccessError(`File exceeds the ${MAX_TEXT_FILE_BYTES} byte safety limit.`);
-  }
-
-  const bytes = await readFile(path.absolute);
   if (isBinary(bytes)) {
     throw new WorkspaceAccessError('Binary files are unavailable to the agent.');
   }
@@ -239,6 +236,7 @@ export const readWorkspaceTextFile = async (
     content: bytes.toString('utf8'),
     hash: sha256(bytes),
     size: bytes.length,
+    bytes,
   };
 };
 
@@ -284,39 +282,6 @@ export const readWorkspaceTextRange = async (
   };
 };
 
-const walk = async (root: string, directory: string, files: string[]): Promise<void> => {
-  if (files.length >= MAX_LISTED_FILES) {
-    return;
-  }
-
-  const entries = await readdir(directory, { withFileTypes: true });
-  for (const entry of entries) {
-    if (files.length >= MAX_LISTED_FILES) {
-      return;
-    }
-    const absolute = resolve(directory, entry.name);
-    const fromRoot = relative(root, absolute).split(sep).join('/');
-    if (isProtectedPath(fromRoot)) {
-      continue;
-    }
-    if (entry.isSymbolicLink()) {
-      try {
-        const resolved = await realpath(absolute);
-        if (!isContained(root, resolved)) {
-          continue;
-        }
-      } catch {
-        continue;
-      }
-    }
-    if (entry.isDirectory()) {
-      await walk(root, absolute, files);
-    } else if (entry.isFile()) {
-      files.push(fromRoot);
-    }
-  }
-};
-
 const cursorOffset = (value: string | undefined): number => {
   if (!value) return 0;
   if (!/^\d{1,8}$/.test(value)) throw new WorkspaceAccessError('The page cursor is invalid.');
@@ -353,6 +318,8 @@ const globRegex = (value: string | undefined): RegExp | null => {
 
 const gitIgnored = async (root: string, files: string[]): Promise<Set<string>> => {
   if (files.length === 0) return new Set();
+  const gitExecutable = resolveTrustedGitExecutable(root);
+  if (!gitExecutable) return new Set();
   return await new Promise((resolveIgnored) => {
     const ignored = new Set<string>();
     let output = Buffer.alloc(0);
@@ -364,7 +331,7 @@ const gitIgnored = async (root: string, files: string[]): Promise<Set<string>> =
       for (const entry of output.toString('utf8').split('\0')) if (entry) ignored.add(entry);
       resolveIgnored(ignored);
     };
-    const child = spawn('git', ['-C', root, 'check-ignore', '--stdin', '-z'], {
+    const child = spawn(gitExecutable, ['-C', root, 'check-ignore', '--stdin', '-z'], {
       shell: false,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'ignore'],
@@ -388,13 +355,20 @@ export const listWorkspaceFiles = async (workspaceRoot: string, input = '.'): Pr
     input === '.'
       ? { root, absolute: root, relative: '' }
       : await resolveWorkspacePath(root, input);
-  const fileStat = await stat(target.absolute);
-  if (!fileStat.isDirectory()) {
-    throw new WorkspaceAccessError('list_files requires a directory.');
+  const relativePath = target.relative || '.';
+  try {
+    if (relativePath !== '.') {
+      const inspected = inspectWorkspacePath(root, relativePath);
+      if (inspected.kind !== 'directory') {
+        throw new WorkspaceAccessError('list_files requires a directory.');
+      }
+    }
+    const listed = listBoundWorkspaceFiles(root, relativePath, MAX_LISTED_FILES);
+    return listed.files.filter((file) => !isProtectedPath(file)).sort();
+  } catch (error) {
+    if (error instanceof WorkspaceAccessError) throw error;
+    throw new WorkspaceAccessError(error instanceof Error ? error.message : String(error));
   }
-  const files: string[] = [];
-  await walk(root, target.absolute, files);
-  return files.sort();
 };
 
 export const listWorkspaceFilesPage = async (
@@ -609,18 +583,6 @@ const applyReplacements = (current: string, replacements: readonly Replacement[]
   return next;
 };
 
-const atomicWrite = async (filePath: string, contents: string): Promise<void> => {
-  const temp = resolve(dirname(filePath), `.${basename(filePath)}.adrouter-${randomUUID()}.tmp`);
-  try {
-    await writeFile(temp, contents, { encoding: 'utf8', mode: 0o600 });
-    await rename(temp, filePath);
-  } finally {
-    if (await exists(temp)) {
-      await unlink(temp);
-    }
-  }
-};
-
 export interface ApplyPatchInput {
   path: string;
   expectedBeforeHash: string | null;
@@ -643,7 +605,16 @@ export const applyWorkspacePatch = async (
   options: { deletionApproved: boolean }
 ): Promise<AppliedPatch> => {
   const path = await resolveWorkspacePath(workspaceRoot, input.path, { allowMissing: true });
-  const filePresent = await exists(path.absolute);
+  let inspected: ReturnType<typeof inspectWorkspacePath>;
+  try {
+    inspected = inspectWorkspacePath(path.root, path.relative);
+  } catch (error) {
+    throw new WorkspaceAccessError(error instanceof Error ? error.message : String(error));
+  }
+  if (inspected.kind === 'directory') {
+    throw new WorkspaceAccessError('Workspace patches accept only regular files.');
+  }
+  const filePresent = inspected.kind === 'file';
   const before = filePresent ? await readWorkspaceTextFile(workspaceRoot, input.path) : undefined;
 
   if (before && input.expectedBeforeHash !== before.hash) {
@@ -662,7 +633,11 @@ export const applyWorkspacePatch = async (
     if (!options.deletionApproved) {
       throw new WorkspaceAccessError('File deletion requires explicit approval.');
     }
-    await unlink(path.absolute);
+    try {
+      deleteBoundWorkspaceFile(path.root, path.relative, before.bytes);
+    } catch (error) {
+      throw new WorkspaceAccessError(error instanceof Error ? error.message : String(error));
+    }
     return {
       path: path.relative,
       before: before.content,
@@ -685,8 +660,16 @@ export const applyWorkspacePatch = async (
     );
   }
 
-  await mkdir(dirname(path.absolute), { recursive: true });
-  await atomicWrite(path.absolute, after);
+  try {
+    replaceBoundWorkspaceFile(
+      path.root,
+      path.relative,
+      before?.bytes ?? null,
+      Buffer.from(after, 'utf8')
+    );
+  } catch (error) {
+    throw new WorkspaceAccessError(error instanceof Error ? error.message : String(error));
+  }
   return {
     path: path.relative,
     before: before?.content ?? null,

@@ -129,25 +129,49 @@ async function packageSandboxHelper(
   platform: string,
   arch: string
 ): Promise<void> {
-  if (platform === 'darwin') return;
-  if (!['linux', 'win32'].includes(platform) || !['x64', 'arm64'].includes(arch)) {
-    throw new Error(`Unsupported sandbox helper target ${platform}-${arch}.`);
+  if (!['darwin', 'linux', 'win32'].includes(platform) || !['x64', 'arm64'].includes(arch)) {
+    throw new Error(`Unsupported native helper target ${platform}-${arch}.`);
   }
-  const relativeHelper =
-    platform === 'linux'
-      ? join('seccomp', arch, 'apply-seccomp')
-      : join('srt-win', arch, 'srt-win.exe');
-  const source = resolve(
-    'node_modules',
-    '@anthropic-ai',
-    'sandbox-runtime',
-    'vendor',
-    relativeHelper
+  const brokerSource = resolve(
+    'native',
+    'workspace-broker',
+    'build',
+    'Release',
+    'adrouter_workspace_broker.node'
   );
-  const destination = join(buildPath, 'resources', 'vendor', relativeHelper);
-  await mkdir(dirname(destination), { recursive: true });
-  await copyFile(source, destination);
-  await chmod(destination, 0o755);
+  const resourcesRoot =
+    platform === 'darwin'
+      ? join(buildPath, 'AdRouter Agent.app', 'Contents', 'Resources')
+      : join(buildPath, 'resources');
+  const brokerPlatform = platform === 'darwin' ? 'darwin-universal' : `${platform}-${arch}`;
+  const brokerDestination = join(
+    resourcesRoot,
+    'vendor',
+    'workspace-broker',
+    brokerPlatform,
+    'adrouter_workspace_broker.node'
+  );
+  await mkdir(dirname(brokerDestination), { recursive: true });
+  await copyFile(brokerSource, brokerDestination);
+  await chmod(brokerDestination, 0o755);
+
+  if (platform !== 'darwin') {
+    const relativeHelper =
+      platform === 'linux'
+        ? join('seccomp', arch, 'apply-seccomp')
+        : join('srt-win', arch, 'srt-win.exe');
+    const source = resolve(
+      'node_modules',
+      '@anthropic-ai',
+      'sandbox-runtime',
+      'vendor',
+      relativeHelper
+    );
+    const destination = join(resourcesRoot, 'vendor', relativeHelper);
+    await mkdir(dirname(destination), { recursive: true });
+    await copyFile(source, destination);
+    await chmod(destination, 0o755);
+  }
 }
 
 function packageSandboxHelperHook(
