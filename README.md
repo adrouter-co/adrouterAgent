@@ -42,7 +42,7 @@ Latest channel:
 npm install --global @adrouter/agent@latest
 ```
 
-Candidate channel (beta.16 testing only; `beta` and `latest` remain on beta.15):
+Candidate alias (temporarily retained on the same immutable beta.16 release):
 
 ```sh
 npm install --global @adrouter/agent@candidate
@@ -110,7 +110,7 @@ npm install --global @adrouter/agent@beta
 # Current recommended release
 npm install --global @adrouter/agent@latest
 
-# Candidate under acceptance testing
+# Candidate alias for the same immutable beta.16 release
 npm install --global @adrouter/agent@candidate
 ```
 

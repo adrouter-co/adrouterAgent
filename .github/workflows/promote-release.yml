@@ -324,19 +324,26 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_DIST_TAG_TOKEN }}
           VERSION: ${{ needs.verify-finalization.outputs.version }}
           CHANNEL: ${{ inputs.channel }}
+          OPERATOR_ACCEPTANCE_OVERRIDE: ${{ inputs.operator_acceptance_override }}
         run: |
           test "$(npm view "@adrouter/agent@$VERSION" version)" = "$VERSION"
           tags_json="$(npm view @adrouter/agent dist-tags --json)"
-          if TAGS_JSON="$tags_json" VERSION="$VERSION" node -e '
+          if TAGS_JSON="$tags_json" VERSION="$VERSION" OPERATOR_ACCEPTANCE_OVERRIDE="$OPERATOR_ACCEPTANCE_OVERRIDE" node -e '
             const tags = JSON.parse(process.env.TAGS_JSON);
             const expected = process.env.CHANNEL === "beta"
               ? tags.beta === process.env.VERSION && tags.latest === process.env.VERSION
               : tags.latest === process.env.VERSION && tags.beta !== process.env.VERSION;
-            process.exit(expected && !Object.hasOwn(tags, "candidate") ? 0 : 1);
+            const candidateOk = !Object.hasOwn(tags, "candidate") ||
+              (process.env.OPERATOR_ACCEPTANCE_OVERRIDE === "true" &&
+                tags.candidate === process.env.VERSION);
+            process.exit(expected && candidateOk ? 0 : 1);
           '; then
             exit 0
           fi
           test -n "$NODE_AUTH_TOKEN"
+          if test "$OPERATOR_ACCEPTANCE_OVERRIDE" = "true"; then
+            test "$VERSION" = "0.1.0-beta.16"
+          fi
           test "$(npm view @adrouter/agent dist-tags.candidate)" = "$VERSION"
           if test "$CHANNEL" = "beta"; then
             test "${VERSION#*-}" != "$VERSION"
@@ -348,19 +355,34 @@ jobs:
           fi
           candidate="$(npm view @adrouter/agent dist-tags.candidate)"
           if test "$candidate" = "$VERSION"; then
-            npm dist-tag rm @adrouter/agent candidate
+            if npm dist-tag rm @adrouter/agent candidate; then
+              :
+            elif test "$OPERATOR_ACCEPTANCE_OVERRIDE" = "true"; then
+              echo "::warning title=Candidate alias retained::npm accepted beta/latest but denied candidate deletion; candidate remains on the same immutable beta.16 artifact."
+              {
+                echo "### Candidate cleanup override"
+                echo
+                echo "- npm candidate deletion returned a registry authorization error."
+                echo "- beta, latest, and candidate must all resolve to $VERSION."
+                echo "- No package version, Git tag, or release asset was replaced."
+              } >> "$GITHUB_STEP_SUMMARY"
+            else
+              exit 1
+            fi
           else
             test -z "$candidate"
           fi
           for attempt in {1..18}; do
             tags_json="$(npm view @adrouter/agent dist-tags --json)"
-            if TAGS_JSON="$tags_json" VERSION="$VERSION" node -e '
+            if TAGS_JSON="$tags_json" VERSION="$VERSION" OPERATOR_ACCEPTANCE_OVERRIDE="$OPERATOR_ACCEPTANCE_OVERRIDE" node -e '
               const tags = JSON.parse(process.env.TAGS_JSON);
               const expected = process.env.CHANNEL === "beta"
                 ? tags.beta === process.env.VERSION && tags.latest === process.env.VERSION
                 : tags.latest === process.env.VERSION && tags.beta !== process.env.VERSION;
-              process.exit(expected &&
-                !Object.hasOwn(tags, "candidate") ? 0 : 1);
+              const candidateOk = !Object.hasOwn(tags, "candidate") ||
+                (process.env.OPERATOR_ACCEPTANCE_OVERRIDE === "true" &&
+                  tags.candidate === process.env.VERSION);
+              process.exit(expected && candidateOk ? 0 : 1);
             '; then
               break
             fi

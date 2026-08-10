@@ -85,6 +85,11 @@ The override waives only the `authentication-acceptance.json` presence check; im
 inventory, npm integrity, and all anonymous macOS arm64/Intel, Ubuntu, and Windows launcher smoke
 checks remain mandatory. The workflow rejects this override for every other version.
 
+If npm accepts the beta.16 `beta`/`latest` writes but rejects deletion of the temporary `candidate`
+alias, the same override may complete with `candidate` retained only when all three tags resolve to
+the exact beta.16 package. This does not replace an artifact or create another release channel; it
+records a registry-cleanup exception so the accepted public channels are not rolled back.
+
 ## 5. Future signed releases and recovery
 
 Schema-4 Ed25519 manifests, Developer ID/notarization, Authenticode, and healthy-start rollback are
