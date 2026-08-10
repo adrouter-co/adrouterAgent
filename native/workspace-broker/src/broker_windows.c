@@ -513,7 +513,9 @@ int broker_write(const char *root, const char *relative_path,
       ok = fail_message(error, error_size, "Unable to allocate workspace rename state.");
     } else {
       rename->ReplaceIfExists = expects_existing ? TRUE : FALSE;
-      rename->RootDirectory = bound.parent;
+      /* The staging file already resides in the bound parent. A simple name
+         with no RootDirectory renames it within that exact directory. */
+      rename->RootDirectory = NULL;
       rename->FileNameLength = (DWORD)name_bytes;
       memcpy(rename->FileName, bound.name, name_bytes);
       if (!SetFileInformationByHandle(temporary, FileRenameInfo, rename, (DWORD)structure_bytes)) {

@@ -735,9 +735,14 @@ git status --short --branch
   override that also affected node-gyp's generated C++ delay-load hook. The fourth run compiled
   successfully and exposed `ERROR_INVALID_PARAMETER` in all broker replacement tests. Microsoft
   requires a rename buffer of at least the full `FILE_RENAME_INFO` structure plus the filename;
-  the broker used only the filename-field offset plus the filename. The allocation now follows the
-  documented contract while retaining the bound parent-directory handle. The protected Windows
-  rerun remains the acceptance gate.
+  the broker used only the filename-field offset plus the filename. The larger buffer alone still
+  returned error 87 because same-directory renames require `RootDirectory` to be null. The broker
+  now supplies a simple target name with a null root, which renames the already-open staging file
+  inside its exact bound directory without pathname re-resolution. The protected Windows rerun
+  remains the acceptance gate.
+- The same protected run's macOS E2E job missed the timeline auto-scroll threshold by 118 pixels.
+  An immediate pinned-runtime packaged rerun passed both E2E tests, so CI must reproduce or clear
+  that timing failure before merge.
 - Physical Windows 11 downloaded-artifact acceptance and channel finalization remain out of scope.
 
 ---
