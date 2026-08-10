@@ -5,17 +5,22 @@ portable application from the canonical GitHub release. The desktop binaries
 are not duplicated in the npm tarball.
 
 ```bash
+# Accepted prereleases
 npm install --global @adrouter/agent@beta
+
+# Current recommended release
+npm install --global @adrouter/agent@latest
+
 adrouter-agent doctor --json
 adrouter-agent
 ```
 
 Supported targets are macOS 12+ universal arm64/x64, Ubuntu Desktop 24.04 LTS x64, and Windows 11
-x64 with Node.js 22.19 or newer. The beta.13 candidate uses the credential-free schema-3 manifest;
+x64 with Node.js 22.19 or newer. The current public beta uses the credential-free schema-3 manifest;
 the launcher accepts no alternate artifact URL or checksum and validates bounded downloads, exact
 SHA-256 digests, archive paths, native architecture, bundle identity, and managed receipts.
 
-The beta.13 candidate remains ad-hoc/unsigned. A future schema-4 release requires
+The current public beta remains ad-hoc/unsigned. A future schema-4 release requires
 Developer ID/notarization on macOS and Authenticode on Windows; Linux identity is provided by the
 signed manifest and exact artifact checksum. Update checks use a fixed HTTPS origin with no
 redirects. Applying an update is compiled off until exact signed acceptance is recorded. The
@@ -38,4 +43,4 @@ Commands:
   network request.
 
 See the repository's platform-setup guide for Ubuntu dependencies, Windows
-one-time sandbox provisioning, and staging bearer-token onboarding.
+one-time sandbox provisioning, and staging installation authentication.

@@ -1,13 +1,20 @@
 # Platform setup and staging authentication
 
-The beta.13 candidate supports macOS 12+ on Apple Silicon and Intel, Ubuntu Desktop
+The current public beta supports macOS 12+ on Apple Silicon and Intel, Ubuntu Desktop
 24.04 LTS x64, and Windows 11 x64. Install Node.js 22.19 or newer before using the dependency-free
 npm launcher.
 
 ## Install the launcher
 
+Choose one release channel:
+
 ```bash
+# Accepted prereleases
 npm install --global @adrouter/agent@beta
+
+# Current recommended release
+npm install --global @adrouter/agent@latest
+
 adrouter-agent doctor --json
 adrouter-agent install
 adrouter-agent launch
@@ -19,10 +26,10 @@ The application is installed per user:
 - Linux: `${XDG_DATA_HOME:-~/.local/share}/adrouter-agent/app`
 - Windows: `%LOCALAPPDATA%\Programs\AdRouter Agent`
 
-Beta.13 macOS artifacts are ad-hoc signed and its Linux/Windows artifacts are unsigned.
+The current public macOS artifact is ad-hoc signed and the Linux/Windows artifacts are unsigned.
 Future schema-4 releases require Developer ID signing/notarization and stapling on macOS,
 Authenticode through the protected Windows signing provider, and an Ed25519-signed exact manifest
-for every platform. The beta.13 launcher downloads only canonical GitHub release URLs and verifies
+for every platform. The launcher downloads only canonical GitHub release URLs and verifies
 SHA-256, archive layout, architecture, and the expected credential-free platform integrity before
 activation.
 
