@@ -22,6 +22,15 @@ on:
         type: choice
         options:
           - beta
+      operator_acceptance_override:
+        description: One-time beta.16 operator override for the acceptance JSON gate
+        required: true
+        default: false
+        type: boolean
+      operator_acceptance_override_reason:
+        description: Required audit reason when the beta.16 acceptance override is enabled
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -194,13 +203,22 @@ jobs:
         name: Verify exact public candidate identity
         env:
           GH_TOKEN: ${{ github.token }}
+          OPERATOR_ACCEPTANCE_OVERRIDE: ${{ inputs.operator_acceptance_override }}
+          OPERATOR_ACCEPTANCE_OVERRIDE_REASON: ${{ inputs.operator_acceptance_override_reason }}
         run: |
           version="$(node -p "require('./package.json').version")"
           test "${{ inputs.tag }}" = "v$version"
           test "${{ inputs.channel }}" = "beta"
           test "${version#*-}" != "$version"
           expected_prerelease=true
-          test "$GITHUB_REF" = "refs/tags/v$version"
+          if test "$OPERATOR_ACCEPTANCE_OVERRIDE" = "true"; then
+            test "$version" = "0.1.0-beta.16"
+            test "$GITHUB_REF" = "refs/heads/main"
+            test -n "$OPERATOR_ACCEPTANCE_OVERRIDE_REASON"
+            test "${#OPERATOR_ACCEPTANCE_OVERRIDE_REASON}" -le 512
+          else
+            test "$GITHUB_REF" = "refs/tags/v$version"
+          fi
           test "$(git rev-list -n 1 "${{ inputs.tag }}")" = "$(git rev-parse HEAD)"
           test "$(gh release view "${{ inputs.tag }}" --json isDraft --jq .isDraft)" = false
           test "$(gh release view "${{ inputs.tag }}" --json isPrerelease --jq .isPrerelease)" = "$expected_prerelease"
@@ -210,10 +228,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.identity.outputs.version }}
           CHANNEL: ${{ inputs.channel }}
+          OPERATOR_ACCEPTANCE_OVERRIDE: ${{ inputs.operator_acceptance_override }}
+          OPERATOR_ACCEPTANCE_OVERRIDE_REASON: ${{ inputs.operator_acceptance_override_reason }}
         run: |
           mkdir "$RUNNER_TEMP/release"
           gh release download "${{ inputs.tag }}" --dir "$RUNNER_TEMP/release"
-          node scripts/verify-release-assets.mjs "$RUNNER_TEMP/release" --require-acceptance
+          if test "$OPERATOR_ACCEPTANCE_OVERRIDE" = "true"; then
+            node scripts/verify-release-assets.mjs "$RUNNER_TEMP/release"
+            echo "::warning title=Operator acceptance override::beta.16 finalization is using the explicitly authorized live macOS/Windows operator attestation instead of authentication-acceptance.json."
+            {
+              echo "### Operator acceptance override"
+              echo
+              echo "- Immutable tag: ${{ inputs.tag }}"
+              printf '%s\n' "- Reason: $OPERATOR_ACCEPTANCE_OVERRIDE_REASON"
+              echo "- Scope: acceptance JSON only; artifact, integrity, registry, and public smoke checks remain required."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            node scripts/verify-release-assets.mjs "$RUNNER_TEMP/release" --require-acceptance
+          fi
           tarball="$RUNNER_TEMP/release/adrouter-agent-$VERSION.tgz"
           local_integrity="sha512-$(openssl dgst -sha512 -binary "$tarball" | openssl base64 -A)"
           test "$(npm view "@adrouter/agent@$VERSION" version)" = "$VERSION"

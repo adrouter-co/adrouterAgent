@@ -78,6 +78,13 @@ Finalization is a separate authorization and workflow dispatch. For this beta it
 and `latest` to the exact accepted version and removes `candidate`; it never rebuilds or retargets
 the tag. Delete `NPM_DIST_TAG_TOKEN` and revoke its short-lived granular npm token after use.
 
+For `0.1.0-beta.16` only, `promote-release.yml` also exposes an explicit operator acceptance
+override. It may be used from `main` only after the operator has attested successful live macOS and
+physical Windows testing and separately authorized finalization. A bounded audit reason is required.
+The override waives only the `authentication-acceptance.json` presence check; immutable tag, release
+inventory, npm integrity, and all anonymous macOS arm64/Intel, Ubuntu, and Windows launcher smoke
+checks remain mandatory. The workflow rejects this override for every other version.
+
 ## 5. Future signed releases and recovery
 
 Schema-4 Ed25519 manifests, Developer ID/notarization, Authenticode, and healthy-start rollback are
