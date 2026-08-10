@@ -6,11 +6,11 @@ import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const brokerRoot = join(repositoryRoot, 'native', 'workspace-broker');
-const nodeGyp = join(repositoryRoot, 'node_modules', '.bin', 'node-gyp');
+const nodeGyp = join(repositoryRoot, 'node_modules', '@electron', 'node-gyp', 'bin', 'node-gyp.js');
 const output = join(brokerRoot, 'build', 'Release', 'adrouter_workspace_broker.node');
 
 if (!existsSync(nodeGyp)) {
-  throw new Error('The pinned node-gyp executable is unavailable. Run npm ci with the lockfile.');
+  throw new Error('The pinned node-gyp entrypoint is unavailable. Run npm ci with the lockfile.');
 }
 
 const runBuild = (arch) => {
