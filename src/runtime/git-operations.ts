@@ -11,6 +11,7 @@ import { OperationManifestV1Schema } from '../shared/contracts';
 import { now, sha256 } from '../shared/security';
 import { assertNetworkBindingCurrent, createGitPushNetworkBinding } from './network-policy';
 import { assertOperationManifest, createOperationManifest } from './operation-manifest';
+import { resolveTrustedGitExecutable } from './platform';
 import { snapshotStructuredTarget, verifyStructuredTargets } from './structured-files';
 import { WorkspaceAccessError } from './workspace';
 
@@ -72,6 +73,11 @@ const runGit = async (
   } = {}
 ): Promise<GitCommandResult> =>
   await new Promise((resolveRun, rejectRun) => {
+    const executable = resolveTrustedGitExecutable(workspace);
+    if (!executable) {
+      rejectRun(new WorkspaceAccessError('A trusted system Git executable is unavailable.'));
+      return;
+    }
     const argv = [
       '-C',
       workspace,
@@ -80,7 +86,7 @@ const runGit = async (
       ...(options.extraConfig ?? []),
       ...args,
     ];
-    const child = spawn('git', argv, {
+    const child = spawn(executable, argv, {
       cwd: workspace,
       detached: process.platform !== 'win32',
       env: gitEnvironment(),

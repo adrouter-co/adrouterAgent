@@ -20,6 +20,7 @@ import {
 } from './dependency-operations';
 import { createGitOperationManifest, type GitWriteCapability } from './git-operations';
 import { createNetworkFetchManifest } from './network-policy';
+import { resolveTrustedGitExecutable } from './platform';
 import { createRestoreManifest, createStructuredFileManifest } from './structured-files';
 import { createScriptOperationManifest } from './structured-processes';
 import {
@@ -183,9 +184,9 @@ const commandTool = (
   execute: async (toolCallId, params, signal, onUpdate) => {
     const argv =
       name === 'git_status'
-        ? ['git', 'status', '--short', '--branch']
+        ? ['git', 'status', '--short', '--branch', '--ignore-submodules=all']
         : name === 'git_diff'
-          ? ['git', 'diff', '--no-ext-diff']
+          ? ['git', 'diff', '--no-ext-diff', '--no-textconv', '--ignore-submodules=all']
           : (params as { argv: string[] }).argv;
     const timeoutMs =
       name === 'run_command' ? (params as { timeoutMs?: number }).timeoutMs : undefined;
@@ -193,6 +194,22 @@ const commandTool = (
     if (assessment.disposition === 'deny') {
       return errorContent(assessment.reason);
     }
+
+    const executableName = (argv[0]?.replaceAll('\\', '/').split('/').at(-1) ?? '')
+      .toLowerCase()
+      .replace(/\.exe$/, '');
+    const gitExecutable =
+      executableName === 'git' ? resolveTrustedGitExecutable(options.workspaceRoot) : null;
+    if (executableName === 'git' && !gitExecutable) {
+      return errorContent('A trusted system Git executable is unavailable.');
+    }
+    const executionArgv = gitExecutable
+      ? [
+          gitExecutable,
+          ...(name === 'run_command' ? [] : ['-c', 'core.fsmonitor=false']),
+          ...argv.slice(1),
+        ]
+      : argv;
 
     if (name === 'run_command') {
       const approval: ToolApproval = {
@@ -212,7 +229,7 @@ const commandTool = (
 
     const startedAt = now();
     const result = await options.commandRunner.run({
-      argv,
+      argv: executionArgv,
       cwd: options.workspaceRoot,
       workspaceWriteAllowed: options.permissionMode === 'workspace-write',
       timeoutMs,
@@ -446,14 +463,14 @@ export const createDesktopTools = (options: DesktopToolOptions): AgentTool[] => 
     name,
     label:
       name === 'copy_path'
-        ? 'Copy file or directory'
+        ? 'Copy regular file'
         : name === 'move_path'
-          ? 'Move file or directory'
+          ? 'Move regular file'
           : name === 'delete_path'
             ? 'Delete to recovery vault'
             : 'Restore from recovery vault',
     description:
-      'Prepare an immutable, hash-bound operation; request allow-once approval; then execute it through the main-process operation broker.',
+      'Prepare an immutable, hash-bound regular-file operation; request allow-once approval; then execute it through the descriptor-bound main-process broker. Directory mutations fail closed.',
     parameters:
       name === 'copy_path' || name === 'move_path'
         ? Type.Object({

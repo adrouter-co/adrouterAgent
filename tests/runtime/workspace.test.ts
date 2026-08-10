@@ -42,6 +42,16 @@ describe('workspace tools', () => {
     await expect(readWorkspaceTextFile(root, 'link.txt')).rejects.toBeInstanceOf(
       WorkspaceAccessError
     );
+    for (const protectedPath of [
+      '.Git/config',
+      'nested/.SSH/id_ed25519',
+      'nested/.AWS/credentials',
+      '.ADROUTER-RECOVERY/record.json',
+    ]) {
+      await expect(
+        resolveWorkspacePath(root, protectedPath, { allowMissing: true })
+      ).rejects.toThrow('protected');
+    }
   });
 
   it('uses hash-checked atomic exact-block patches and preserves baseline input', async () => {

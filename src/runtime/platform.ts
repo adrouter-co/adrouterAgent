@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join, win32 } from 'node:path';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, sep, win32 } from 'node:path';
 import {
   getWindowsSandboxUserStatus,
   parseWindowsBinShell,
@@ -15,6 +15,68 @@ export interface SandboxReadiness {
 }
 
 const WINDOWS_SETUP_COMMAND = 'npx @anthropic-ai/sandbox-runtime@0.0.65 windows-install';
+
+const pathIsWithin = (
+  root: string,
+  candidate: string,
+  platform: NodeJS.Platform = process.platform
+): boolean => {
+  const normalize = (value: string): string =>
+    platform === 'win32' || platform === 'darwin' ? value.toLocaleLowerCase('en-US') : value;
+  const fromRoot = relative(normalize(root), normalize(candidate));
+  return (
+    fromRoot === '' ||
+    (!fromRoot.startsWith(`..${sep}`) && fromRoot !== '..' && !isAbsolute(fromRoot))
+  );
+};
+
+export const trustedGitCandidates = (
+  platform: NodeJS.Platform = process.platform,
+  sourceEnvironment: NodeJS.ProcessEnv = process.env
+): string[] => {
+  if (platform === 'win32') {
+    return [
+      sourceEnvironment.ProgramFiles
+        ? win32.join(sourceEnvironment.ProgramFiles, 'Git', 'cmd', 'git.exe')
+        : undefined,
+      sourceEnvironment.ProgramFiles
+        ? win32.join(sourceEnvironment.ProgramFiles, 'Git', 'bin', 'git.exe')
+        : undefined,
+      sourceEnvironment['ProgramFiles(x86)']
+        ? win32.join(sourceEnvironment['ProgramFiles(x86)'], 'Git', 'cmd', 'git.exe')
+        : undefined,
+      sourceEnvironment.SystemRoot
+        ? win32.join(sourceEnvironment.SystemRoot, 'System32', 'git.exe')
+        : undefined,
+    ].filter((candidate): candidate is string => Boolean(candidate));
+  }
+  return ['/usr/bin/git', '/bin/git', '/opt/homebrew/bin/git', '/usr/local/bin/git'];
+};
+
+export const resolveTrustedGitExecutable = (
+  workspaceRoot?: string,
+  platform: NodeJS.Platform = process.platform,
+  sourceEnvironment: NodeJS.ProcessEnv = process.env
+): string | null => {
+  let canonicalWorkspace: string | undefined;
+  try {
+    canonicalWorkspace = workspaceRoot ? realpathSync(workspaceRoot) : undefined;
+  } catch {
+    return null;
+  }
+  for (const candidate of trustedGitCandidates(platform, sourceEnvironment)) {
+    try {
+      if (!existsSync(candidate)) continue;
+      const canonical = realpathSync(candidate);
+      if (!lstatSync(canonical).isFile()) continue;
+      if (canonicalWorkspace && pathIsWithin(canonicalWorkspace, canonical, platform)) continue;
+      return canonical;
+    } catch {
+      // Continue to the next fixed system location.
+    }
+  }
+  return null;
+};
 
 const ubuntuRestrictsUserNamespaces = (): boolean => {
   const path = '/proc/sys/kernel/apparmor_restrict_unprivileged_userns';

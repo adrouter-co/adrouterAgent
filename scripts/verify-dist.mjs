@@ -75,7 +75,7 @@ for (const app of apps) {
   if (
     info.CFBundleIdentifier !== 'com.adrouter.agent' ||
     info.CFBundleShortVersionString !== '0.1.0' ||
-    info.CFBundleVersion !== '10016' ||
+    info.CFBundleVersion !== '10017' ||
     info.NSAppTransportSecurity?.NSAllowsArbitraryLoads !== false ||
     info.NSAppTransportSecurity?.NSAllowsLocalNetworking !== true
   ) {
@@ -96,6 +96,22 @@ for (const app of apps) {
     if (!existsSync(join(resourcesPath, resource))) {
       throw new Error(`Missing packaged legal resource: ${resource}`);
     }
+  }
+  const brokerPath = join(
+    resourcesPath,
+    'vendor',
+    'workspace-broker',
+    'darwin-universal',
+    'adrouter_workspace_broker.node'
+  );
+  if (!existsSync(brokerPath)) {
+    throw new Error('Missing descriptor-bound universal macOS workspace broker.');
+  }
+  const brokerArchitectures = execFileSync('lipo', ['-archs', brokerPath], {
+    encoding: 'utf8',
+  });
+  if (!brokerArchitectures.includes('arm64') || !brokerArchitectures.includes('x86_64')) {
+    throw new Error(`Workspace broker has unexpected architectures: ${brokerArchitectures.trim()}`);
   }
   const packagedFiles = asar.listPackage(asarPath);
   if (
@@ -120,7 +136,7 @@ for (const app of apps) {
       throw new Error(`The packaged application contains forbidden content: ${forbidden}`);
     }
   }
-  if (!packagedText.includes('0.1.0-beta.16')) {
+  if (!packagedText.includes('0.1.0-beta.17')) {
     throw new Error('The packaged About metadata does not include the public release version.');
   }
   verifyPackagedStagingDefault(packagedFiles, (filename) =>

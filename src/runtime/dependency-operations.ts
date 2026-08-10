@@ -1,15 +1,6 @@
-import {
-  lstat,
-  mkdtemp,
-  readFile,
-  realpath,
-  rename,
-  rm,
-  unlink,
-  writeFile,
-} from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import type { OperationManifestV1 } from '../shared/contracts';
 import { OperationManifestV1Schema } from '../shared/contracts';
@@ -19,6 +10,12 @@ import { assertOperationManifest, createOperationManifest } from './operation-ma
 import { snapshotStructuredTarget, verifyStructuredTargets } from './structured-files';
 import type { PackageManager } from './structured-processes';
 import { WorkspaceAccessError } from './workspace';
+import {
+  deleteBoundWorkspaceFile,
+  inspectWorkspacePath,
+  readBoundWorkspaceFile,
+  replaceBoundWorkspaceFile,
+} from './workspace-broker';
 
 const MAX_DEPENDENCY_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_PROPOSALS = 16;
@@ -243,6 +240,27 @@ const readBoundedFile = async (path: string, optional = false): Promise<Buffer |
   }
 };
 
+const readWorkspaceDependencyFile = (
+  workspace: string,
+  path: string,
+  optional = false
+): Buffer | null => {
+  try {
+    const inspected = inspectWorkspacePath(workspace, path);
+    if (inspected.kind === 'missing') {
+      if (optional) return null;
+      throw new WorkspaceAccessError('A required dependency manifest is missing.');
+    }
+    if (inspected.kind !== 'file') {
+      throw new WorkspaceAccessError('Dependency manifests must be regular files.');
+    }
+    return readBoundWorkspaceFile(workspace, path, MAX_DEPENDENCY_FILE_BYTES);
+  } catch (error) {
+    if (error instanceof WorkspaceAccessError) throw error;
+    throw new WorkspaceAccessError(error instanceof Error ? error.message : String(error));
+  }
+};
+
 const dependencyMap = (value: unknown): Record<string, string> =>
   Object.fromEntries(
     Object.entries(safeRecord(value)).filter(
@@ -314,7 +332,7 @@ const inspectPackageChange = (
 
 interface StoredProposal {
   result: DependencyPreviewResult;
-  files: Array<{ path: string; before: Buffer | null; after: Buffer | null; mode: number }>;
+  files: Array<{ path: string; before: Buffer | null; after: Buffer | null }>;
   threadId: string;
   turnId: string;
 }
@@ -322,19 +340,27 @@ interface StoredProposal {
 const proposalDigest = (input: Omit<DependencyPreviewResult, 'digest' | 'commandOutput'>): string =>
   sha256(JSON.stringify(input));
 
-const writeAtomically = async (path: string, bytes: Buffer | null, mode: number): Promise<void> => {
-  if (bytes === null) {
-    await unlink(path).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== 'ENOENT') throw error;
-    });
-    return;
-  }
-  const temporary = resolve(dirname(path), `.${basename(path)}.adrouter-dependency-${createId()}`);
+const applyWorkspaceDependencyFile = (
+  workspace: string,
+  path: string,
+  expected: Buffer | null,
+  replacement: Buffer | null
+): void => {
   try {
-    await writeFile(temporary, bytes, { flag: 'wx', mode });
-    await rename(temporary, path);
-  } finally {
-    await unlink(temporary).catch(() => undefined);
+    if (replacement !== null) {
+      replaceBoundWorkspaceFile(workspace, path, expected, replacement);
+      return;
+    }
+    if (expected !== null) {
+      deleteBoundWorkspaceFile(workspace, path, expected);
+      return;
+    }
+    if (inspectWorkspacePath(workspace, path).kind !== 'missing') {
+      throw new WorkspaceAccessError('A dependency target changed before apply.');
+    }
+  } catch (error) {
+    if (error instanceof WorkspaceAccessError) throw error;
+    throw new WorkspaceAccessError(error instanceof Error ? error.message : String(error));
   }
 };
 
@@ -382,12 +408,14 @@ export class DependencyOperationBroker {
     try {
       const files = await Promise.all(
         manifest.targets.map(async (target) => {
-          const source = resolve(manifest.workspace, target.path);
-          const before = await readBoundedFile(source, target.kind === 'missing');
+          const before = readWorkspaceDependencyFile(
+            manifest.workspace,
+            target.path,
+            target.kind === 'missing'
+          );
           if (before)
             await writeFile(resolve(mirror, target.path), before, { flag: 'wx', mode: 0o600 });
-          const mode = before ? (await lstat(source)).mode & 0o777 : 0o600;
-          return { path: target.path, before, after: null as Buffer | null, mode };
+          return { path: target.path, before, after: null as Buffer | null };
         })
       );
       const run = await this.runner.run({
@@ -491,15 +519,17 @@ export class DependencyOperationBroker {
     const applied: string[] = [];
     try {
       for (const file of proposal.files) {
-        await writeAtomically(resolve(manifest.workspace, file.path), file.after, file.mode);
+        applyWorkspaceDependencyFile(manifest.workspace, file.path, file.before, file.after);
         applied.push(file.path);
       }
     } catch (error) {
       for (const file of proposal.files) {
         if (!applied.includes(file.path)) continue;
-        await writeAtomically(resolve(manifest.workspace, file.path), file.before, file.mode).catch(
-          () => undefined
-        );
+        try {
+          applyWorkspaceDependencyFile(manifest.workspace, file.path, file.after, file.before);
+        } catch {
+          // Preserve the original failure; exact-content rollback can be retried safely.
+        }
       }
       throw error;
     }

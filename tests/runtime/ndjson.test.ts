@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NdjsonParser } from '@/runtime/ndjson';
+import { MAX_ROUTER_LINE_BYTES, NdjsonParser, RouterStreamLimitError } from '@/runtime/ndjson';
 
 describe('NdjsonParser', () => {
   it('preserves ad-before-text ordering across split chunks', () => {
@@ -108,5 +108,57 @@ describe('NdjsonParser', () => {
 
     expect(result.events.map((event) => event.type)).toEqual(['text', 'done']);
     expect(result.errors).toHaveLength(1);
+  });
+
+  it('fails closed on oversized lines and excessive tool-call state', () => {
+    expect(() =>
+      new NdjsonParser().push(new Uint8Array(MAX_ROUTER_LINE_BYTES + 1).fill(97))
+    ).toThrow(RouterStreamLimitError);
+
+    const tooManyCalls = Array.from({ length: 129 }, (_, index) =>
+      JSON.stringify({
+        type: 'tool_call',
+        id: `call-${index}`,
+        name: 'read_file',
+        arguments: { path: `${index}.txt` },
+      })
+    ).join('\n');
+    expect(() => new NdjsonParser().push(new TextEncoder().encode(`${tooManyCalls}\n`))).toThrow(
+      /128 unique tool calls/
+    );
+
+    const argumentsParser = new NdjsonParser();
+    const argumentEvent = (id: string) =>
+      `${JSON.stringify({
+        type: 'tool_call',
+        id,
+        name: 'write_file',
+        arguments: { content: 'x'.repeat(600_000) },
+      })}\n`;
+    argumentsParser.push(new TextEncoder().encode(argumentEvent('large-1')));
+    expect(() => argumentsParser.push(new TextEncoder().encode(argumentEvent('large-2')))).toThrow(
+      /aggregate tool arguments/
+    );
+  });
+
+  it('rejects conflicting repeated tool-call identities', () => {
+    const parser = new NdjsonParser();
+    parser.push(
+      new TextEncoder().encode(
+        `${JSON.stringify({ type: 'tool_call', id: 'same', name: 'read_file', arguments: {} })}\n`
+      )
+    );
+    expect(() =>
+      parser.push(
+        new TextEncoder().encode(
+          `${JSON.stringify({
+            type: 'tool_call',
+            id: 'same',
+            name: 'write_file',
+            arguments: {},
+          })}\n`
+        )
+      )
+    ).toThrow(/conflicting tool calls/);
   });
 });

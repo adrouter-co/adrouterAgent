@@ -7,7 +7,8 @@ should manually install the relevant current channel before reporting a problem.
 
 | Version | Supported |
 | --- | --- |
-| 0.1.0-beta.16 (`beta`, `latest`, retained `candidate` alias) | Yes |
+| 0.1.0-beta.17 (`candidate`) | Yes |
+| 0.1.0-beta.16 (`beta`, `latest`) | Yes |
 | 0.1.0-beta.15 | No |
 | 0.1.0-beta.14 | No |
 | 0.1.0-beta.13 | No |
@@ -41,6 +42,13 @@ Node.js, the filesystem, or child processes. File mutations and general
 commands require a fresh one-time approval and remain constrained by the
 workspace sandbox.
 
+Workspace reads, listings, regular-file replacements, review reverts, and deletes are performed by
+the packaged native workspace broker. It binds the canonical workspace and every path component to
+directory handles, rejects symbolic links, reparse points, and hard links, and has no pathname-based
+fallback. Structured directory copy, move, delete, and restore fail closed until equivalent
+descriptor-bound tree operations are available. Silent Git inspection resolves a canonical Git
+binary from fixed system locations instead of the project-controlled `PATH`.
+
 Every task stores an immutable, versioned capability snapshot when it is created. Later project or
 preset edits cannot expand that task, and policy is rechecked before an operation can consume its
 one-use approval. Project-owned Markdown is accepted only from bounded `.adrouter/skills` and
@@ -53,7 +61,7 @@ under `/tmp`, inside a directory that must be a real mode-0700 directory owned b
 the socket must be owned by that user and mode 0600. Windows uses a current-user-DACL named pipe.
 Every paired request remains scope-bound, signed, freshness-checked, nonce-protected, and bounded.
 
-The beta.16 candidate launcher uses the credential-free schema-3 manifest and pins every platform
+The beta.17 candidate launcher uses the credential-free schema-3 manifest and pins every platform
 ZIP to its canonical GitHub URL, exact SHA-256 digest, archive layout, platform, architecture, and
 bundle identity. Downloads remain bounded, archive paths and symlinks are validated, macOS must
 have the expected ad-hoc signature, and Linux/Windows are explicitly unsigned portable candidates. The

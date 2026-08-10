@@ -2,6 +2,19 @@
 
 All notable changes to AdRouter Agent are documented here.
 
+## [0.1.0-beta.17] - 2026-08-11
+
+### Security
+
+- Bound workspace reads, listings, regular-file replacements, deletes, dependency-manifest writes,
+  and review operations to descriptor-based native handles so a project cannot substitute a
+  symlink between validation and use.
+- Made protected-path matching case-insensitive on macOS and Windows and resolved silent Git
+  inspection only from fixed trusted system locations, preventing project-controlled executable
+  shadowing.
+- Added bounded Router response parsing, NDJSON line/stream limits, idle timeouts, and packaged
+  broker verification for macOS, Linux, and Windows candidates.
+
 ## [0.1.0-beta.16] - 2026-08-10
 
 ### Fixed
@@ -293,6 +306,7 @@ All notable changes to AdRouter Agent are documented here.
 - Updates are downloaded and installed manually.
 - A reachable AdRouter server and valid bearer token are required.
 
+[0.1.0-beta.17]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.17
 [0.1.0-beta.16]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.16
 [0.1.0-beta.15]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.15
 [0.1.0-beta.14]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.14

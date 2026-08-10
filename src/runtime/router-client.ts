@@ -15,12 +15,24 @@ import {
   validateLiveCatalog,
 } from '../shared/model-catalog';
 import { containsSponsorKey, removeSponsorData } from '../shared/security';
+import {
+  iterateBoundedResponse,
+  RouterResponseLimitError,
+  readBoundedResponseJson,
+} from './bounded-response';
 import { NdjsonParser, type RouterStreamEvent } from './ndjson';
 
 const ProfileSchema = z.object({}).passthrough();
 const HealthSchema = z.object({ mode: z.enum(['live', 'mock']).optional() }).passthrough();
 const MAX_ROUTER_ERROR_BYTES = 32 * 1024;
 const MAX_ROUTER_ERROR_DETAILS = 16;
+const MAX_ROUTER_DIAGNOSTIC_BYTES = 64 * 1024;
+const MAX_ROUTER_CATALOG_BYTES = 512 * 1024;
+export const MAX_ROUTER_RESPONSE_BYTES = 8 * 1024 * 1024;
+export const ROUTER_HEADER_TIMEOUT_MS = 30_000;
+export const ROUTER_IDLE_TIMEOUT_MS = 60_000;
+export const ROUTER_OVERALL_TIMEOUT_MS = 10 * 60_000;
+const ROUTER_DIAGNOSTIC_TIMEOUT_MS = 60_000;
 const RouterErrorEnvelopeSchema = z
   .object({
     error: z.string().min(1).max(1_000).optional(),
@@ -48,30 +60,91 @@ export class RouterHttpError extends Error {
   }
 }
 
+interface RouterRequestLifetime {
+  signal: AbortSignal;
+  abort: (reason: unknown) => void;
+  dispose: () => void;
+}
+
+const createRouterRequestLifetime = (
+  callerSignal: AbortSignal | undefined,
+  overallTimeoutMs: number,
+  timeoutMessage: string
+): RouterRequestLifetime => {
+  const controller = new AbortController();
+  const abortFromCaller = (): void => controller.abort(callerSignal?.reason);
+  if (callerSignal?.aborted) abortFromCaller();
+  else callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
+  const overallTimer = setTimeout(
+    () => controller.abort(new RouterResponseLimitError(timeoutMessage)),
+    overallTimeoutMs
+  );
+  overallTimer.unref?.();
+  return {
+    signal: controller.signal,
+    abort: (reason) => controller.abort(reason),
+    dispose: () => {
+      clearTimeout(overallTimer);
+      callerSignal?.removeEventListener('abort', abortFromCaller);
+    },
+  };
+};
+
+const fetchWithHeaderTimeout = async (
+  fetchFn: typeof fetch,
+  input: URL | RequestInfo,
+  init: RequestInit,
+  lifetime: RouterRequestLifetime
+): Promise<Response> => {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let removeAbortListener = (): void => undefined;
+  const headerTimeout = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => {
+      const error = new RouterResponseLimitError(
+        'AdRouter timed out before returning response headers.'
+      );
+      lifetime.abort(error);
+      reject(error);
+    }, ROUTER_HEADER_TIMEOUT_MS);
+  });
+  const aborted = new Promise<never>((_resolve, reject) => {
+    const onAbort = (): void =>
+      reject(lifetime.signal.reason ?? new DOMException('Aborted', 'AbortError'));
+    removeAbortListener = () => lifetime.signal.removeEventListener('abort', onAbort);
+    if (lifetime.signal.aborted) onAbort();
+    else lifetime.signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([
+      fetchFn(input, { ...init, signal: lifetime.signal }),
+      headerTimeout,
+      aborted,
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    removeAbortListener();
+  }
+};
+
+const bodyOptions = (signal: AbortSignal, maxBytes: number, label: string) => ({
+  maxBytes,
+  idleTimeoutMs: ROUTER_IDLE_TIMEOUT_MS,
+  overallTimeoutMs: ROUTER_OVERALL_TIMEOUT_MS,
+  signal,
+  label,
+});
+
 const readRouterError = async (
-  response: Response
+  response: Response,
+  signal: AbortSignal
 ): Promise<{ message: string | null; code: string | null; details: RouterErrorDetails }> => {
   if (!response.body) return { message: null, code: null, details: {} };
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.length;
-      if (size > MAX_ROUTER_ERROR_BYTES) {
-        await reader.cancel().catch(() => undefined);
-        return { message: null, code: null, details: {} };
-      }
-      chunks.push(value);
-    }
-  } catch {
-    return { message: null, code: null, details: {} };
-  }
   try {
     const parsed = RouterErrorEnvelopeSchema.parse(
-      JSON.parse(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString('utf8'))
+      await readBoundedResponseJson(
+        response,
+        bodyOptions(signal, MAX_ROUTER_ERROR_BYTES, 'AdRouter error response')
+      )
     );
     const details = Object.fromEntries(
       Object.entries(parsed.details ?? {})
@@ -194,7 +267,7 @@ export class AdRouterClient {
     method: ProtectedRouterRequest['method'],
     body: Uint8Array | undefined,
     headers: Record<string, string>,
-    signal?: AbortSignal
+    lifetime: RouterRequestLifetime
   ): Promise<Response> {
     if ((method === 'POST' && !body) || (method === 'GET' && body)) {
       throw new Error('The protected router request has an invalid body binding.');
@@ -204,7 +277,12 @@ export class AdRouterClient {
     if (authentication.mode === 'custom_bearer') {
       authorizationHeaders = { Authorization: `Bearer ${authentication.token}` };
     } else {
-      const protectedHeaders = await authentication.authorize({ method, path, body, signal });
+      const protectedHeaders = await authentication.authorize({
+        method,
+        path,
+        body,
+        signal: lifetime.signal,
+      });
       if (
         (method === 'GET' && protectedHeaders['Content-Digest'] !== undefined) ||
         (method === 'POST' && protectedHeaders['Content-Digest'] === undefined)
@@ -216,13 +294,17 @@ export class AdRouterClient {
     const request = (
       protectedHeaders: ProtectedRouterHeaders | { Authorization: string }
     ): Promise<Response> =>
-      this.fetchFn(`${this.serverUrl}${path}`, {
-        method,
-        headers: { ...headers, ...protectedHeaders },
-        ...(body ? { body: Buffer.from(body) } : {}),
-        redirect: 'manual',
-        signal,
-      });
+      fetchWithHeaderTimeout(
+        this.fetchFn,
+        `${this.serverUrl}${path}`,
+        {
+          method,
+          headers: { ...headers, ...protectedHeaders },
+          ...(body ? { body: Buffer.from(body) } : {}),
+          redirect: 'manual',
+        },
+        lifetime
+      );
     let response = await request(authorizationHeaders);
     if (response.status >= 300 && response.status < 400) {
       throw new RouterHttpError(response.status, 'Authenticated router redirects are not allowed.');
@@ -232,7 +314,14 @@ export class AdRouterClient {
       throw new RouterHttpError(401, 'AdRouter returned an invalid proof nonce.');
     }
     if (authentication.mode === 'installation' && response.status === 401 && nonce) {
-      const retryHeaders = await authentication.authorize({ method, path, body, nonce, signal });
+      await response.body?.cancel().catch(() => undefined);
+      const retryHeaders = await authentication.authorize({
+        method,
+        path,
+        body,
+        nonce,
+        signal: lifetime.signal,
+      });
       if (
         (method === 'GET' && retryHeaders['Content-Digest'] !== undefined) ||
         (method === 'POST' && retryHeaders['Content-Digest'] === undefined)
@@ -251,10 +340,25 @@ export class AdRouterClient {
   }
 
   public async diagnostics(signal?: AbortSignal): Promise<RouterDiagnostics> {
+    const lifetime = createRouterRequestLifetime(
+      signal,
+      ROUTER_DIAGNOSTIC_TIMEOUT_MS,
+      'AdRouter diagnostics exceeded the 60-second overall timeout.'
+    );
+    try {
+      return await this.diagnosticsWithLifetime(lifetime);
+    } finally {
+      lifetime.dispose();
+    }
+  }
+
+  private async diagnosticsWithLifetime(
+    lifetime: RouterRequestLifetime
+  ): Promise<RouterDiagnostics> {
     const checkedAt = new Date().toISOString();
     let health: Response;
     try {
-      health = await this.fetchFn(`${this.serverUrl}/health`, { signal });
+      health = await fetchWithHeaderTimeout(this.fetchFn, `${this.serverUrl}/health`, {}, lifetime);
     } catch (error) {
       return {
         health: false,
@@ -269,6 +373,7 @@ export class AdRouterClient {
       };
     }
     if (!health.ok) {
+      await health.body?.cancel().catch(() => undefined);
       return {
         health: false,
         authenticated: false,
@@ -281,16 +386,23 @@ export class AdRouterClient {
         authentication: this.authenticationDiagnostics(false),
       };
     }
-    const healthPayload = HealthSchema.parse(await health.json());
+    const healthPayload = HealthSchema.parse(
+      await readBoundedResponseJson(
+        health,
+        bodyOptions(lifetime.signal, MAX_ROUTER_DIAGNOSTIC_BYTES, 'AdRouter health response')
+      )
+    );
 
     let models: RouterModelDescriptor[] = [];
     let catalog = unavailableCatalogStatus(checkedAt, 'catalog_unreachable');
     let catalogError: string | null = null;
     try {
-      const modelsResponse = await this.fetchFn(`${this.serverUrl}/v1/models`, {
-        redirect: 'manual',
-        signal,
-      });
+      const modelsResponse = await fetchWithHeaderTimeout(
+        this.fetchFn,
+        `${this.serverUrl}/v1/models`,
+        { redirect: 'manual' },
+        lifetime
+      );
       if (modelsResponse.status >= 300 && modelsResponse.status < 400) {
         throw new ModelCatalogError(
           'catalog_invalid',
@@ -298,11 +410,15 @@ export class AdRouterClient {
         );
       }
       if (!modelsResponse.ok) {
+        await modelsResponse.body?.cancel().catch(() => undefined);
         catalog = unavailableCatalogStatus(checkedAt, 'catalog_http_error');
         catalogError = `AdRouter model discovery failed (${modelsResponse.status}).`;
       } else {
         const validated = validateLiveCatalog(
-          await modelsResponse.json(),
+          await readBoundedResponseJson(
+            modelsResponse,
+            bodyOptions(lifetime.signal, MAX_ROUTER_CATALOG_BYTES, 'AdRouter model catalog')
+          ),
           classifyRouterOrigin(this.serverUrl) === 'official'
         );
         models = validated.models;
@@ -323,8 +439,9 @@ export class AdRouterClient {
     }
 
     try {
-      const profile = await this.protectedFetch('/v1/profile', 'GET', undefined, {}, signal);
+      const profile = await this.protectedFetch('/v1/profile', 'GET', undefined, {}, lifetime);
       if (!profile.ok) {
+        await profile.body?.cancel().catch(() => undefined);
         return {
           health: true,
           authenticated: false,
@@ -340,7 +457,12 @@ export class AdRouterClient {
           ),
         };
       }
-      ProfileSchema.parse(await profile.json());
+      ProfileSchema.parse(
+        await readBoundedResponseJson(
+          profile,
+          bodyOptions(lifetime.signal, MAX_ROUTER_DIAGNOSTIC_BYTES, 'AdRouter profile response')
+        )
+      );
     } catch (error) {
       return {
         health: true,
@@ -372,6 +494,22 @@ export class AdRouterClient {
     input: RouterTurnInput,
     signal?: AbortSignal
   ): AsyncGenerator<RouterStreamEvent> {
+    const lifetime = createRouterRequestLifetime(
+      signal,
+      ROUTER_OVERALL_TIMEOUT_MS,
+      'AdRouter response exceeded the 10-minute overall timeout.'
+    );
+    try {
+      yield* this.turnWithLifetime(input, lifetime);
+    } finally {
+      lifetime.dispose();
+    }
+  }
+
+  private async *turnWithLifetime(
+    input: RouterTurnInput,
+    lifetime: RouterRequestLifetime
+  ): AsyncGenerator<RouterStreamEvent> {
     const requestBody = {
       model: input.model,
       thinking_level: input.thinkingLevel,
@@ -401,10 +539,10 @@ export class AdRouterClient {
         'Content-Type': 'application/json',
         Accept: 'application/x-ndjson, application/json',
       },
-      signal
+      lifetime
     );
     if (!response.ok) {
-      const envelope = await readRouterError(response);
+      const envelope = await readRouterError(response, lifetime.signal);
       throw new RouterHttpError(
         response.status,
         response.status === 426
@@ -419,13 +557,11 @@ export class AdRouterClient {
       throw new Error('AdRouter returned no response body.');
     }
 
-    const reader = response.body.getReader();
     const parser = new NdjsonParser();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
+    for await (const value of iterateBoundedResponse(
+      response,
+      bodyOptions(lifetime.signal, MAX_ROUTER_RESPONSE_BYTES, 'AdRouter turn response')
+    )) {
       const parsed = parser.push(value);
       for (const parseError of parsed.errors) {
         yield { type: 'error', message: parseError, code: 'malformed_event' };
