@@ -728,9 +728,10 @@ git status --short --branch
 ### Findings / Notes
 
 - The first protected Windows portability run reached `npm ci` but Node parsed npm's POSIX
-  `.bin/node-gyp` shim. The build script now invokes the pinned
-  `@electron/node-gyp/bin/node-gyp.js` entrypoint directly on every platform; the protected Windows
-  rerun remains the acceptance gate.
+  `.bin/node-gyp` shim. The next run reached toolchain discovery but the transitive Electron
+  node-gyp 10.2 did not recognize the current Visual Studio 2026 runner. The build now invokes an
+  exact direct node-gyp 12.3.0 entrypoint on every platform; the protected Windows rerun remains
+  the acceptance gate.
 - Physical Windows 11 downloaded-artifact acceptance and channel finalization remain out of scope.
 
 ---

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const brokerRoot = join(repositoryRoot, 'native', 'workspace-broker');
-const nodeGyp = join(repositoryRoot, 'node_modules', '@electron', 'node-gyp', 'bin', 'node-gyp.js');
+const nodeGyp = join(repositoryRoot, 'node_modules', 'node-gyp', 'bin', 'node-gyp.js');
 const output = join(brokerRoot, 'build', 'Release', 'adrouter_workspace_broker.node');
 
 if (!existsSync(nodeGyp)) {
