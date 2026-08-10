@@ -729,9 +729,10 @@ git status --short --branch
 
 - The first protected Windows portability run reached `npm ci` but Node parsed npm's POSIX
   `.bin/node-gyp` shim. The next run reached toolchain discovery but the transitive Electron
-  node-gyp 10.2 did not recognize the current Visual Studio 2026 runner. The build now invokes an
-  exact direct node-gyp 12.3.0 entrypoint on every platform; the protected Windows rerun remains
-  the acceptance gate.
+  node-gyp 10.2 did not recognize the current Visual Studio 2026 runner. The third run used exact
+  node-gyp 12.3.0 and compiled both broker C files, then exposed a target-wide `CompileAs=C`
+  override that also affected node-gyp's generated C++ delay-load hook. The override is removed;
+  the protected Windows rerun remains the acceptance gate.
 - Physical Windows 11 downloaded-artifact acceptance and channel finalization remain out of scope.
 
 ---

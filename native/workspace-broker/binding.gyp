@@ -9,11 +9,6 @@
         "GCC_C_LANGUAGE_STANDARD": "c11",
         "MACOSX_DEPLOYMENT_TARGET": "12.0"
       },
-      "msvs_settings": {
-        "VCCLCompilerTool": {
-          "CompileAs": "1"
-        }
-      },
       "conditions": [
         ["OS=='win'", { "sources": ["src/broker_windows.c"] }],
         ["OS!='win'", { "sources": ["src/broker_posix.c"] }]
