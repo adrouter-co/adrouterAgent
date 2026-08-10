@@ -1,360 +1,140 @@
-# AdRouter Agent
+<p align="center">
+  <a href="https://adrouter.co">
+    <img src="assets/icon.svg" alt="AdRouter Agent" width="112">
+  </a>
+</p>
 
-AdRouter Agent is a local-first cross-platform desktop coding agent. It opens a folder
-you approve, keeps durable task threads, inspects and edits project files, runs
-approved development commands in an OS sandbox, and presents its work for
-review.
+<h1 align="center">AdRouter Agent</h1>
 
-Model inference is sent only to the AdRouter server you configure. Sponsor
-selection and settlement use a separate display channel; sponsor data is never
-added to model prompts, tool arguments, commands, patches, or compacted agent
-context.
+<p align="center">
+  <a href="https://www.npmjs.com/package/@adrouter/agent"><img src="https://img.shields.io/npm/v/%40adrouter%2Fagent/beta?label=npm%20beta" alt="npm beta version"></a>
+  <a href="https://github.com/adrouter/adrouterAgent/actions/workflows/ci.yml"><img src="https://github.com/adrouter/adrouterAgent/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://github.com/adrouter/adrouterAgent/releases"><img src="https://img.shields.io/github/v/release/adrouter/adrouterAgent?include_prereleases&amp;label=release" alt="GitHub release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="Apache 2.0 license"></a>
+</p>
 
-> **Candidate boundary:** the immutable 0.1.0-beta.15 candidate supports macOS 12+ on Apple Silicon
-> and Intel, Ubuntu Desktop 24.04 LTS x64, and Windows 11 x64. It is manual-update and
-> ad-hoc/unsigned. npm `beta`/`latest` remain on the prior accepted release until downloaded
-> beta.15 artifacts pass primary macOS and physical Windows 11 x64 acceptance.
+<p align="center">
+  A local-first desktop coding agent that connects an approved project to AdRouter.
+</p>
 
-## Install from npm
+AdRouter Agent keeps durable task threads, reads and edits files in a folder you choose, runs
+approved development commands in an operating-system sandbox, and presents every change for
+review. It is distributed as a small npm launcher backed by matching native assets on
+[GitHub Releases](https://github.com/adrouter/adrouterAgent/releases).
 
-The npm package is a small verified launcher for the exact platform ZIP on
-GitHub Releases. Installation requires Node.js 22.19.0 or newer:
+Sponsor content is display-only. It is never added to model prompts, tool arguments, commands,
+patches, or compacted task context. Hosted AdRouter access is currently invite-only.
 
-```bash
+## Install
+
+Node.js 22.19 or newer is required for the dependency-free launcher. Choose the release channel you
+want to follow.
+
+Beta channel:
+
+```sh
 npm install --global @adrouter/agent@beta
+```
+
+Latest channel:
+
+```sh
+npm install --global @adrouter/agent@latest
+```
+
+Then verify and launch the installed application:
+
+```sh
+adrouter-agent --version
 adrouter-agent doctor --json
 adrouter-agent
 ```
 
-`adrouter-agent install` downloads and verifies without launching.
-`adrouter-agent --version` prints the release version without downloading.
-The launcher accepts no alternate URL or checksum, verifies the archive and
-platform integrity, and installs the real application in the standard per-user
-location. See [platform setup and staging authentication](docs/platform-setup.md)
-for Ubuntu prerequisites, Windows one-time sandbox provisioning, install paths,
-and authentication steps.
+The launcher downloads the exact platform archive from the matching GitHub release, verifies its
+SHA-256 digest, layout, architecture, bundle identity, and managed receipt, then installs it in the
+standard per-user location. It accepts no alternate release URL or checksum.
 
-The beta.15 candidate is not Developer ID signed or notarized. If macOS blocks the first
-launch, open **System Settings → Privacy & Security** and choose **Open Anyway**.
-The launcher never removes quarantine metadata or changes Gatekeeper settings.
-After launch, the app is prefilled with `https://api-staging.adrouter.co`. Select **Connect this
-Agent**, sign in through the AdRouter WebUI, return to the Agent and select **Continue**, then compare
-the displayed code and explicitly approve the installation.
+| Platform | Public beta support | Integrity status |
+| --- | --- | --- |
+| macOS 12+ on Apple Silicon or Intel | Universal application | Ad-hoc signed; not notarized |
+| Ubuntu Desktop 24.04 LTS x64 | Portable application | Unsigned; sandbox and secret-store checks required |
+| Windows 11 x64 | Portable application | Unsigned; one-time sandbox setup required |
 
-Remote routers must use HTTPS. Plain HTTP is accepted only for `localhost`,
-`127.0.0.1`, and `::1` development servers. Official origins use an OS-encrypted Ed25519
-installation. Bearer tokens remain available only in the advanced local/custom-router path and can
-never override official hosted authentication.
+See [platform setup](docs/platform-setup.md) for install locations, Ubuntu prerequisites, Windows
+sandbox provisioning, and first-launch guidance. The application includes its runtime dependencies;
+AdRouterCLI, a source checkout, and the WebUI are not required after installation.
 
-The installed app includes its runtime dependencies. After installation it can
-be opened directly without the CLI. AdRouterCLI, the
-AdRouter WebUI, and a source checkout are not required. Git is optional; when
-available, the app adds branch and change metadata, while non-Git folders
-remain fully usable.
+## First run
 
-## Run from a source checkout
+1. Start `adrouter-agent`.
+2. Select **Connect this Agent**, finish browser sign-in, return to the app, and select
+   **Continue**.
+3. Compare the code in the Agent with the code in the AdRouter WebUI, then approve only the
+   installation you recognize.
+4. Choose a project folder and start a task.
+5. Review every requested file mutation, general command, or Git operation before choosing
+   **Allow once**.
 
-The updated product is the Electron desktop application. Run it with
-`npm run dev`; it does not start an `adrouter` executable, the AdRouterCLI, or
-the WebUI in the background.
+The installation private key and rotating refresh credential are encrypted with Electron
+`safeStorage` through Keychain, DPAPI, or a supported Linux secret store. Access tokens remain
+memory-only. Remote routers must use HTTPS; plain HTTP is accepted only for loopback development.
 
-The normal local setup has two processes:
+## What the Agent includes
 
-```text
-Terminal 1: sibling AdRouter backend  http://localhost:8787
-Terminal 2: this Electron application (renderer dev server on http://localhost:5174)
+- Git and non-Git projects selected through the native folder picker.
+- Persistent projects, searchable task history, checkpoints, forks, and redacted import/export.
+- Streamed text, thinking, tool activity, command output, retries, and final evidence.
+- Safe silent reads plus a fresh **Allow once** or **Deny** decision for each mutation or command.
+- Workspace containment and operating-system sandbox checks that fail closed.
+- Agent-authored diffs that remain separate from pre-existing project changes.
+- Model and thinking selection, task presets, trusted project guidance, and sponsor controls.
+- Explicit installation revocation and local sign-out without deleting projects or task history.
+
+The Agent never stages, commits, pushes, elevates privileges, disables host security, or expands a
+task's saved capability limits automatically.
+
+## Updates
+
+Repeat the install command for the channel you follow:
+
+```sh
+# Accepted prereleases
+npm install --global @adrouter/agent@beta
+
+# Current recommended release
+npm install --global @adrouter/agent@latest
 ```
 
-Port `5174` is reserved for the Electron renderer during development so the
-sibling WebUI can run concurrently on its standard `http://localhost:5173`.
+Updates are manual during the beta. Installing a newer accepted launcher verifies and replaces only
+the managed application; it preserves encrypted installation material, projects, sessions, and
+unrelated workspace changes. Run `adrouter-agent doctor --json` after updating.
 
-The desktop repository pins Node.js in `.nvmrc`:
+## Documentation
 
-```bash
-cd /path/to/adrouterAgent
-nvm install 25.9.0
-nvm use 25.9.0
-npm ci
-npm run dev
-```
-
-If `nvm` is not installed, use any Node version manager that can provide
-Node.js `25.9.0`. Node 24 is not supported by this repository's `engines`
-field. The sibling backend supports Node.js `22.13` or newer.
-
-### Start an explicit local demo backend
-
-The default backend profile is the database-backed service. Follow its service setup guide for that
-mode; do not run its destructive local database reset merely to start the desktop. For isolated
-protocol/UI work, explicitly choose the demo profile from the usual sibling checkout:
-
-```bash
-cd /path/to/router/backend
-npm ci
-# configure ignored .env.local from .env.example without committing secrets
-```
-
-Set a local bearer token and, for live DeepSeek inference, a separate
-DeepSeek Platform key in `router/backend/.env.local`:
-
-```dotenv
-ADROUTER_PROFILE_ID=local-demo
-ADROUTER_PROFILE_NAME=AdRouter Local Demo
-ADROUTER_API_KEY=your_generated_local_bearer_token
-DEEPSEEK_API_KEY=your_deepseek_platform_key
-PORT=8787
-```
-
-Generate a local bearer token without printing it into the repository:
-
-```bash
-openssl rand -hex 32
-```
-
-Never reuse `DEEPSEEK_API_KEY` as `ADROUTER_API_KEY`, commit either credential,
-or paste either value into a chat, screenshot, or issue. `.env.local` is
-intentionally local-only.
-
-Start and verify the backend:
-
-```bash
-npm run dev:demo
-curl -fsS http://localhost:8787/health
-```
-
-The public health response confirms only `status: "ok"`; use authenticated profile/operator
-diagnostics to determine provider readiness. Without a valid DeepSeek key, an explicitly configured
-local demo backend can still support protocol and UI testing.
-
-### Complete first-run onboarding
-
-After `npm run dev` opens the desktop app:
-
-1. For the official staging service, keep `https://api-staging.adrouter.co`, choose whether to enable
-   sponsored compute, and select **Connect this Agent**.
-2. Finish signing in in the browser, return to the Agent, and select **Continue**. The installation
-   key and approval request are not created before this step.
-3. Compare the code shown by the Agent with the authenticated AdRouter WebUI and explicitly approve
-   it. The Agent resumes an unexpired approval after restart and best-effort cancels abandoned
-   approvals on the server.
-4. For `http://localhost:8787` or another explicit custom router, open the advanced section, enter
-   that router's bearer token, test the connection, and save it.
-
-Private keys and rotating refresh credentials are encrypted by Electron `safeStorage` using
-Keychain, DPAPI, or a supported Linux secret store. Access tokens remain memory-only. No key, token,
-device code, nonce, or proof is exposed to the renderer or written to the event journal. Remote
-servers must use HTTPS; plain HTTP is accepted only for loopback development URLs.
-
-Select **Choose folder**, open a project directory, and start a chat. A new
-chat can inspect files immediately. File mutations and general commands pause
-for a fresh **Allow once** or **Deny** decision. The **Changes** drawer shows
-agent-authored diffs separately from the task-start baseline. Explicit branch, switch, path/hunk
-stage, commit, and push controls each create an exact expiring operation and require a fresh second-click
-**Allow once** decision; the Agent never performs them automatically.
-
-For a new task, the composer can apply a saved task preset. The preset's additional instructions and
-capability ceilings are copied into an immutable task snapshot, so editing project defaults or the
-preset later cannot expand an existing task. Settings also discovers project-owned Markdown only
-under `.adrouter/skills/**/SKILL.md` and `.adrouter/prompts/**/*.md`. Each resource is inactive until
-the user trusts its exact path and SHA-256 digest; a changed or removed file fails closed. Trusted
-skills load on demand, while a trusted prompt is inserted into the composer and is never sent
-automatically.
-
-## What is included
-
-- Git and non-Git project folders selected through the native folder picker.
-- Persistent projects, searchable session trees, immutable checkpoint forks, redacted import/export,
-  append-only event history, and explicit restart recovery without request replay.
-- Streamed text, thinking, tool activity, command output, retries, and final
-  evidence.
-- An exact eight-model Router catalog with validated thinking modes and token-aware compaction.
-- Silent safe reads and a fresh **Allow once** or **Deny** decision for every
-  file mutation and general command.
-- Workspace containment, protected credential paths, and an OS command sandbox
-  that blocks network access, privilege escalation, and outside-workspace
-  access.
-- Agent-authored diffs and exact task-start Git baselines that preserve pre-existing user changes.
-- A single normal active task, workspace/Git writer leases, immutable per-task capability snapshots,
-  and optional depth-one delegation behind that snapshot and a fresh approval.
-- Agent-native task presets; exact-digest bundled guidance; explicitly trusted, bounded project
-  Markdown skills/prompts; and GUI-paired, owner-only Ed25519 local automation.
-- Tier A/B/C/NONE sponsor placement and settlement/economics summaries.
-- Stop, permanent chat deletion, and local project instructions.
-- Privileged installation revocation and local sign out without removing projects, chats, or
-  preferences.
-
-### Current desktop interaction surface
-
-- The composer is the anchored interaction point for task entry, model and
-  thinking-level/preset selection, sponsor banners, and command approvals.
-- Tier B/C bottom sponsor surfaces attach directly above the composer, animate
-  into view when routed, and can be dismissed with the close control. Approval
-  cards use the same dock and remain tied to the input area while a command is
-  waiting for a decision.
-- History, Changes, and Settings open as animated side drawers. The drawers
-  preserve their existing read-only review, router-status, and configuration
-  responsibilities.
-- An empty project view provides starter suggestions for explaining a codebase,
-  fixing a bug, or reviewing changes. Selecting a suggestion fills the composer
-  without sending a request until the user submits it.
-- Assistant responses use the blue response treatment with readable links and
-  code blocks; user messages remain visually distinct for scanability.
-
-## Router contract
-
-The desktop app uses only these routes on the configured AdRouter origin:
-
-```text
-GET  /health
-POST /v1/device/authorizations  DPoP proof after nonce challenge
-POST /v1/device/authorizations/cancel  signed cleanup for abandoned approvals
-POST /v1/oauth/token            DPoP-bound device redemption and refresh
-GET  /v1/profile                DPoP access token + bodyless proof
-GET  /v1/models                 public model discovery
-POST /v1/agent/turn             DPoP access token + proof + exact-body digest
-POST /v1/installation/revoke    signed privileged revocation
-```
-
-`POST /v1/agent/turn` streams newline-delimited JSON containing sponsor, text,
-thinking, tool-call, settlement, usage, completion, and error events. The
-router remains independently deployed and controls provider credentials and
-model availability.
-
-## Data and security
-
-Application state is stored under the normal operating-system user-data
-directory in SQLite and a small configuration file. The configuration contains only OS-encrypted
-installation/pending-enrollment ciphertext, or custom-router token ciphertext. Access tokens are not
-persisted. Deleting a chat removes application
-history and review metadata but never deletes project files.
-
-The renderer is sandboxed and context-isolated, with no Node.js or raw
-filesystem access. The utility process embeds the Pi-based coding-agent loop;
-the app does not spawn an `adrouter` executable. Device permissions are denied
-because the current product does not use the camera, microphone, Bluetooth,
-location, or notifications.
-
-See [PRIVACY.md](PRIVACY.md), [SECURITY.md](SECURITY.md), and
-[docs/operator-guide.md](docs/operator-guide.md) for the complete boundaries
-and operating model.
-
-## Development
-
-Use Node.js `25.9.0` and npm 10 or newer:
-
-```bash
-nvm use 25.9.0
-npm ci
-npm run dev
-```
-
-Useful checks:
-
-```bash
-npm run check
-npm run test:e2e
-```
-
-The available scripts are:
-
-| Command | Purpose |
-| --- | --- |
-| `npm run dev` | Launch the Electron app with Forge/Vite development tooling. |
-| `npm run start` | Alias for the development launch. |
-| `npm run lint` | Run Biome checks. |
-| `npm run typecheck` | Run TypeScript without emitting files. |
-| `npm run test` | Run unit tests. |
-| `npm run test:integration` | Run integration tests. |
-| `npm run check` | Run lint, typecheck, unit tests, and integration tests. |
-| `npm run test:e2e` | Package and run the deterministic Electron E2E suite. |
-| `npm run audit:build` | Reject new high/critical build-tool advisories outside the reviewed dev-only Forge exception. |
-| `npm run smoke:live` | Ask an exact packaged, already-approved installation for a redacted authentication diagnostic. |
-| `npm run make:mac` | Build a local universal macOS ZIP. |
-| `npm run verify:dist` | Verify the generated macOS artifacts. |
-| `npm run make:linux` | Build an Ubuntu/Linux x64 portable ZIP. |
-| `npm run make:windows` | Build a Windows x64 portable ZIP. |
-
-The deterministic E2E suite packages an inspector-enabled test build and uses an in-process fixture
-router. It does not need live credentials. To check an exact installed candidate after WebUI
-approval, point the manual utility at its executable; it rejects bearer-credential environment
-variables and prints only a redacted result:
-
-```bash
-ADROUTER_AGENT_EXECUTABLE=/absolute/path/to/AdRouter-Agent npm run smoke:live
-```
-
-The smoke test discovers a model, sends a no-tools `READY` request, requires a
-terminal response, and removes its temporary workspace.
-
-Additional references:
-
-- [Manual acceptance test](docs/manual-testing.md)
-- [Public beta release checklist](docs/release-checklist.md)
-- [Operator and architecture guide](docs/operator-guide.md)
-- [Implementation record](PLAN.md)
-- [Public release procedure](RELEASE.md)
-- [Source provenance](SOURCE_PROVENANCE.md)
+- [Platform setup and authentication](docs/platform-setup.md)
+- [Operator guide and architecture](docs/operator-guide.md)
+- [Manual acceptance testing](docs/manual-testing.md)
+- [Privacy](PRIVACY.md)
+- [Security policy](SECURITY.md)
 - [Support](SUPPORT.md)
+- [Changelog](CHANGELOG.md)
+- [GitHub releases](https://github.com/adrouter/adrouterAgent/releases)
 
-## Troubleshooting
+## Development and contributing
 
-### The app cannot reach the router
+The desktop source checkout pins Node.js 25.9.0:
 
-Check the backend process and the configured URL:
-
-```bash
-curl -fsS http://localhost:8787/health
+```sh
+nvm use 25.9.0
+npm ci
+npm run check
 ```
 
-Health is public and does not validate authentication. For an official origin, reconnect the
-installation and compare its approval code in the WebUI. For an advanced local/custom router,
-compare its bearer token with the backend configuration and restart the backend after changes.
-
-### The router is healthy but reports mock mode
-
-Set a valid `DEEPSEEK_API_KEY` in the backend's `.env.local` and restart the
-backend. Mock mode is still useful for testing the desktop protocol, approvals,
-and sponsor presentation.
-
-### No models appear
-
-The desktop discovers models through public `GET /v1/models` and verifies authentication separately
-through signed `GET /v1/profile`. Refresh the Agent status panel in **Settings**, reconnect if
-required, and inspect the backend model configuration. A cached model catalog may remain visible while a
-temporary router check is unavailable.
-
-### A command or file operation is blocked
-
-This is expected for network access, dependency installation, credentials,
-privilege escalation, destructive filesystem/Git operations, shell operators,
-and paths outside the selected workspace. It can also be an immutable task-preset denial; approval
-cannot raise a task's captured capability ceiling. Use a new deliberately configured task when
-broader authority is actually required. If the OS sandbox cannot initialize, commands fail closed.
-
-For deeper operational guidance, see [docs/operator-guide.md](docs/operator-guide.md).
-
-## Build and release
-
-Local universal artifacts can be built on macOS with Node.js 25:
-
-```bash
-npm run make:mac
-npm run verify:dist
-```
-
-The credential-free beta workflow builds macOS universal plus Ubuntu and Windows x64 ZIPs, creates
-SBOMs and attestations, embeds exact canonical URLs/layouts/architectures/SHA-256 digests in a
-schema-3 launcher manifest, and opens an immutable draft before GitHub and npm `candidate`
-publication. macOS is ad-hoc signed; Linux and Windows are unsigned. A future schema-4 signed
-release requires a separately reviewed Developer ID/notarization, Authenticode, and Ed25519 trust
-setup.
-
-The release operator must record exact downloaded-candidate acceptance on the primary Mac and a
-physical Windows 11 x64 device before moving `beta`/`latest`. Release tags and assets are immutable;
-a defective release is withdrawn and replaced with a higher version.
+`npm run test:e2e` packages and exercises the deterministic Electron suite. See
+[CONTRIBUTING.md](CONTRIBUTING.md), the [release procedure](RELEASE.md), and
+[source provenance](SOURCE_PROVENANCE.md) for maintainer workflows.
 
 ## License
 
-AdRouter Agent is licensed under the [Apache License 2.0](LICENSE). Third-party
-attributions are recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-and in the SBOM attached to each release.
+AdRouter Agent is released under the [Apache License 2.0](LICENSE). Third-party attributions are
+recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and in each release SBOM.
