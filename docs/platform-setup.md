@@ -15,10 +15,16 @@ npm install --global @adrouter/agent@beta
 # Current recommended release
 npm install --global @adrouter/agent@latest
 
+# Candidate under acceptance testing (beta.16)
+npm install --global @adrouter/agent@candidate
+
 adrouter-agent doctor --json
 adrouter-agent install
 adrouter-agent launch
 ```
+
+The `candidate` command is for exact-artifact acceptance testing. During beta.16 acceptance,
+`beta` and `latest` continue to install the accepted beta.15 release.
 
 The application is installed per user:
 

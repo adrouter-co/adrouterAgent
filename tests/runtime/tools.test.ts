@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SandboxedCommandRunner } from '@/runtime/command-runner';
-import { createDesktopTools } from '@/runtime/tools';
+import { createDesktopTools, formatWorkspaceMutationApprovalReason } from '@/runtime/tools';
 import { sha256 } from '@/shared/security';
 
 const directories: string[] = [];
@@ -15,6 +15,57 @@ afterEach(async () => {
 });
 
 describe('desktop tool approvals', () => {
+  it('formats bounded file-mutation previews with readable source lines', () => {
+    const modify = formatWorkspaceMutationApprovalReason({
+      path: 'src/status.ts',
+      expectedBeforeHash: null,
+      replacements: [
+        { original: 'status=old\nready=false', replacement: 'status=new\nready=true' },
+      ],
+    });
+    expect(modify).toContain('Operation: Modify file');
+    expect(modify).toContain('File: src/status.ts');
+    expect(modify).toContain('Before:\nstatus=old\nready=false');
+    expect(modify).toContain('After:\nstatus=new\nready=true');
+    expect(modify).not.toContain('\\n');
+
+    const create = formatWorkspaceMutationApprovalReason({
+      path: 'src/new.ts',
+      expectedBeforeHash: null,
+      createContent: 'x'.repeat(4_001),
+    });
+    expect(create).toContain('Operation: Create file');
+    expect(create).toContain('[Create content truncated after 4,000 characters.]');
+    expect(create.length).toBeLessThanOrEqual(8_000);
+
+    const remove = formatWorkspaceMutationApprovalReason({
+      path: 'src/old.ts',
+      expectedBeforeHash: null,
+      deleteFile: true,
+    });
+    expect(remove).toContain('Operation: Delete file');
+
+    const many = formatWorkspaceMutationApprovalReason({
+      path: 'src/many.ts',
+      expectedBeforeHash: null,
+      replacements: Array.from({ length: 21 }, (_, index) => ({
+        original: `before-${index}`,
+        replacement: `after-${index}`,
+      })),
+    });
+    expect(many).toContain('[1 additional replacements omitted.]');
+
+    const controlled = formatWorkspaceMutationApprovalReason({
+      path: 'src/control.ts',
+      expectedBeforeHash: null,
+      replacements: [{ original: 'before\u0000', replacement: 'after\u001b' }],
+    });
+    expect(controlled).toContain('before\\u0000');
+    expect(controlled).toContain('after\\u001b');
+    expect(controlled).not.toContain('\u0000');
+    expect(controlled).not.toContain('\u001b');
+  });
+
   it('registers only tool families allowed by the immutable task policy', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'adrouter-policy-tools-'));
     directories.push(workspace);

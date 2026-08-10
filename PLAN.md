@@ -4,9 +4,9 @@
 
 Close the remaining safe, desktop-appropriate gaps between AdRouter Agent and AdRouterCLI while
 preserving the Agent's stronger sandbox, approval, identity, sponsor-privacy, and GUI boundaries.
-The original parity pass stopped after local implementation and verification. Step G records the
-separately authorized credential-free beta.13 candidate release; stable/final channel promotion
-still requires later downloaded-artifact acceptance and separate authorization.
+The original parity work now ships through accepted beta.15. Step H prepares the separately
+authorized beta.16 UI candidate; public `beta`/`latest` remain on beta.15 until later exact-artifact
+acceptance and separate finalization authorization.
 
 ## Context
 
@@ -565,6 +565,80 @@ updates unchanged until downloaded-artifact acceptance is complete.
 
 ---
 
+## Step H: Beta.16 desktop UI candidate
+
+### Status
+
+`in_progress`
+
+### Objective
+
+Publish the bounded banner, timeline-following, and edit-approval readability improvements as the
+immutable `0.1.0-beta.16` candidate without changing runtime contracts or accepted npm channels.
+
+### Tasks
+
+- [x] Re-query remote main, npm channels, GitHub identity, unused beta.16 version/tag, and protected
+      release environments.
+- [x] Port the preserved local UI/runtime changes onto a clean branch from current remote main.
+- [x] Align inline sponsor geometry with thinking/tool blocks and cover it in packaged UI tests.
+- [x] Keep automatic following at the exact bottom while preserving deliberate manual scrolling.
+- [x] Replace serialized mutation JSON with bounded readable previews and a concise legacy fallback.
+- [x] Update beta.16/`10016` package, launcher, bundle, workflow, documentation, and provenance state.
+- [ ] Run the complete pinned checks, merge through protected main, and publish only npm
+      `candidate` plus the matching GitHub prerelease.
+
+### Relevant Files
+
+- `src/renderer/`, `src/runtime/tools.ts`, `tests/`
+- `package.json`, `packages/agent-launcher/`, `scripts/`, `.github/workflows/`
+- `README.md`, `CHANGELOG.md`, `SECURITY.md`, `RELEASE.md`, `SOURCE_PROVENANCE.md`
+
+### Expected Changes
+
+- modify: bounded desktop presentation/approval source and focused tests
+- modify: beta.16 identity, release metadata, documentation, and deterministic provenance
+- create/delete: none outside generated release output
+
+### Do Not Modify
+
+- Router, authentication, IPC/persistence schemas, model/settlement contracts, or sponsor isolation
+- npm `beta`/`latest`, beta.15 tags/assets, signing secrets, or hosted service state
+
+### Commands
+
+```bash
+npm run check
+npm run verify:release-readiness
+npm run test:e2e
+npm run make:mac
+npm run verify:dist
+git diff --check
+```
+
+### Acceptance Criteria
+
+- [x] Inline banner width/left edge match thinking and tool blocks at tested viewport sizes.
+- [x] Streaming stays at the bottom only while follow mode is active; manual scroll is preserved.
+- [x] Create/modify/delete approvals are readable, bounded, safe, and legacy-safe.
+- [x] Node.js 25.9.0 local gates pass, including packaged E2E and native macOS verification.
+- [ ] Protected macOS/Linux/Windows gates pass.
+- [ ] npm `candidate` resolves to beta.16 while `beta`/`latest` remain beta.15.
+
+### Validation Results
+
+- Pinned Node.js 25.9.0: clean `npm ci`, production/build audits, `npm run check`, release readiness,
+  packaged E2E (2/2), universal macOS build, and native `verify:dist` all pass locally.
+- Protected macOS/Linux/Windows CI, release assets, and candidate checks: pending GitHub
+  jobs/workflows.
+
+### Findings / Notes
+
+- The canonical dirty future-fix worktree is preserved; release work uses a clean temporary clone.
+- Beta.16 and `v0.1.0-beta.16` were unused at preflight; npm had no `candidate` tag.
+
+---
+
 ## Follow-up Work
 
 - Verify the hosted Router's exact `/v1/models` catalog and installation-auth contract during the
@@ -590,3 +664,4 @@ updates unchanged until downloaded-artifact acceptance is complete.
 | 2026-08-04 | Keep normal capacity at one and official targets at macOS universal, Ubuntu x64, and Windows x64. | These are explicit repository invariants. | Queue/lease/signing infrastructure remains, but unsupported defaults and ARM64 release claims are removed. |
 | 2026-08-07 | Adapt CLI beta.19 profiles as immutable Agent task presets, not global profile switching. | Desktop tasks need reproducible policy without replacing user-level settings or widening provider authority. | Presets are copied into versioned task snapshots and later edits cannot expand existing tasks. |
 | 2026-08-07 | Support only exact-digest project Markdown skills/prompts. | CLI's global/package/script-capable skill surface is outside the Agent's trust and sandbox boundaries. | Skills use metadata-first on-demand loading; prompts require an explicit insert and neither can add executable behavior. |
+| 2026-08-10 | Fix forward the desktop UI work as beta.16 candidate only. | Beta.15 is accepted and immutable; UI changes require a new artifact while public channels must remain stable during candidate testing. | Publish a new GitHub prerelease and npm `candidate`; defer `beta`/`latest` movement and physical acceptance. |

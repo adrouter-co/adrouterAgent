@@ -66,7 +66,7 @@ test('builds an explicit credential-free manifest only for beta candidates', () 
     });
     assert.equal(result.manifest.schema, 3);
     assert.equal(result.manifest.distributionMode, 'credential-free-portable');
-    assert.equal(result.manifest.bundleVersion, '10015');
+    assert.equal(result.manifest.bundleVersion, '10016');
     assert.equal(result.manifest.artifacts[0].verificationMode, 'macos-adhoc');
     assert.equal(result.manifest.artifacts[2].verificationMode, 'portable-checksum');
     assert.equal('bytes' in result.manifest.artifacts[0], false);
