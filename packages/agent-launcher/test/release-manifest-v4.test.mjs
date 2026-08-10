@@ -37,7 +37,7 @@ const targetMetadata = [
 
 const createEnvelope = (overrides = {}) => {
   const signing = createTestReleaseSigning();
-  const version = overrides.releaseVersion ?? '0.1.0-beta.15';
+  const version = overrides.releaseVersion ?? '0.1.0-beta.16';
   const signed = {
     distributionMode: 'signed-release-metadata',
     channel: overrides.channel ?? 'beta',
@@ -46,7 +46,7 @@ const createEnvelope = (overrides = {}) => {
     repository: 'adrouter/adrouterAgent',
     bundleIdentifier: 'com.adrouter.agent',
     bundleShortVersion: '0.1.0',
-    bundleVersion: '10015',
+    bundleVersion: '10016',
     minimumAgentVersion: '0.1.0-beta.12',
     issuedAt: signing.issuedAt,
     expiresAt: signing.expiresAt,
@@ -173,7 +173,7 @@ test('fixed-origin update checks reject redirects and accept only a trusted matc
   });
   assert.equal(requestedUrl, updateManifestUrl('beta'));
   assert.equal(result.available, true);
-  assert.equal(result.latestVersion, '0.1.0-beta.15');
+  assert.equal(result.latestVersion, '0.1.0-beta.16');
   await assert.rejects(
     checkForUpdate('0.1.0-beta.12', 'beta', {
       fetchImpl: async () =>
@@ -247,7 +247,7 @@ test('expired unhealthy activation restores the prior managed installation', asy
     };
     await writeFile(
       paths.receiptPath,
-      JSON.stringify({ ...previousReceipt, releaseVersion: '0.1.0-beta.15' })
+      JSON.stringify({ ...previousReceipt, releaseVersion: '0.1.0-beta.16' })
     );
     await writeFile(
       paths.pendingPath,
@@ -256,7 +256,7 @@ test('expired unhealthy activation restores the prior managed installation', asy
         applicationPath: paths.appPath,
         rollbackPath: paths.rollbackPath,
         markerPath: paths.markerPath,
-        targetVersion: '0.1.0-beta.15',
+        targetVersion: '0.1.0-beta.16',
         deadlineAt: '2026-08-02T00:01:00.000Z',
         token: 'a'.repeat(43),
         previousReceipt,

@@ -2,6 +2,17 @@
 
 All notable changes to AdRouter Agent are documented here.
 
+## [0.1.0-beta.16] - 2026-08-10
+
+### Fixed
+
+- Matched inline sponsor-banner geometry to thinking and tool-call blocks at desktop widths.
+- Kept a followed timeline anchored to the newest streamed or resized content while preserving a
+  user's deliberate upward scroll.
+- Replaced serialized edit approvals with bounded multiline operation, file, before, and after
+  previews for create, modify, and delete requests; malformed legacy previews now fail closed with
+  concise guidance instead of exposing unreadable JSON.
+
 ## [0.1.0-beta.15] - 2026-08-10
 
 ### Security
@@ -282,6 +293,7 @@ All notable changes to AdRouter Agent are documented here.
 - Updates are downloaded and installed manually.
 - A reachable AdRouter server and valid bearer token are required.
 
+[0.1.0-beta.16]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.16
 [0.1.0-beta.15]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.15
 [0.1.0-beta.14]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.14
 [0.1.0-beta.13]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.13

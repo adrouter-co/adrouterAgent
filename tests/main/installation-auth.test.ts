@@ -379,7 +379,7 @@ describe('InstallationAuthManager', () => {
       if (url.endsWith('/v1/profile')) return new Response('{}', { status: 200 });
       throw new Error(`Unexpected authentication request: ${url}`);
     });
-    const manager = new InstallationAuthManager(store, '0.1.0-beta.15', { fetchFn });
+    const manager = new InstallationAuthManager(store, '0.1.0-beta.16', { fetchFn });
 
     await manager.startEnrollment({
       serverUrl: 'https://api-staging.adrouter.co',

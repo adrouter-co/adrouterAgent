@@ -89,6 +89,74 @@ const errorContent = (message: string): AgentToolResult<Record<string, unknown>>
   details: { error: message },
 });
 
+const MUTATION_PREVIEW_MAX_CHARACTERS = 8_000;
+const MUTATION_PREVIEW_MAX_REPLACEMENTS = 20;
+const MUTATION_PREVIEW_MAX_CREATE_CHARACTERS = 4_000;
+
+const mutationOperationLabel = (input: ApplyPatchInput): string => {
+  if (input.deleteFile) return 'Delete file';
+  if (input.createContent !== undefined) return 'Create file';
+  return 'Modify file';
+};
+
+const truncateMutationPreview = (preview: string): string => {
+  if (preview.length <= MUTATION_PREVIEW_MAX_CHARACTERS) return preview;
+  const marker = '\n\n[Preview truncated to 8,000 characters.]';
+  return `${preview.slice(0, MUTATION_PREVIEW_MAX_CHARACTERS - marker.length)}${marker}`;
+};
+
+const readableMutationPreviewText = (value: string): string =>
+  Array.from(value.replace(/\r\n?/g, '\n'), (character) => {
+    const code = character.charCodeAt(0);
+    const isUnreadableControl =
+      code <= 8 || code === 11 || code === 12 || (code >= 14 && code <= 31) || code === 127;
+    return isUnreadableControl ? `\\u${code.toString(16).padStart(4, '0')}` : character;
+  }).join('');
+
+export const formatWorkspaceMutationApprovalReason = (input: ApplyPatchInput): string => {
+  const lines = [
+    'Review this workspace mutation before it runs.',
+    '',
+    `Operation: ${mutationOperationLabel(input)}`,
+    `File: ${readableMutationPreviewText(input.path)}`,
+  ];
+
+  if (input.createContent !== undefined) {
+    const content = readableMutationPreviewText(
+      input.createContent.slice(0, MUTATION_PREVIEW_MAX_CREATE_CHARACTERS)
+    );
+    lines.push('', 'Content:', content || '[Empty file]');
+    if (input.createContent.length > MUTATION_PREVIEW_MAX_CREATE_CHARACTERS) {
+      lines.push('', '[Create content truncated after 4,000 characters.]');
+    }
+  } else if (!input.deleteFile) {
+    const replacements = input.replacements ?? [];
+    const previewed = replacements.slice(0, MUTATION_PREVIEW_MAX_REPLACEMENTS);
+    lines.push('', `Replacements: ${replacements.length}`);
+    for (const [index, replacement] of previewed.entries()) {
+      lines.push(
+        '',
+        `Replacement ${index + 1}`,
+        'Before:',
+        readableMutationPreviewText(replacement.original),
+        '',
+        'After:',
+        replacement.replacement
+          ? readableMutationPreviewText(replacement.replacement)
+          : '[Empty text]'
+      );
+    }
+    if (replacements.length > previewed.length) {
+      lines.push(
+        '',
+        `[${replacements.length - previewed.length} additional replacements omitted.]`
+      );
+    }
+  }
+
+  return truncateMutationPreview(lines.join('\n'));
+};
+
 const commandTool = (
   options: CommandToolOptions,
   name: 'run_command' | 'git_status' | 'git_diff'
@@ -332,16 +400,6 @@ export const createDesktopTools = (options: DesktopToolOptions): AgentTool[] => 
       }
       const input = params as ApplyPatchInput;
       try {
-        const preview = JSON.stringify({
-          operation: input.deleteFile
-            ? 'delete'
-            : input.createContent !== undefined
-              ? 'create'
-              : 'modify',
-          path: input.path,
-          replacements: input.replacements?.slice(0, 20),
-          createContent: input.createContent?.slice(0, 4_000),
-        }).slice(0, 8_000);
         const approval: ToolApproval = {
           id: createId(),
           kind: input.deleteFile ? 'file-delete' : 'file-mutation',
@@ -349,7 +407,7 @@ export const createDesktopTools = (options: DesktopToolOptions): AgentTool[] => 
           path: input.path,
           cwd: options.workspaceRoot,
           risk: input.deleteFile ? 'high' : 'medium',
-          reason: `Review this exact workspace mutation before it runs: ${preview}`,
+          reason: formatWorkspaceMutationApprovalReason(input),
         };
         const decision = await options.requestApproval(approval, signal);
         if (decision !== 'allow-once') {

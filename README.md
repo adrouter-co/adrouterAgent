@@ -42,6 +42,12 @@ Latest channel:
 npm install --global @adrouter/agent@latest
 ```
 
+Candidate channel (beta.16 testing only; `beta` and `latest` remain on beta.15):
+
+```sh
+npm install --global @adrouter/agent@candidate
+```
+
 Then verify and launch the installed application:
 
 ```sh
@@ -103,6 +109,9 @@ npm install --global @adrouter/agent@beta
 
 # Current recommended release
 npm install --global @adrouter/agent@latest
+
+# Candidate under acceptance testing
+npm install --global @adrouter/agent@candidate
 ```
 
 Updates are manual during the beta. Installing a newer accepted launcher verifies and replaces only

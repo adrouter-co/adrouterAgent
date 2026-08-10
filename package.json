@@ -1,7 +1,7 @@
 {
   "name": "adrouter-agent",
   "productName": "AdRouter Agent",
-  "version": "0.1.0-beta.15",
+  "version": "0.1.0-beta.16",
   "description": "A secure, local-first desktop coding agent routed through AdRouter.",
   "license": "Apache-2.0",
   "private": true,

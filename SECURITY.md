@@ -2,11 +2,12 @@
 
 ## Supported versions
 
-Security fixes are provided for the newest public beta release only. Users
-should manually install the latest release before reporting a problem.
+Security fixes are provided for the newest published candidate and accepted public beta. Users
+should manually install the relevant current channel before reporting a problem.
 
 | Version | Supported |
 | --- | --- |
+| 0.1.0-beta.16 (`candidate`) | Yes |
 | 0.1.0-beta.15 | Yes |
 | 0.1.0-beta.14 | No |
 | 0.1.0-beta.13 | No |
@@ -52,10 +53,10 @@ under `/tmp`, inside a directory that must be a real mode-0700 directory owned b
 the socket must be owned by that user and mode 0600. Windows uses a current-user-DACL named pipe.
 Every paired request remains scope-bound, signed, freshness-checked, nonce-protected, and bounded.
 
-The beta.15 npm launcher uses the credential-free schema-3 manifest and pins every platform ZIP to
-its canonical GitHub URL, exact SHA-256 digest, archive layout, platform, architecture, and bundle
-identity. Downloads remain bounded, archive paths and symlinks are validated, macOS must have the
-expected ad-hoc signature, and Linux/Windows are explicitly unsigned portable candidates. The
+The beta.16 candidate launcher uses the credential-free schema-3 manifest and pins every platform
+ZIP to its canonical GitHub URL, exact SHA-256 digest, archive layout, platform, architecture, and
+bundle identity. Downloads remain bounded, archive paths and symlinks are validated, macOS must
+have the expected ad-hoc signature, and Linux/Windows are explicitly unsigned portable candidates. The
 launcher also contains fail-closed schema-4 Ed25519 verification for a future protected release,
 but signed update application remains disabled.
 
