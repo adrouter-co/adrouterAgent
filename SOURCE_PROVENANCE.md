@@ -1,5 +1,9 @@
 # Source provenance
 
+> This checkout's manifest values below describe its beta.15 source baseline. The current public
+> beta.16 identity must be read from its immutable tag/release; do not infer it from this older
+> local manifest.
+
 This public repository was created as a history-free export of the tracked
 files in the private review source. The original export baseline was:
 

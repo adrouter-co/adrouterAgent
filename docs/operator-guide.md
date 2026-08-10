@@ -107,7 +107,7 @@ exact lockfile/package bindings, and a fresh structured-operation approval.
 
 Both clients use the Pi-derived agent foundation and can route turns through
 the same backend, but their capabilities are different. This boundary was last reconciled against
-immutable CLI tag `v0.81.0-beta.19`; matching a CLI feature means adapting its value to desktop
+immutable CLI tag `v0.81.0-beta.20`; matching a CLI feature means adapting its value to desktop
 invariants, not embedding the CLI or copying its local-account authority.
 
 | Area | AdRouterCLI | AdRouter Agent |

@@ -72,19 +72,13 @@ The checked-in `packages/agent-launcher/release-manifest.json` uses `UNBUILT` so
 until protected native workflows fill hashes. Do not hand-edit them or use them to judge already
 published GitHub assets.
 
-## Current candidate and release policy
+## Release-state source and policy
 
-Remote state was verified on 2026-08-01:
-
-- source/tag and npm `candidate`: `0.1.0-beta.12` at commit
-  `443998f63a4a56b6647185b41ae102934b7fcc59`;
-- GitHub beta.12: published prerelease;
-- public npm `beta` and `latest`: still `0.1.0-beta.7`.
-
-Re-query before repeating this state. Beta.12 remains a candidate until the documented primary Mac
-and physical Windows 11 exact-artifact acceptance is complete and public channels are deliberately
-promoted. The release targets macOS 12+ universal, Ubuntu Desktop 24.04 x64, and Windows 11 x64;
-the beta is unsigned/not notarized and has no stable or auto-update channel.
+Read `../../docs/state.md` and the newest workspace parity report, then re-query npm and GitHub
+before making a current version, channel, asset, signing, or acceptance claim. Local dirty future
+work is not part of an immutable public tag. The release targets macOS 12+ universal, Ubuntu
+Desktop 24.04 x64, and Windows 11 x64; signing/notarization and stable/auto-update status must be
+verified from the exact release rather than inferred.
 
 - Keep immutable version, `v<version>` GitHub tag, npm `candidate`, final `beta`/`latest`, native
   assets, and source commit distinct.

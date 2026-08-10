@@ -1,5 +1,11 @@
 # Plan: AdRouter Agent Safe Desktop Parity Completion
 
+> Reconciliation note (2026-08-10 SGT): the immutable public release is beta.16, while the current
+> working tree contains pre-existing user-owned renderer/runtime parity work that is not part of
+> that release. Keep this plan active until those changes are reconciled and validated. Historical
+> beta.13 release steps below are retained as execution history, not current release instructions;
+> use `../../docs/state.md` for volatile channel and source identities.
+
 ## Goal
 
 Close the remaining safe, desktop-appropriate gaps between AdRouter Agent and AdRouterCLI while

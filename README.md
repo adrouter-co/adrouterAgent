@@ -10,10 +10,10 @@ selection and settlement use a separate display channel; sponsor data is never
 added to model prompts, tool arguments, commands, patches, or compacted agent
 context.
 
-> **Candidate boundary:** the immutable 0.1.0-beta.15 candidate supports macOS 12+ on Apple Silicon
-> and Intel, Ubuntu Desktop 24.04 LTS x64, and Windows 11 x64. It is manual-update and
-> ad-hoc/unsigned. npm `beta`/`latest` remain on the prior accepted release until downloaded
-> beta.15 artifacts pass primary macOS and physical Windows 11 x64 acceptance.
+> **Public beta boundary:** immutable 0.1.0-beta.16 is the current npm `beta`/`latest` and GitHub
+> prerelease. It supports macOS 12+ on Apple Silicon and Intel, Ubuntu Desktop 24.04 LTS x64, and
+> Windows 11 x64. It remains manual-update and ad-hoc/unsigned; verify exact current channels and
+> assets before repeating this release state.
 
 ## Install from npm
 
@@ -34,7 +34,7 @@ location. See [platform setup and staging authentication](docs/platform-setup.md
 for Ubuntu prerequisites, Windows one-time sandbox provisioning, install paths,
 and authentication steps.
 
-The beta.15 candidate is not Developer ID signed or notarized. If macOS blocks the first
+The beta.16 release is not Developer ID signed or notarized. If macOS blocks the first
 launch, open **System Settings → Privacy & Security** and choose **Open Anyway**.
 The launcher never removes quarantine metadata or changes Gatekeeper settings.
 After launch, the app is prefilled with `https://api-staging.adrouter.co`. Select **Connect this
@@ -185,6 +185,8 @@ automatically.
 
 ### Current desktop interaction surface
 
+- The beta.16 baseline uses a persistent status banner, follows streamed conversation output with
+  reliable autoscroll, and gives proposed file edits a clearer preview before approval.
 - The composer is the anchored interaction point for task entry, model and
   thinking-level/preset selection, sponsor banners, and command approvals.
 - Tier B/C bottom sponsor surfaces attach directly above the composer, animate
