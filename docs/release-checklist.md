@@ -9,6 +9,8 @@ artifacts, a dirty tree, or an already-used version/tag.
       metadata, changelog, and promotion default agree.
 - [ ] The tree is clean and `npm run check`, release readiness, packaged E2E, audits, source parity,
       and `git diff --check` pass under Node.js 25.9.0.
+- [ ] Exact Pi pins, transitive-only optional packages, audited security overrides, physical nested
+      resolutions, and disabled executable resource loading pass `npm run check:dependency-overrides`.
 - [ ] The inventory contains exactly `darwin-universal`, `linux-x64`, and `win32-x64` ZIPs; three
       native SBOMs; launcher tarball/SBOM; `SHA256SUMS`; schema-3 `artifact-manifest.json`; and
       attestations.

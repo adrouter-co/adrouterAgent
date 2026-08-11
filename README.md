@@ -123,6 +123,7 @@ unrelated workspace changes. Run `adrouter-agent doctor --json` after updating.
 - [Platform setup and authentication](docs/platform-setup.md)
 - [Operator guide and architecture](docs/operator-guide.md)
 - [Manual acceptance testing](docs/manual-testing.md)
+- [Pi and external-feature update workflow](docs/upstream-updates.md)
 - [Privacy](PRIVACY.md)
 - [Security policy](SECURITY.md)
 - [Support](SUPPORT.md)

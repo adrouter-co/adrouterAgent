@@ -7,6 +7,7 @@ import {
 } from './constants';
 import {
   ApprovalDecisionSchema,
+  CacheOptimizationModeSchema,
   EventTypeSchema,
   IdSchema,
   JsonObjectSchema,
@@ -55,6 +56,7 @@ export const RuntimeStartSchema = z.object({
   model: RouterModelDescriptorSchema,
   thinkingLevel: ThinkingLevelSchema,
   runtimeMode: RuntimeModeSchema,
+  cacheOptimizationMode: CacheOptimizationModeSchema.default('stats-only'),
   sponsoredCompute: z.boolean(),
   router: RuntimeRouterSchema,
   input: z.string().min(1),

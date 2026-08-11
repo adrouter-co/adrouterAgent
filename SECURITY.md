@@ -56,6 +56,13 @@ one-use approval. Project-owned Markdown is accepted only from bounded `.adroute
 inactive until its exact path and digest are trusted. Changed or revoked skills cannot fall back to
 their prior content. Prompt templates require an explicit insert action and never auto-submit.
 
+The desktop pins its Pi packages exactly but does not enable Pi executable extensions, provider
+profiles, themes, context discovery, remote client/protocol surfaces, or arbitrary skills. Its Pi
+model runtime uses app-owned in-memory credentials and a fixed desktop tool allowlist. Native cache
+optimization cannot write provider configuration or hosted cache fields. Delegation creates only
+directly owned visible tasks; status, follow-up/resume, and cancellation remain exact,
+approval-bound, depth-one operations through the normal scheduler.
+
 Local automation never listens on TCP. On macOS and Linux it uses a short deterministic socket
 under `/tmp`, inside a directory that must be a real mode-0700 directory owned by the current user;
 the socket must be owned by that user and mode 0600. Windows uses a current-user-DACL named pipe.
