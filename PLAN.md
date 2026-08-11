@@ -677,6 +677,7 @@ candidate artifacts while preserving unrelated local work and leaving the canoni
 
 - `src/runtime/workspace.ts`, `src/runtime/workspace-broker.ts`, `src/runtime/structured-files.ts`
 - `src/runtime/tools.ts`, `src/runtime/platform.ts`, `src/runtime/router-client.ts`, `src/runtime/ndjson.ts`
+- `src/main/task-service.ts`, `src/main/ipc.ts`, and the task-start race regression
 - `src/renderer/App.tsx`, `tests/renderer/App.test.tsx` for the release-blocking follow-mode race
 - `native/`, `scripts/build-workspace-broker.mjs`, source-parity/provenance inputs, focused tests
 - `package.json`, `package-lock.json`, `packages/agent-launcher/`, `.github/workflows/`, release docs
@@ -746,8 +747,11 @@ git status --short --branch
 - Two protected macOS E2E runs missed the timeline auto-scroll threshold by 118 pixels while an
   immediate pinned-runtime packaged rerun passed both tests. Responsive reflow could emit `scroll`
   and incorrectly disable follow mode without user input. Follow-state changes now require recent
-  wheel or pointer-drag intent, with regression coverage for reflow and manual scrolling. CI must
-  clear the corrected packaged check before merge.
+  wheel or pointer-drag intent, with regression coverage for reflow and manual scrolling. The next
+  protected run cleared that assertion and exposed a later sign-out race: thread state became
+  `running` before the supervisor registered its pending lease. `TaskService` now counts starts
+  from IPC entry through registration, and sign-out consults that complete state. CI must clear the
+  corrected packaged check before merge.
 - Physical Windows 11 downloaded-artifact acceptance and channel finalization remain out of scope.
 
 ---

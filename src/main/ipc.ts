@@ -142,7 +142,7 @@ export const registerIpcHandlers = (dependencies: IpcDependencies): EventSubscri
   );
   register('configuration.status', () => installationAuth.diagnostics());
   register('configuration.signOut', () => {
-    if (supervisor.hasTasks) {
+    if (tasks.hasTasks) {
       throw new Error('Stop all active or queued agent tasks before signing out.');
     }
     return installationAuth.signOut();
