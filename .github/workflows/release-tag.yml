@@ -117,7 +117,7 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           node scripts/prepare-release-assets.mjs "$version"
           node scripts/verify-release-assets.mjs out/release
-      - uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-path: out/release/*
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
