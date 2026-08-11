@@ -4,9 +4,10 @@
 
 Close the remaining safe, desktop-appropriate gaps between AdRouter Agent and AdRouterCLI while
 preserving the Agent's stronger sandbox, approval, identity, sponsor-privacy, and GUI boundaries.
-The original parity work now ships through accepted beta.15. Step H prepares the separately
-authorized beta.16 UI candidate; public `beta`/`latest` remain on beta.15 until later exact-artifact
-acceptance and separate finalization authorization.
+The original parity and UI work now ships through accepted beta.16. Step H is retained as beta.16
+release history. Step I prepares the separately authorized beta.17 security candidate; public
+`beta`/`latest` remain on beta.16 until later exact-artifact acceptance and separate finalization
+authorization.
 
 ## Context
 
@@ -47,6 +48,10 @@ acceptance and separate finalization authorization.
 - Current repository instructions define normal concurrency as one task and official release
   targets as macOS universal, Ubuntu 24.04 x64, and Windows 11 x64. Existing queue/lease machinery
   stays, but the default and public claims must match those constraints.
+- GitHub protected environments can hold candidate publication until their review rules pass, and
+  npm trusted publishing binds publication to the reviewed workflow through OIDC.
+- Public beta.16 and tag `v0.1.0-beta.16` are immutable, so the security candidate uses the unused
+  next identity `0.1.0-beta.17`.
 
 ## Constraints
 
@@ -64,7 +69,7 @@ acceptance and separate finalization authorization.
 - Preserve Node.js 25.9.0 for the app and Node.js 22.19+ with zero runtime dependencies for the npm
   launcher. Add no dependencies unless unavoidable; none are planned.
 - Preserve public APIs and persisted data with additive versioned migrations/readers.
-- Publish only the explicitly authorized unsigned/ad-hoc beta.13 GitHub prerelease and npm
+- Publish only the explicitly authorized unsigned/ad-hoc beta.17 GitHub prerelease and npm
   `candidate`; do not move `beta`/`latest`, sign/notarize, mutate hosted data, or finalize.
 
 ## Out of Scope
@@ -639,6 +644,118 @@ git diff --check
 
 ---
 
+## Step I: Security-only beta.17 candidate
+
+### Status
+
+`in_progress`
+
+### Objective
+
+Publish the validated desktop trust-boundary fixes as immutable `0.1.0-beta.17` GitHub and npm
+candidate artifacts while preserving unrelated local work and leaving the canonical checkout clean.
+
+### Tasks
+
+- [x] Preserve the original mixed worktree on local-only branch
+      `codex/preserve-pre-security-20260811` at `1242459`.
+- [x] Fetch current remote state, create `codex/security-beta17` from `origin/main`, and port only
+      the descriptor-bound workspace broker, case-insensitive protected paths, trusted Git
+      resolution, bounded Router/NDJSON handling, focused tests, and required packaging inputs.
+- [x] Prepare unused `0.1.0-beta.17` metadata and review the final diff for unrelated renderer,
+      guidance, review, or parity changes.
+- [x] Run the complete pinned source, release-readiness, packaged-Electron, macOS distribution, and
+      native broker verification gates.
+- [x] Require protected Windows broker compilation in GitHub Actions.
+- [ ] Push a release PR, merge only after required checks, tag the exact protected-main commit, and
+      verify the immutable draft inventory.
+- [ ] Dispatch `publish-candidate`, approve the protected environment when requested, verify the
+      GitHub prerelease and npm `candidate`, and confirm `beta`/`latest` remain beta.16.
+- [ ] Record exact SHA/tag/workflow/public integrity and leave the checkout clean.
+
+### Relevant Files
+
+- `src/runtime/workspace.ts`, `src/runtime/workspace-broker.ts`, `src/runtime/structured-files.ts`
+- `src/runtime/tools.ts`, `src/runtime/platform.ts`, `src/runtime/router-client.ts`, `src/runtime/ndjson.ts`
+- `src/main/task-service.ts`, `src/main/ipc.ts`, and the task-start race regression
+- `src/renderer/App.tsx`, `tests/renderer/App.test.tsx` for the release-blocking follow-mode race
+- `native/`, `scripts/build-workspace-broker.mjs`, source-parity/provenance inputs, focused tests
+- `package.json`, `package-lock.json`, `packages/agent-launcher/`, `.github/workflows/`, release docs
+
+### Expected Changes
+
+- create: descriptor-bound native broker source and immutable beta.17 candidate branch/tag
+- modify: security runtime, broker packaging, focused tests, release metadata, the release-blocking
+  follow-mode race, and this plan
+- delete: no user-owned work, public artifacts, or prior immutable tags
+
+### Do Not Modify
+
+- unrelated renderer, guidance/review-service, feature-parity, or presentation behavior
+- npm `beta`/`latest`, prior GitHub releases/tags/assets, hosted Router state, or signing policy
+- ignored credentials, `adrouter_release/.protected/`, generated `out/`, or packaged release output
+
+### Commands
+
+```bash
+npm ci
+npm run check
+npm run verify:release-readiness
+npm run test:e2e
+npm run make:mac
+npm run verify:dist
+git diff --check
+git status --short --branch
+```
+
+### Acceptance Criteria
+
+- [x] The candidate diff contains only validated security fixes and required release metadata.
+- [x] Unrelated local work is recoverable from the documented preservation branch.
+- [x] All local gates pass under Node.js 25.9.0.
+- [x] Protected Windows builds verify the broker.
+- [ ] `v0.1.0-beta.17`, GitHub prerelease, and npm `candidate` identify one exact artifact set.
+- [ ] npm `beta` and `latest` remain `0.1.0-beta.16`.
+- [ ] The canonical working directory is clean at handoff.
+
+### Validation Results
+
+- Pinned Node.js 25.9.0: `npm ci`, `npm run check`, `npm run verify:release-readiness`, production
+  and bounded build audits, packaged Electron E2E (2/2), universal macOS `make`, and native
+  `verify:dist` all pass. The full source gate passed 39 unit files (155 tests), three integration
+  files (13 tests), 47 launcher tests, source parity, public-boundary, documentation, and workflow
+  policy checks.
+- Protected CI/native build: Windows 11 x64 portability passed in run `31444587426`, including all
+  155 tests, launcher checks, Windows packaging, and distribution verification.
+- Candidate publication and anonymous verification: not run.
+
+### Findings / Notes
+
+- The first protected Windows portability run reached `npm ci` but Node parsed npm's POSIX
+  `.bin/node-gyp` shim. The next run reached toolchain discovery but the transitive Electron
+  node-gyp 10.2 did not recognize the current Visual Studio 2026 runner. The third run used exact
+  node-gyp 12.3.0 and compiled both broker C files, then exposed a target-wide `CompileAs=C`
+  override that also affected node-gyp's generated C++ delay-load hook. The fourth run compiled
+  successfully and exposed `ERROR_INVALID_PARAMETER` in all broker replacement tests. Microsoft
+  requires a rename buffer of at least the full `FILE_RENAME_INFO` structure plus the filename;
+  the broker used only the filename-field offset plus the filename. The larger buffer alone still
+  returned error 87 because the Win32 wrapper rejected the bound root. Supplying a simple target
+  with a null root advanced to error 17: the wrapper resolved it from the process working directory
+  on another volume. The broker now calls user-mode `NtSetInformationFile(FileRenameInformation)`
+  at the same native layer as its existing `NtCreateFile` operations, with the reviewed target name
+  relative to the bound parent handle. The protected Windows rerun passed end to end.
+- Two protected macOS E2E runs missed the timeline auto-scroll threshold by 118 pixels while an
+  immediate pinned-runtime packaged rerun passed both tests. Responsive reflow could emit `scroll`
+  and incorrectly disable follow mode without user input. Follow-state changes now require recent
+  wheel or pointer-drag intent, with regression coverage for reflow and manual scrolling. The next
+  protected run cleared that assertion and exposed a later sign-out race: thread state became
+  `running` before the supervisor registered its pending lease. `TaskService` now counts starts
+  from IPC entry through registration, and sign-out consults that complete state. CI must clear the
+  corrected packaged check before merge.
+- Physical Windows 11 downloaded-artifact acceptance and channel finalization remain out of scope.
+
+---
+
 ## Follow-up Work
 
 - Verify the hosted Router's exact `/v1/models` catalog and installation-auth contract during the
@@ -665,3 +782,4 @@ git diff --check
 | 2026-08-07 | Adapt CLI beta.19 profiles as immutable Agent task presets, not global profile switching. | Desktop tasks need reproducible policy without replacing user-level settings or widening provider authority. | Presets are copied into versioned task snapshots and later edits cannot expand existing tasks. |
 | 2026-08-07 | Support only exact-digest project Markdown skills/prompts. | CLI's global/package/script-capable skill surface is outside the Agent's trust and sandbox boundaries. | Skills use metadata-first on-demand loading; prompts require an explicit insert and neither can add executable behavior. |
 | 2026-08-10 | Fix forward the desktop UI work as beta.16 candidate only. | Beta.15 is accepted and immutable; UI changes require a new artifact while public channels must remain stable during candidate testing. | Publish a new GitHub prerelease and npm `candidate`; defer `beta`/`latest` movement and physical acceptance. |
+| 2026-08-11 | Extract a security-only beta.17 candidate from current remote main and preserve mixed local work separately. | Publishing the aggregate dirty tree would bundle unrelated work and would not be reproducible. | The candidate remains narrow while all prior local bytes stay recoverable and the checkout can finish clean. |

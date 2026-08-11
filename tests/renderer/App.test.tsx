@@ -555,6 +555,9 @@ describe('App onboarding', () => {
     });
     timelineLog.scrollTop = 650;
     fireEvent.scroll(timelineLog);
+    // Responsive reflow can emit scroll without user intent; keep following in that case.
+    timelineScrollHeight = 1_020;
+    fireEvent.scroll(timelineLog);
     act(() => emitEvent?.(completedEvent));
     await waitFor(() =>
       expect(screen.getAllByLabelText('Sponsored compute tier C')).toHaveLength(2)
@@ -562,6 +565,7 @@ describe('App onboarding', () => {
     await waitFor(() => expect(timelineLog.scrollTop).toBe(timelineScrollHeight));
 
     timelineLog.scrollTop = 100;
+    fireEvent.wheel(timelineLog);
     fireEvent.scroll(timelineLog);
     timelineScrollHeight = 1_100;
     await act(async () => {

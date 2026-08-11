@@ -1,39 +1,23 @@
-import { constants } from 'node:fs';
-import {
-  access,
-  cp,
-  lstat,
-  mkdir,
-  readdir,
-  readFile,
-  realpath,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
-import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { realpath } from 'node:fs/promises';
+import { basename, relative, resolve, sep } from 'node:path';
 import { type OperationManifestV1, OperationManifestV1Schema } from '../shared/contracts';
 import { sha256 } from '../shared/security';
 import { assertOperationManifest, createOperationManifest } from './operation-manifest';
 import { resolveWorkspacePath, WorkspaceAccessError } from './workspace';
+import {
+  deleteBoundWorkspaceFile,
+  inspectWorkspacePath,
+  listBoundWorkspaceFiles,
+  readBoundWorkspaceFile,
+  replaceBoundWorkspaceFile,
+} from './workspace-broker';
 
 const MAX_OPERATION_BYTES = 10 * 1024 * 1024;
-const MAX_OPERATION_ENTRIES = 2_000;
 const MAX_RECOVERY_BYTES = 50 * 1024 * 1024;
 const MAX_RECOVERY_ENTRIES = 100;
 const RECOVERY_DIRECTORY = '.adrouter-recovery';
 const RECOVERY_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-const pathExists = async (path: string): Promise<boolean> => {
-  try {
-    await access(path, constants.F_OK);
-    return true;
-  } catch {
-    return false;
-  }
-};
 
 interface TreeInventory {
   digest: string;
@@ -42,44 +26,33 @@ interface TreeInventory {
   kind: 'file' | 'directory';
 }
 
-const inventoryTree = async (absolute: string): Promise<TreeInventory> => {
-  const records: Array<{ path: string; kind: 'file' | 'directory'; digest: string; size: number }> =
-    [];
-  let bytes = 0;
-  const walk = async (path: string, fromRoot: string): Promise<void> => {
-    const metadata = await lstat(path);
-    if (metadata.isSymbolicLink()) {
-      throw new WorkspaceAccessError('Structured file operations do not follow symbolic links.');
-    }
-    if (metadata.isFile()) {
-      bytes += metadata.size;
-      if (bytes > MAX_OPERATION_BYTES) {
-        throw new WorkspaceAccessError('Structured file operation exceeds the 10 MiB limit.');
-      }
-      const content = await readFile(path);
-      records.push({ path: fromRoot, kind: 'file', digest: sha256(content), size: content.length });
-      return;
-    }
-    if (!metadata.isDirectory()) {
-      throw new WorkspaceAccessError('Only regular files and directories may be moved or copied.');
-    }
-    records.push({ path: fromRoot, kind: 'directory', digest: sha256('directory'), size: 0 });
-    const children = await readdir(path, { withFileTypes: true });
-    for (const child of children.sort((left, right) => left.name.localeCompare(right.name))) {
-      if (records.length >= MAX_OPERATION_ENTRIES) {
-        throw new WorkspaceAccessError('Structured file operation contains too many entries.');
-      }
-      await walk(join(path, child.name), fromRoot ? `${fromRoot}/${child.name}` : child.name);
-    }
-  };
-  await walk(absolute, '');
-  const rootKind = records[0]?.kind;
-  if (!rootKind) throw new WorkspaceAccessError('The structured operation target is unavailable.');
+const inventoryBoundTarget = (workspace: string, path: string): TreeInventory | null => {
+  let inspected: ReturnType<typeof inspectWorkspacePath>;
+  try {
+    inspected = inspectWorkspacePath(workspace, path);
+  } catch (error) {
+    throw new WorkspaceAccessError(error instanceof Error ? error.message : String(error));
+  }
+  if (inspected.kind === 'missing') return null;
+  if (inspected.kind === 'directory') {
+    throw new WorkspaceAccessError(
+      'Directory copy, move, delete, and restore are disabled until they use the descriptor-bound broker.'
+    );
+  }
+  let content: Buffer;
+  try {
+    content = readBoundWorkspaceFile(workspace, path, MAX_OPERATION_BYTES);
+  } catch (error) {
+    throw new WorkspaceAccessError(error instanceof Error ? error.message : String(error));
+  }
+  const records = [
+    { path: '', kind: 'file' as const, digest: sha256(content), size: content.length },
+  ];
   return {
     digest: sha256(JSON.stringify(records)),
-    bytes,
-    entries: records.length,
-    kind: rootKind,
+    bytes: content.length,
+    entries: 1,
+    kind: 'file',
   };
 };
 
@@ -99,7 +72,8 @@ export const snapshotStructuredTarget = async (
   allowProtected = false
 ): Promise<StructuredTargetSnapshot> => {
   const path = await resolveWorkspacePath(workspaceRoot, input, { allowMissing, allowProtected });
-  if (!(await pathExists(path.absolute))) {
+  const inventory = inventoryBoundTarget(path.root, path.relative);
+  if (!inventory) {
     return {
       path: path.relative,
       absolute: path.absolute,
@@ -109,7 +83,6 @@ export const snapshotStructuredTarget = async (
       entries: 0,
     };
   }
-  const inventory = await inventoryTree(path.absolute);
   return {
     path: path.relative,
     absolute: path.absolute,
@@ -180,31 +153,71 @@ interface RecoveryRecord {
 
 const recoveryRoot = (workspace: string): string => resolve(workspace, RECOVERY_DIRECTORY);
 
+const readBound = (workspace: string, path: string, maxBytes = MAX_OPERATION_BYTES): Buffer => {
+  try {
+    return readBoundWorkspaceFile(workspace, path, maxBytes);
+  } catch (error) {
+    throw new WorkspaceAccessError(error instanceof Error ? error.message : String(error));
+  }
+};
+
+const replaceBound = (
+  workspace: string,
+  path: string,
+  expected: Uint8Array | null,
+  replacement: Uint8Array
+): void => {
+  try {
+    replaceBoundWorkspaceFile(workspace, path, expected, replacement);
+  } catch (error) {
+    throw new WorkspaceAccessError(error instanceof Error ? error.message : String(error));
+  }
+};
+
+const deleteBound = (workspace: string, path: string, expected: Uint8Array): void => {
+  try {
+    deleteBoundWorkspaceFile(workspace, path, expected);
+  } catch (error) {
+    throw new WorkspaceAccessError(error instanceof Error ? error.message : String(error));
+  }
+};
+
 const recoveryUsage = async (workspace: string): Promise<{ bytes: number; entries: number }> => {
-  const root = recoveryRoot(workspace);
-  if (!(await pathExists(root))) return { bytes: 0, entries: 0 };
+  let recovery: ReturnType<typeof inspectWorkspacePath>;
+  try {
+    recovery = inspectWorkspacePath(workspace, RECOVERY_DIRECTORY);
+  } catch (error) {
+    throw new WorkspaceAccessError(error instanceof Error ? error.message : String(error));
+  }
+  if (recovery.kind === 'missing') return { bytes: 0, entries: 0 };
+  if (recovery.kind !== 'directory') {
+    throw new WorkspaceAccessError('The recovery vault path is not a directory.');
+  }
+  let files: string[];
+  try {
+    files = listBoundWorkspaceFiles(workspace, RECOVERY_DIRECTORY, MAX_RECOVERY_ENTRIES + 1).files;
+  } catch (error) {
+    throw new WorkspaceAccessError(error instanceof Error ? error.message : String(error));
+  }
   let bytes = 0;
-  let entries = 0;
-  const walk = async (directory: string): Promise<void> => {
-    for (const child of await readdir(directory, { withFileTypes: true })) {
-      const path = join(directory, child.name);
-      if (child.isDirectory()) await walk(path);
-      else if (child.isFile()) {
-        entries += 1;
-        bytes += (await stat(path)).size;
-      }
-      if (entries > MAX_RECOVERY_ENTRIES || bytes > MAX_RECOVERY_BYTES) return;
-    }
-  };
-  await walk(root);
-  return { bytes, entries };
+  for (const file of files) {
+    bytes += inspectWorkspacePath(workspace, file).size;
+    if (bytes > MAX_RECOVERY_BYTES) break;
+  }
+  return { bytes, entries: files.length };
 };
 
 const prepareRecovery = async (
   manifest: OperationManifestV1,
   source: StructuredTargetSnapshot,
   destinationPath: string | null
-): Promise<{ directory: string; stored: string; record: RecoveryRecord }> => {
+): Promise<{
+  directory: string;
+  stored: string;
+  recordPath: string;
+  recordBytes: Buffer;
+  record: RecoveryRecord;
+}> => {
   const usage = await recoveryUsage(manifest.workspace);
   if (
     usage.entries + source.entries + 1 > MAX_RECOVERY_ENTRIES ||
@@ -214,13 +227,12 @@ const prepareRecovery = async (
       'The bounded recovery vault is full; recover or remove old entries first.'
     );
   }
-  const directory = resolve(recoveryRoot(manifest.workspace), manifest.operationId);
-  const relativeDirectory = relative(recoveryRoot(manifest.workspace), directory);
+  const absoluteDirectory = resolve(recoveryRoot(manifest.workspace), manifest.operationId);
+  const relativeDirectory = relative(recoveryRoot(manifest.workspace), absoluteDirectory);
   if (relativeDirectory.startsWith(`..${sep}`) || relativeDirectory === '..') {
     throw new WorkspaceAccessError('Invalid recovery vault target.');
   }
-  await mkdir(recoveryRoot(manifest.workspace), { recursive: true, mode: 0o700 });
-  await mkdir(directory, { recursive: false, mode: 0o700 });
+  const directory = `${RECOVERY_DIRECTORY}/${manifest.operationId}`;
   const record: RecoveryRecord = {
     version: 1,
     operationId: manifest.operationId,
@@ -230,22 +242,16 @@ const prepareRecovery = async (
     beforeHash: source.beforeHash ?? '',
     createdAt: new Date().toISOString(),
   };
-  await writeFile(resolve(directory, 'record.json'), JSON.stringify(record), {
-    encoding: 'utf8',
-    mode: 0o600,
-    flag: 'wx',
-  });
-  return { directory, stored: resolve(directory, basename(source.absolute)), record };
-};
-
-const copyExact = async (source: string, destination: string): Promise<void> => {
-  await cp(source, destination, {
-    recursive: true,
-    force: false,
-    errorOnExist: true,
-    dereference: false,
-    preserveTimestamps: true,
-  });
+  const recordPath = `${directory}/record.json`;
+  const recordBytes = Buffer.from(JSON.stringify(record), 'utf8');
+  replaceBound(manifest.workspace, recordPath, null, recordBytes);
+  return {
+    directory,
+    stored: `${directory}/${basename(source.path)}`,
+    recordPath,
+    recordBytes,
+    record,
+  };
 };
 
 export interface StructuredFileResult {
@@ -282,20 +288,11 @@ export const executeStructuredFileOperation = async (
   const destination = destinationTarget
     ? await resolveWorkspacePath(manifest.workspace, destinationTarget.path, { allowMissing: true })
     : undefined;
+  const sourceBytes = readBound(manifest.workspace, source.path);
 
   if (manifest.capability === 'file.copy') {
     if (!destination) throw new WorkspaceAccessError('Copy requires a destination.');
-    await mkdir(dirname(destination.absolute), { recursive: true });
-    const staging = resolve(
-      dirname(destination.absolute),
-      `.${basename(destination.absolute)}.adrouter-${manifest.operationId}.tmp`
-    );
-    try {
-      await copyExact(source.absolute, staging);
-      await rename(staging, destination.absolute);
-    } finally {
-      if (await pathExists(staging)) await rm(staging, { recursive: true, force: true });
-    }
+    replaceBound(manifest.workspace, destination.relative, null, sourceBytes);
     return {
       capability: manifest.capability,
       source: source.path,
@@ -306,17 +303,37 @@ export const executeStructuredFileOperation = async (
   }
 
   const recovery = await prepareRecovery(manifest, source, destination?.relative ?? null);
+  let destinationCreated = false;
+  let recoveryStored = false;
   try {
+    replaceBound(manifest.workspace, recovery.stored, null, sourceBytes);
+    recoveryStored = true;
     if (manifest.capability === 'file.move') {
       if (!destination) throw new WorkspaceAccessError('Move requires a destination.');
-      await copyExact(source.absolute, recovery.stored);
-      await mkdir(dirname(destination.absolute), { recursive: true });
-      await rename(source.absolute, destination.absolute);
-    } else {
-      await rename(source.absolute, recovery.stored);
+      replaceBound(manifest.workspace, destination.relative, null, sourceBytes);
+      destinationCreated = true;
     }
+    deleteBound(manifest.workspace, source.path, sourceBytes);
   } catch (error) {
-    await rm(recovery.directory, { recursive: true, force: true }).catch(() => undefined);
+    if (destinationCreated && destination) {
+      try {
+        deleteBound(manifest.workspace, destination.relative, sourceBytes);
+      } catch {
+        // Preserve the original failure; the recovery payload remains available.
+      }
+    }
+    if (recoveryStored) {
+      try {
+        deleteBound(manifest.workspace, recovery.stored, sourceBytes);
+      } catch {
+        // Preserve the original failure; cleanup can be retried explicitly.
+      }
+    }
+    try {
+      deleteBound(manifest.workspace, recovery.recordPath, recovery.recordBytes);
+    } catch {
+      // Preserve the original failure; an inert recovery record is safer than pathname cleanup.
+    }
     throw error;
   }
   return {
@@ -341,7 +358,7 @@ export const createRestoreManifest = async (input: {
   const directory = resolve(recoveryRoot(workspace), input.recoveryId);
   const recordPath = relative(workspace, resolve(directory, 'record.json')).split(sep).join('/');
   const recordSnapshot = await snapshotStructuredTarget(workspace, recordPath, false, true);
-  const record = JSON.parse(await readFile(recordSnapshot.absolute, 'utf8')) as RecoveryRecord;
+  const record = JSON.parse(readBound(workspace, recordPath).toString('utf8')) as RecoveryRecord;
   if (record.version !== 1 || record.operationId !== input.recoveryId) {
     throw new WorkspaceAccessError('The recovery record is invalid.');
   }
@@ -397,21 +414,25 @@ export const executeRestoreOperation = async (
     throw new WorkspaceAccessError('The restore binding is incomplete.');
   }
   await verifyStructuredTargets(manifest);
-  const directory = resolve(recoveryRoot(manifest.workspace), recoveryId);
-  const record = JSON.parse(
-    await readFile(resolve(directory, 'record.json'), 'utf8')
-  ) as RecoveryRecord;
-  const stored = resolve(directory, basename(record.originalPath));
+  const directory = `${RECOVERY_DIRECTORY}/${recoveryId}`;
+  const recordPath = `${directory}/record.json`;
+  const recordBytes = readBound(manifest.workspace, recordPath);
+  const record = JSON.parse(recordBytes.toString('utf8')) as RecoveryRecord;
+  const stored = `${directory}/${basename(record.originalPath)}`;
   const destination = await resolveWorkspacePath(manifest.workspace, record.originalPath, {
     allowMissing: true,
   });
-  const recovered = await inventoryTree(stored);
+  const recovered = inventoryBoundTarget(manifest.workspace, stored);
+  if (!recovered) {
+    throw new WorkspaceAccessError('The recovery payload is unavailable.');
+  }
   if (recovered.digest !== record.beforeHash) {
     throw new WorkspaceAccessError('The recovery payload changed and cannot be restored.');
   }
-  await mkdir(dirname(destination.absolute), { recursive: true });
-  await rename(stored, destination.absolute);
-  await rm(directory, { recursive: true, force: true });
+  const storedBytes = readBound(manifest.workspace, stored);
+  replaceBound(manifest.workspace, destination.relative, null, storedBytes);
+  deleteBound(manifest.workspace, stored, storedBytes);
+  deleteBound(manifest.workspace, recordPath, recordBytes);
   return {
     capability: 'file.restore',
     source: record.originalPath,

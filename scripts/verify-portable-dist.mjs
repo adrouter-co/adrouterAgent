@@ -93,6 +93,7 @@ if (!existsSync(nativeSandboxPath)) {
 const vendorRoot = join(resources, 'vendor');
 const expectedVendorEntry =
   platform === 'linux' ? `seccomp/${arch}/apply-seccomp` : `srt-win/${arch}/srt-win.exe`;
+const expectedBrokerEntry = `workspace-broker/${platform}-${arch}/adrouter_workspace_broker.node`;
 const vendorEntries = readdirSync(vendorRoot, { recursive: true, withFileTypes: true })
   .filter((entry) => entry.isFile())
   .map((entry) =>
@@ -101,10 +102,18 @@ const vendorEntries = readdirSync(vendorRoot, { recursive: true, withFileTypes: 
       .replaceAll('\\', '/')
   )
   .sort();
-if (JSON.stringify(vendorEntries) !== JSON.stringify([expectedVendorEntry])) {
-  throw new Error(`The packaged sandbox helper inventory is invalid: ${vendorEntries.join(', ')}`);
+if (
+  JSON.stringify(vendorEntries) !==
+  JSON.stringify([expectedVendorEntry, expectedBrokerEntry].sort())
+) {
+  throw new Error(`The packaged native helper inventory is invalid: ${vendorEntries.join(', ')}`);
 }
 assertBinaryArchitecture(readFileSync(nativeSandboxPath), arch, 'The packaged sandbox helper');
+assertBinaryArchitecture(
+  readFileSync(join(vendorRoot, expectedBrokerEntry)),
+  arch,
+  'The packaged workspace broker'
+);
 if (
   packagedFiles.some(
     (filename) =>

@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SandboxedCommandRunner } from '@/runtime/command-runner';
 import { createDesktopTools, formatWorkspaceMutationApprovalReason } from '@/runtime/tools';
@@ -154,7 +154,7 @@ describe('desktop tool approvals', () => {
   it('runs an allowed general command with a read-only sandbox ceiling', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'adrouter-readonly-command-'));
     directories.push(workspace);
-    const run = vi.fn(async () => ({
+    const run = vi.fn(async (_input: Parameters<SandboxedCommandRunner['run']>[0]) => ({
       exitCode: 0,
       stdout: '',
       stderr: '',
@@ -313,5 +313,44 @@ describe('desktop tool approvals', () => {
     expect(
       emit.mock.calls.some(([type]) => type === 'tool.activity' || type === 'tool.result')
     ).toBe(false);
+  });
+
+  it('uses an absolute trusted Git binary for silent repository inspection', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'adrouter-git-path-'));
+    directories.push(workspace);
+    const run = vi.fn(async (_input: Parameters<SandboxedCommandRunner['run']>[0]) => ({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      stdoutTruncated: false,
+      stderrTruncated: false,
+      timedOut: false,
+      cancelled: false,
+      durationMs: 1,
+    }));
+    const gitStatus = createDesktopTools({
+      workspaceRoot: workspace,
+      permissionMode: 'workspace-write',
+      threadId: '11111111-1111-4111-8111-111111111111',
+      turnId: '22222222-2222-4222-8222-222222222222',
+      commandRunner: { run } as unknown as SandboxedCommandRunner,
+      requestApproval: vi.fn(),
+      emit: vi.fn(),
+    }).find((tool) => tool.name === 'git_status');
+    if (!gitStatus) throw new Error('Expected Git status tool.');
+
+    await gitStatus.execute('git-status-1', {});
+
+    const execution = run.mock.calls[0]?.[0];
+    expect(execution?.argv[0] && isAbsolute(execution.argv[0])).toBe(true);
+    expect(execution?.argv[0]).not.toContain(workspace);
+    expect(execution?.argv.slice(1)).toEqual([
+      '-c',
+      'core.fsmonitor=false',
+      'status',
+      '--short',
+      '--branch',
+      '--ignore-submodules=all',
+    ]);
   });
 });

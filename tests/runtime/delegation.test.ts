@@ -50,6 +50,8 @@ const setup = async () => {
     }),
   } as unknown as ConfigurationStore;
   const supervisor = {
+    hasTasks: false,
+    hasThread: vi.fn().mockReturnValue(false),
     start: vi.fn().mockResolvedValue(undefined),
   } as unknown as RuntimeSupervisor;
   const tasks = new TaskService(database, configuration, supervisor, () => undefined);
@@ -66,6 +68,7 @@ const setup = async () => {
     parent,
     parentTurn,
     model,
+    configuration,
     supervisor,
     tasks,
     manifest,
@@ -74,6 +77,37 @@ const setup = async () => {
 };
 
 describe('bounded delegated child tasks', () => {
+  it('reports task initialization as active before supervisor registration', async () => {
+    const { configuration, database, model, project, tasks } = await setup();
+    const thread = database.createThread({
+      projectId: project.id,
+      title: 'Starting task',
+      model: model.id,
+      thinkingLevel: model.defaultThinkingLevel,
+    });
+    let releaseConfiguration: (() => void) | undefined;
+    vi.mocked(configuration.get).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseConfiguration = () => resolve({ models: [] } as never);
+        })
+    );
+
+    const starting = tasks.start({
+      threadId: thread.id,
+      input: 'Wait for runtime registration.',
+      model: model.id,
+      thinkingLevel: model.defaultThinkingLevel,
+      runtimeMode: 'auto',
+    });
+    await vi.waitFor(() => expect(releaseConfiguration).toBeTypeOf('function'));
+    expect(tasks.hasTasks).toBe(true);
+    releaseConfiguration?.();
+    await expect(starting).rejects.toThrow('selected model is not available');
+    expect(tasks.hasTasks).toBe(false);
+    database.close();
+  });
+
   it('creates an independent visible child and schedules it through the normal task service', async () => {
     const { database, parent, supervisor, tasks, manifest } = await setup();
     const result = await tasks.startDelegated(manifest);

@@ -16,6 +16,8 @@ import type { AppDatabase } from './database';
 import type { RuntimeSupervisor } from './runtime-supervisor';
 
 export class TaskService {
+  private readonly startingThreadIds = new Set<string>();
+
   public constructor(
     private readonly database: AppDatabase,
     private readonly configuration: ConfigurationStore,
@@ -28,8 +30,24 @@ export class TaskService {
     if (event) this.publish(event);
   }
 
+  public get hasTasks(): boolean {
+    return this.startingThreadIds.size > 0 || this.supervisor.hasTasks;
+  }
+
   public async start(rawInput: z.input<typeof TurnStartInputSchema>): Promise<Turn> {
     const input = TurnStartInputSchema.parse(rawInput);
+    if (this.startingThreadIds.has(input.threadId) || this.supervisor.hasThread(input.threadId)) {
+      throw new Error('This task already has an active or queued runtime.');
+    }
+    this.startingThreadIds.add(input.threadId);
+    try {
+      return await this.startParsed(input);
+    } finally {
+      this.startingThreadIds.delete(input.threadId);
+    }
+  }
+
+  private async startParsed(input: z.output<typeof TurnStartInputSchema>): Promise<Turn> {
     const thread = this.database.getThread(input.threadId);
     if (!thread) throw new Error('Thread not found.');
     if (thread.status === 'interrupted' || thread.status === 'blocked') {
