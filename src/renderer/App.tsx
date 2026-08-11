@@ -284,6 +284,9 @@ export function App(): JSX.Element {
   const sessionImportRef = useRef<HTMLInputElement>(null);
   const followTimeline = useRef(true);
   const timelineFollowFrame = useRef<number | null>(null);
+  const timelineUserScrolling = useRef(false);
+  const timelineUserScrollTimer = useRef<number | null>(null);
+  const timelinePointerActive = useRef(false);
   const newTaskRequested = useRef(false);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
@@ -337,6 +340,17 @@ export function App(): JSX.Element {
     });
   }, []);
 
+  const markTimelineUserScroll = useCallback((): void => {
+    timelineUserScrolling.current = true;
+    if (timelineUserScrollTimer.current !== null) {
+      window.clearTimeout(timelineUserScrollTimer.current);
+    }
+    timelineUserScrollTimer.current = window.setTimeout(() => {
+      timelineUserScrollTimer.current = null;
+      timelineUserScrolling.current = false;
+    }, 250);
+  }, []);
+
   const refreshRouterStatus = useCallback(async (): Promise<void> => {
     if (typeof window.adrouter.configuration.status !== 'function') return;
     setStatusBusy(true);
@@ -387,6 +401,9 @@ export function App(): JSX.Element {
     () => () => {
       if (timelineFollowFrame.current !== null) {
         cancelAnimationFrame(timelineFollowFrame.current);
+      }
+      if (timelineUserScrollTimer.current !== null) {
+        window.clearTimeout(timelineUserScrollTimer.current);
       }
     },
     []
@@ -1257,7 +1274,21 @@ export function App(): JSX.Element {
             className="timeline"
             role="log"
             aria-label="Agent activity timeline"
+            onWheel={markTimelineUserScroll}
+            onPointerDown={() => {
+              timelinePointerActive.current = true;
+            }}
+            onPointerMove={() => {
+              if (timelinePointerActive.current) markTimelineUserScroll();
+            }}
+            onPointerUp={() => {
+              timelinePointerActive.current = false;
+            }}
+            onPointerCancel={() => {
+              timelinePointerActive.current = false;
+            }}
             onScroll={(event) => {
+              if (!timelineUserScrolling.current) return;
               const element = event.currentTarget;
               followTimeline.current =
                 element.scrollHeight - element.scrollTop - element.clientHeight < 80;

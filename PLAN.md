@@ -666,7 +666,7 @@ candidate artifacts while preserving unrelated local work and leaving the canoni
       guidance, review, or parity changes.
 - [x] Run the complete pinned source, release-readiness, packaged-Electron, macOS distribution, and
       native broker verification gates.
-- [ ] Require protected Windows broker compilation in GitHub Actions.
+- [x] Require protected Windows broker compilation in GitHub Actions.
 - [ ] Push a release PR, merge only after required checks, tag the exact protected-main commit, and
       verify the immutable draft inventory.
 - [ ] Dispatch `publish-candidate`, approve the protected environment when requested, verify the
@@ -677,13 +677,15 @@ candidate artifacts while preserving unrelated local work and leaving the canoni
 
 - `src/runtime/workspace.ts`, `src/runtime/workspace-broker.ts`, `src/runtime/structured-files.ts`
 - `src/runtime/tools.ts`, `src/runtime/platform.ts`, `src/runtime/router-client.ts`, `src/runtime/ndjson.ts`
+- `src/renderer/App.tsx`, `tests/renderer/App.test.tsx` for the release-blocking follow-mode race
 - `native/`, `scripts/build-workspace-broker.mjs`, source-parity/provenance inputs, focused tests
 - `package.json`, `package-lock.json`, `packages/agent-launcher/`, `.github/workflows/`, release docs
 
 ### Expected Changes
 
 - create: descriptor-bound native broker source and immutable beta.17 candidate branch/tag
-- modify: security runtime, broker packaging, focused tests, release metadata, and this plan
+- modify: security runtime, broker packaging, focused tests, release metadata, the release-blocking
+  follow-mode race, and this plan
 - delete: no user-owned work, public artifacts, or prior immutable tags
 
 ### Do Not Modify
@@ -710,7 +712,7 @@ git status --short --branch
 - [x] The candidate diff contains only validated security fixes and required release metadata.
 - [x] Unrelated local work is recoverable from the documented preservation branch.
 - [x] All local gates pass under Node.js 25.9.0.
-- [ ] Protected Windows builds verify the broker.
+- [x] Protected Windows builds verify the broker.
 - [ ] `v0.1.0-beta.17`, GitHub prerelease, and npm `candidate` identify one exact artifact set.
 - [ ] npm `beta` and `latest` remain `0.1.0-beta.16`.
 - [ ] The canonical working directory is clean at handoff.
@@ -722,8 +724,8 @@ git status --short --branch
   `verify:dist` all pass. The full source gate passed 39 unit files (155 tests), three integration
   files (13 tests), 47 launcher tests, source parity, public-boundary, documentation, and workflow
   policy checks.
-- Protected CI/native build: broker compilation passes; the next Windows test rerun will validate
-  the corrected rename-buffer contract.
+- Protected CI/native build: Windows 11 x64 portability passed in run `31444587426`, including all
+  155 tests, launcher checks, Windows packaging, and distribution verification.
 - Candidate publication and anonymous verification: not run.
 
 ### Findings / Notes
@@ -740,10 +742,12 @@ git status --short --branch
   with a null root advanced to error 17: the wrapper resolved it from the process working directory
   on another volume. The broker now calls user-mode `NtSetInformationFile(FileRenameInformation)`
   at the same native layer as its existing `NtCreateFile` operations, with the reviewed target name
-  relative to the bound parent handle. The protected Windows rerun remains the acceptance gate.
-- The same protected run's macOS E2E job missed the timeline auto-scroll threshold by 118 pixels.
-  An immediate pinned-runtime packaged rerun passed both E2E tests, so CI must reproduce or clear
-  that timing failure before merge.
+  relative to the bound parent handle. The protected Windows rerun passed end to end.
+- Two protected macOS E2E runs missed the timeline auto-scroll threshold by 118 pixels while an
+  immediate pinned-runtime packaged rerun passed both tests. Responsive reflow could emit `scroll`
+  and incorrectly disable follow mode without user input. Follow-state changes now require recent
+  wheel or pointer-drag intent, with regression coverage for reflow and manual scrolling. CI must
+  clear the corrected packaged check before merge.
 - Physical Windows 11 downloaded-artifact acceptance and channel finalization remain out of scope.
 
 ---
