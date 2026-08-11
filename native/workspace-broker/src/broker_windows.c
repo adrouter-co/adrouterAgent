@@ -38,11 +38,16 @@
 #define FILE_OPEN_REPARSE_POINT 0x00200000
 #endif
 
+#define BROKER_FILE_RENAME_INFORMATION_CLASS ((FILE_INFORMATION_CLASS)10)
+
 typedef NTSTATUS(NTAPI *nt_create_file_fn)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES,
                                            PIO_STATUS_BLOCK, PLARGE_INTEGER, ULONG, ULONG, ULONG,
                                            ULONG, PVOID, ULONG);
+typedef NTSTATUS(NTAPI *nt_set_information_file_fn)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG,
+                                                    FILE_INFORMATION_CLASS);
 
 static nt_create_file_fn nt_create_file = NULL;
+static nt_set_information_file_fn nt_set_information_file = NULL;
 static LONG temporary_sequence = 0;
 
 static int fail_message(char *error, size_t error_size, const char *message) {
@@ -61,12 +66,21 @@ static int fail_status(char *error, size_t error_size, const char *action, NTSTA
 }
 
 static int ensure_nt_api(char *error, size_t error_size) {
-  if (nt_create_file != NULL) return 1;
+  if (nt_create_file != NULL && nt_set_information_file != NULL) return 1;
   HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
   if (ntdll == NULL) return fail_windows(error, error_size, "Unable to bind ntdll");
-  nt_create_file = (nt_create_file_fn)GetProcAddress(ntdll, "NtCreateFile");
+  if (nt_create_file == NULL) {
+    nt_create_file = (nt_create_file_fn)GetProcAddress(ntdll, "NtCreateFile");
+  }
   if (nt_create_file == NULL) {
     return fail_windows(error, error_size, "Unable to bind NtCreateFile");
+  }
+  if (nt_set_information_file == NULL) {
+    nt_set_information_file =
+        (nt_set_information_file_fn)GetProcAddress(ntdll, "NtSetInformationFile");
+  }
+  if (nt_set_information_file == NULL) {
+    return fail_windows(error, error_size, "Unable to bind NtSetInformationFile");
   }
   return 1;
 }
@@ -513,13 +527,16 @@ int broker_write(const char *root, const char *relative_path,
       ok = fail_message(error, error_size, "Unable to allocate workspace rename state.");
     } else {
       rename->ReplaceIfExists = expects_existing ? TRUE : FALSE;
-      /* The staging file already resides in the bound parent. A simple name
-         with no RootDirectory renames it within that exact directory. */
-      rename->RootDirectory = NULL;
+      rename->RootDirectory = bound.parent;
       rename->FileNameLength = (DWORD)name_bytes;
       memcpy(rename->FileName, bound.name, name_bytes);
-      if (!SetFileInformationByHandle(temporary, FileRenameInfo, rename, (DWORD)structure_bytes)) {
-        ok = fail_windows(error, error_size, "Unable to commit bound workspace replacement");
+      IO_STATUS_BLOCK io_status = {0};
+      NTSTATUS rename_status = nt_set_information_file(
+          temporary, &io_status, rename, (ULONG)structure_bytes,
+          BROKER_FILE_RENAME_INFORMATION_CLASS);
+      if (!NT_SUCCESS(rename_status)) {
+        ok = fail_status(error, error_size, "Unable to commit bound workspace replacement",
+                         rename_status);
       }
       free(rename);
     }
