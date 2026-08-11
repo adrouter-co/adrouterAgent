@@ -590,15 +590,31 @@ export class InstallationAuthManager {
       if (record) {
         const access = await this.ensureAccess(record);
         const body = exactJsonBytes({ installation_id: record.installationId });
-        const response = await this.fetchFn(`${record.origin}/v1/installation/revoke`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...this.protectedHeaders(record, access.token, 'POST', '/v1/installation/revoke', body),
-          },
-          body: Buffer.from(body),
-          redirect: 'manual',
-        });
+        const makeRequest = (nonce?: string): Promise<Response> =>
+          this.fetchFn(`${record.origin}/v1/installation/revoke`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...this.protectedHeaders(
+                record,
+                access.token,
+                'POST',
+                '/v1/installation/revoke',
+                body,
+                nonce
+              ),
+            },
+            body: Buffer.from(body),
+            redirect: 'manual',
+          });
+        let response = await makeRequest();
+        this.rejectRedirect(response);
+        const challenge = this.validNonce(response);
+        if (response.status === 401 && challenge) {
+          await response.body?.cancel().catch(() => undefined);
+          response = await makeRequest(challenge);
+          this.rejectRedirect(response);
+        }
         remoteRevocationConfirmed =
           response.ok || response.status === 404 || response.status === 410;
       }

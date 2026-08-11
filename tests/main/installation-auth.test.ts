@@ -468,6 +468,65 @@ describe('InstallationAuthManager', () => {
     expect(profilePayload).not.toHaveProperty('bht');
   });
 
+  it('retries installation revocation exactly once with the revoke-purpose nonce', async () => {
+    const { store } = await createStore();
+    const record = createRecord();
+    await store.completeEnrollment(
+      record,
+      bundledCatalogModels(),
+      bundledCatalogStatus(),
+      '2026-07-27T00:00:00.000Z'
+    );
+    let revokeAttempts = 0;
+    const fetchFn: typeof fetch = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v1/oauth/token')) {
+        return new Response(
+          JSON.stringify({
+            access_token: accessToken,
+            token_type: 'DPoP',
+            expires_in: 600,
+            refresh_token: rotatedRefreshToken,
+            refresh_expires_in: 2_592_000,
+            installation_id: record.installationId,
+            client_kind: 'desktop',
+            scope: 'agent:turn profile:read',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        );
+      }
+      expect(url).toBe('https://api-staging.adrouter.co/v1/installation/revoke');
+      revokeAttempts += 1;
+      if (revokeAttempts === 1) {
+        return new Response('', {
+          status: 401,
+          headers: { 'DPoP-Nonce': 'revoke-purpose-nonce' },
+        });
+      }
+      const headers = init?.headers as Record<string, string>;
+      const proof = headers.DPoP;
+      if (!proof) throw new Error('The revoke proof is missing.');
+      const encodedPayload = proof.split('.')[1];
+      if (!encodedPayload) throw new Error('The revoke proof is malformed.');
+      const payload = JSON.parse(
+        Buffer.from(encodedPayload, 'base64url').toString('utf8')
+      ) as Record<string, unknown>;
+      expect(payload.nonce).toBe('revoke-purpose-nonce');
+      return new Response(JSON.stringify({ status: 'revoked' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const manager = new InstallationAuthManager(store, '0.1.0-beta.18', { fetchFn });
+
+    await expect(manager.signOut()).resolves.toMatchObject({
+      remoteRevocationConfirmed: true,
+      configuration: { configured: false },
+    });
+    expect(revokeAttempts).toBe(2);
+    await expect(store.getInstallationRecord()).resolves.toBeUndefined();
+  });
+
   it('rejects non-allowlisted signing and clears local auth when remote revocation is offline', async () => {
     const { store } = await createStore();
     const record = createRecord();
