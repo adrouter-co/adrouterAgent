@@ -133,6 +133,9 @@ export type ThinkingLevel = z.infer<typeof ThinkingLevelSchema>;
 export const RuntimeModeSchema = z.enum(['auto', 'mock', 'live']);
 export type RuntimeMode = z.infer<typeof RuntimeModeSchema>;
 
+export const CacheOptimizationModeSchema = z.enum(['off', 'stats-only', 'prompt-rewrite']);
+export type CacheOptimizationMode = z.infer<typeof CacheOptimizationModeSchema>;
+
 export const SponsorTierSchema = z.enum(['A', 'B', 'C', 'NONE']);
 export type SponsorTier = z.infer<typeof SponsorTierSchema>;
 
@@ -681,6 +684,9 @@ export const OperationCapabilitySchema = z.enum([
   'git.push',
   'network.fetch',
   'delegation.start',
+  'delegation.status',
+  'delegation.message',
+  'delegation.cancel',
 ]);
 export type OperationCapability = z.infer<typeof OperationCapabilitySchema>;
 

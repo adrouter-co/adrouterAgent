@@ -108,6 +108,66 @@ describe('desktop tool approvals', () => {
     ]);
   });
 
+  it('exposes only bounded, approval-bound delegation lifecycle tools', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'adrouter-delegation-tools-'));
+    directories.push(workspace);
+    const requestApproval = vi.fn().mockResolvedValue('allow-once');
+    const executeOperation = vi.fn().mockResolvedValue({ ok: true });
+    const tools = createDesktopTools({
+      workspaceRoot: workspace,
+      permissionMode: 'read-only',
+      threadId: '11111111-1111-4111-8111-111111111111',
+      turnId: '22222222-2222-4222-8222-222222222222',
+      commandRunner: {} as SandboxedCommandRunner,
+      capabilityPolicy: {
+        schemaVersion: 1,
+        workspaceAccess: 'read-only',
+        fileMutations: false,
+        generalCommands: false,
+        networkFetch: false,
+        dependencyChanges: false,
+        gitWrites: false,
+        delegation: true,
+      },
+      executeOperation,
+      requestApproval,
+      emit: vi.fn(),
+    });
+    expect(tools.map((tool) => tool.name)).toEqual([
+      'list_files',
+      'read_file',
+      'search_text',
+      'delegate_task',
+      'delegated_children',
+      'message_delegated_child',
+      'cancel_delegated_child',
+      'git_status',
+      'git_diff',
+    ]);
+
+    const childThreadId = '33333333-3333-4333-8333-333333333333';
+    await tools.find((tool) => tool.name === 'delegated_children')?.execute('status', {});
+    await tools
+      .find((tool) => tool.name === 'message_delegated_child')
+      ?.execute('message', { childThreadId, prompt: 'Continue.' });
+    await tools
+      .find((tool) => tool.name === 'cancel_delegated_child')
+      ?.execute('cancel', { childThreadId });
+
+    expect(executeOperation.mock.calls.map(([manifest]) => manifest.capability)).toEqual([
+      'delegation.status',
+      'delegation.message',
+      'delegation.cancel',
+    ]);
+    expect(requestApproval).toHaveBeenCalledTimes(3);
+    for (const [approval] of requestApproval.mock.calls) {
+      expect(approval).toMatchObject({ version: 2, kind: 'delegation' });
+      expect(approval.operationManifest.targets).toEqual([]);
+      expect(approval.operationManifest.network).toBeNull();
+      expect(approval.operationManifest.git).toBeNull();
+    }
+  });
+
   it('loads only an indexed exact-digest skill and surfaces revocation without stale fallback', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'adrouter-guidance-tool-'));
     directories.push(workspace);

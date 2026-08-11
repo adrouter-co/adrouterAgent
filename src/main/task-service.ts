@@ -1,5 +1,10 @@
 import type { z } from 'zod';
-import { delegationArguments } from '../runtime/delegation';
+import {
+  delegationArguments,
+  delegationCancelArguments,
+  delegationMessageArguments,
+  delegationStatusArguments,
+} from '../runtime/delegation';
 import { captureGitTaskBaseline } from '../runtime/git-operations';
 import {
   type Approval,
@@ -289,8 +294,7 @@ export class TaskService {
     return approval;
   }
 
-  public async startDelegated(manifest: OperationManifestV1): Promise<Record<string, unknown>> {
-    const { title, prompt } = delegationArguments(manifest);
+  private delegationContext(manifest: OperationManifestV1) {
     const parent = this.database.getThread(manifest.threadId);
     if (!parent) throw new Error('Delegating task not found.');
     const project = this.database.getProject(parent.projectId);
@@ -301,12 +305,91 @@ export class TaskService {
     if (!effectiveTaskCapabilityPolicy(parentPolicy.capabilityPolicy).delegation) {
       throw new Error('Delegated tasks are disabled by this task policy.');
     }
+    return { parent, project, parentPolicy };
+  }
+
+  private ownedDelegatedChildren(parentId: string, projectId: string) {
+    return this.database
+      .listThreads(projectId)
+      .filter((thread) => thread.parentThreadId === parentId && !thread.forkedFromCheckpointId);
+  }
+
+  private ownedDelegatedChild(parentId: string, projectId: string, childThreadId: string) {
+    const child = this.database.getThread(childThreadId);
+    if (
+      !child ||
+      child.projectId !== projectId ||
+      child.parentThreadId !== parentId ||
+      child.forkedFromCheckpointId
+    ) {
+      throw new Error('The delegated child is not directly owned by this task.');
+    }
+    return child;
+  }
+
+  public async executeDelegation(manifest: OperationManifestV1): Promise<Record<string, unknown>> {
+    if (manifest.capability === 'delegation.status') {
+      delegationStatusArguments(manifest);
+      const { parent, project } = this.delegationContext(manifest);
+      return {
+        children: this.ownedDelegatedChildren(parent.id, project.id).map((child) => ({
+          childThreadId: child.id,
+          title: child.title,
+          status: child.status,
+          runtime: this.supervisor.threadRuntimeState(child.id),
+          updatedAt: child.updatedAt,
+        })),
+        ownership: { parentThreadId: parent.id, depth: 1, maximumChildren: 3 },
+      };
+    }
+    if (manifest.capability === 'delegation.message') {
+      const { childThreadId, prompt } = delegationMessageArguments(manifest);
+      const { parent, project } = this.delegationContext(manifest);
+      const child = this.ownedDelegatedChild(parent.id, project.id, childThreadId);
+      const runtime = this.supervisor.threadRuntimeState(child.id);
+      if (runtime !== 'stopped') {
+        this.supervisor.queueFollowUp(child.id, prompt);
+        return { childThreadId: child.id, delivery: 'follow-up', runtime };
+      }
+      if (child.status === 'interrupted' || child.status === 'blocked') {
+        this.database.continueInterruptedThread(child.id);
+      }
+      const turn = await this.start({
+        threadId: child.id,
+        input: prompt,
+        model: child.model,
+        thinkingLevel: child.thinkingLevel,
+        runtimeMode: 'auto',
+      });
+      return {
+        childThreadId: child.id,
+        childTurnId: turn.id,
+        delivery: 'resumed',
+        runtime: this.supervisor.threadRuntimeState(child.id),
+      };
+    }
+    if (manifest.capability === 'delegation.cancel') {
+      const { childThreadId } = delegationCancelArguments(manifest);
+      const { parent, project } = this.delegationContext(manifest);
+      const child = this.ownedDelegatedChild(parent.id, project.id, childThreadId);
+      const runtime = this.supervisor.threadRuntimeState(child.id);
+      if (runtime !== 'stopped') this.stop(child.id);
+      return {
+        childThreadId: child.id,
+        status: runtime === 'stopped' ? child.status : 'cancelling',
+        alreadyStopped: runtime === 'stopped',
+      };
+    }
+    return this.startDelegated(manifest);
+  }
+
+  public async startDelegated(manifest: OperationManifestV1): Promise<Record<string, unknown>> {
+    const { title, prompt } = delegationArguments(manifest);
+    const { parent, project, parentPolicy } = this.delegationContext(manifest);
     if (parent.parentThreadId && !parent.forkedFromCheckpointId) {
       throw new Error('Delegated child tasks cannot delegate again.');
     }
-    const children = this.database
-      .listThreads(project.id)
-      .filter((thread) => thread.parentThreadId === parent.id && !thread.forkedFromCheckpointId);
+    const children = this.ownedDelegatedChildren(parent.id, project.id);
     if (children.length >= 3) {
       throw new Error('This task already owns the maximum of three delegated children.');
     }

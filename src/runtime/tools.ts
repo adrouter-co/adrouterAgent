@@ -11,7 +11,12 @@ import { createId, now } from '../shared/security';
 import { effectiveTaskCapabilityPolicy, fullTaskCapabilityPolicy } from '../shared/task-policy';
 import { approvalAllowsCommand, classifyCommand } from './command-policy';
 import type { SandboxedCommandRunner } from './command-runner';
-import { createDelegationManifest } from './delegation';
+import {
+  createDelegationCancelManifest,
+  createDelegationManifest,
+  createDelegationMessageManifest,
+  createDelegationStatusManifest,
+} from './delegation';
 import {
   createDependencyApplyManifest,
   createDependencyPreviewManifest,
@@ -972,6 +977,134 @@ export const createDesktopTools = (options: DesktopToolOptions): AgentTool[] => 
     },
   };
 
+  const delegatedChildren: AgentTool = {
+    name: 'delegated_children',
+    label: 'Inspect delegated children',
+    description:
+      'Return bounded status for this task’s directly owned delegated children. Requires one exact allow-once review and cannot inspect unrelated tasks.',
+    parameters: Type.Object({}),
+    executionMode: 'sequential',
+    execute: async (_toolCallId, _params, signal) => {
+      if (!options.executeOperation)
+        return errorContent('The structured operation broker is unavailable.');
+      try {
+        const manifest = await createDelegationStatusManifest({
+          threadId: options.threadId,
+          turnId: options.turnId,
+          workspaceRoot: options.workspaceRoot,
+        });
+        const decision = await options.requestApproval(
+          {
+            version: 2,
+            id: manifest.operationId,
+            kind: 'delegation',
+            argv: manifest.argv,
+            path: null,
+            cwd: manifest.workspace,
+            risk: 'low',
+            reason: `Inspect the status of this task’s directly owned delegated children. Exact binding: ${manifest.binding}.`,
+            operationManifest: manifest,
+            expiresAt: manifest.expiresAt,
+          },
+          signal
+        );
+        if (decision !== 'allow-once')
+          return errorContent('Delegated child inspection was denied.');
+        const result = await options.executeOperation(manifest, signal);
+        return { content: [{ type: 'text', text: JSON.stringify(result) }], details: result };
+      } catch (error) {
+        return errorContent(error instanceof Error ? error.message : String(error));
+      }
+    },
+  };
+
+  const messageDelegatedChild: AgentTool = {
+    name: 'message_delegated_child',
+    label: 'Follow up delegated child',
+    description:
+      'Send one bounded follow-up to a directly owned child. Active children queue it; stopped children resume through the normal task scheduler.',
+    parameters: Type.Object({
+      childThreadId: Type.String({ minLength: 36, maxLength: 36 }),
+      prompt: Type.String({ minLength: 1, maxLength: 8_192 }),
+    }),
+    executionMode: 'sequential',
+    execute: async (_toolCallId, params, signal) => {
+      if (!options.executeOperation)
+        return errorContent('The structured operation broker is unavailable.');
+      try {
+        const input = params as { childThreadId: string; prompt: string };
+        const manifest = await createDelegationMessageManifest({
+          threadId: options.threadId,
+          turnId: options.turnId,
+          workspaceRoot: options.workspaceRoot,
+          ...input,
+        });
+        const decision = await options.requestApproval(
+          {
+            version: 2,
+            id: manifest.operationId,
+            kind: 'delegation',
+            argv: manifest.argv,
+            path: null,
+            cwd: manifest.workspace,
+            risk: 'high',
+            reason: `Send one exact follow-up to directly owned child ${input.childThreadId}. Exact binding: ${manifest.binding}.`,
+            operationManifest: manifest,
+            expiresAt: manifest.expiresAt,
+          },
+          signal
+        );
+        if (decision !== 'allow-once') return errorContent('The delegated follow-up was denied.');
+        const result = await options.executeOperation(manifest, signal);
+        return { content: [{ type: 'text', text: JSON.stringify(result) }], details: result };
+      } catch (error) {
+        return errorContent(error instanceof Error ? error.message : String(error));
+      }
+    },
+  };
+
+  const cancelDelegatedChild: AgentTool = {
+    name: 'cancel_delegated_child',
+    label: 'Cancel delegated child',
+    description: 'Cancel one active or queued directly owned delegated child after exact review.',
+    parameters: Type.Object({ childThreadId: Type.String({ minLength: 36, maxLength: 36 }) }),
+    executionMode: 'sequential',
+    execute: async (_toolCallId, params, signal) => {
+      if (!options.executeOperation)
+        return errorContent('The structured operation broker is unavailable.');
+      try {
+        const input = params as { childThreadId: string };
+        const manifest = await createDelegationCancelManifest({
+          threadId: options.threadId,
+          turnId: options.turnId,
+          workspaceRoot: options.workspaceRoot,
+          ...input,
+        });
+        const decision = await options.requestApproval(
+          {
+            version: 2,
+            id: manifest.operationId,
+            kind: 'delegation',
+            argv: manifest.argv,
+            path: null,
+            cwd: manifest.workspace,
+            risk: 'high',
+            reason: `Cancel directly owned delegated child ${input.childThreadId}. Exact binding: ${manifest.binding}.`,
+            operationManifest: manifest,
+            expiresAt: manifest.expiresAt,
+          },
+          signal
+        );
+        if (decision !== 'allow-once')
+          return errorContent('Delegated child cancellation was denied.');
+        const result = await options.executeOperation(manifest, signal);
+        return { content: [{ type: 'text', text: JSON.stringify(result) }], details: result };
+      } catch (error) {
+        return errorContent(error instanceof Error ? error.message : String(error));
+      }
+    },
+  };
+
   const trustedSkills = options.trustedSkills ?? [];
   const loadGuidance: AgentTool = {
     name: 'load_guidance',
@@ -1029,7 +1162,9 @@ export const createDesktopTools = (options: DesktopToolOptions): AgentTool[] => 
           gitTool('git_push'),
         ]
       : []),
-    ...(capabilities.delegation ? [delegateTask] : []),
+    ...(capabilities.delegation
+      ? [delegateTask, delegatedChildren, messageDelegatedChild, cancelDelegatedChild]
+      : []),
     ...(options.commandsEnabled === false
       ? []
       : [

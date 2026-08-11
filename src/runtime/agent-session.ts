@@ -10,6 +10,9 @@ import {
   type Api,
   type AssistantMessage,
   type Context,
+  type Credential,
+  type CredentialInfo,
+  type CredentialStore,
   createModels,
   type Model,
   type Models,
@@ -17,15 +20,15 @@ import {
 } from '@earendil-works/pi-ai';
 import {
   AgentSession,
-  AuthStorage,
   DefaultResourceLoader,
-  ModelRegistry,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
 } from '@earendil-works/pi-coding-agent';
 import type { ApprovalDecision, OperationManifestV1, Sponsor } from '../shared/contracts';
 import type { RuntimeEvent, RuntimeStartSchema } from '../shared/runtime-protocol';
 import { containsSponsorKey, now, removeSponsorData, safeRecord } from '../shared/security';
+import { type OptimizedPrompt, optimizeDesktopPrompt } from './cache-optimizer';
 import { SandboxedCommandRunner } from './command-runner';
 import {
   COMPACTION_SETTINGS,
@@ -276,12 +279,15 @@ export const historyToMessages = (history: RuntimeStart['history']): AgentMessag
   return messages;
 };
 
-const systemPrompt = (input: RuntimeStart): string =>
-  [
-    'You are AdRouter Agent, a careful desktop coding agent.',
-    'Work only through the supplied desktop tools. Do not ask for shell strings; use argv arrays.',
-    'Respect repository instructions and project permissions. Explain plans and final evidence concisely.',
-    'Never discuss, request, infer, or use sponsor data. Sponsorship is not part of your task context.',
+const STABLE_SYSTEM_PROMPT = [
+  'You are AdRouter Agent, a careful desktop coding agent.',
+  'Work only through the supplied desktop tools. Do not ask for shell strings; use argv arrays.',
+  'Respect repository instructions and project permissions. Explain plans and final evidence concisely.',
+  'Never discuss, request, infer, or use sponsor data. Sponsorship is not part of your task context.',
+].join('\n\n');
+
+const systemPrompt = (input: RuntimeStart): OptimizedPrompt => {
+  const dynamicPrompt = [
     input.project.repositoryInstructions
       ? `Repository instructions:\n${input.project.repositoryInstructions}`
       : '',
@@ -300,9 +306,44 @@ const systemPrompt = (input: RuntimeStart): string =>
           )
           .join('\n')}`
       : '',
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+  ].filter(Boolean);
+  const raw = [STABLE_SYSTEM_PROMPT, ...dynamicPrompt].join('\n\n');
+  return optimizeDesktopPrompt({
+    systemPrompt: raw,
+    stablePrefixEnd: STABLE_SYSTEM_PROMPT.length,
+    modelId: input.model.id,
+    mode: input.cacheOptimizationMode,
+  });
+};
+
+const inMemoryRuntimeCredentials = (): CredentialStore => {
+  const values = new Map<string, Credential>([['adrouter', { type: 'api_key', key: 'runtime' }]]);
+  const assertActive = (signal?: AbortSignal): void => signal?.throwIfAborted();
+  return {
+    read: async (providerId, options) => {
+      assertActive(options?.signal);
+      return values.get(providerId);
+    },
+    list: async (options): Promise<readonly CredentialInfo[]> => {
+      assertActive(options?.signal);
+      return [...values.entries()].map(([providerId, credential]) => ({
+        providerId,
+        type: credential.type,
+      }));
+    },
+    modify: async (providerId, operation, options) => {
+      assertActive(options?.signal);
+      const next = await operation(values.get(providerId));
+      assertActive(options?.signal);
+      if (next !== undefined) values.set(providerId, next);
+      return values.get(providerId);
+    },
+    delete: async (providerId, options) => {
+      assertActive(options?.signal);
+      values.delete(providerId);
+    },
+  };
+};
 
 const describeImportantMessage = (message: AgentMessage): string | undefined => {
   if (!('content' in message)) {
@@ -818,7 +859,8 @@ export class DesktopAgentSession {
       emit: (type, payload) =>
         this.emit({ type, turnId: this.start.turnId, timestamp: now(), payload }),
     });
-    const agentSystemPrompt = systemPrompt(this.start);
+    const optimizedPrompt = systemPrompt(this.start);
+    const agentSystemPrompt = optimizedPrompt.systemPrompt;
     this.emit({
       type: 'diagnostic',
       turnId: this.start.turnId,
@@ -826,6 +868,14 @@ export class DesktopAgentSession {
       payload: {
         message: 'Active prompt sources were resolved before this task started.',
         promptSources: this.start.project.promptSources,
+        cacheOptimization: {
+          mode: optimizedPrompt.mode,
+          eligible: optimizedPrompt.eligible,
+          rewriteApplied: optimizedPrompt.changed,
+          stablePrefixBytes: optimizedPrompt.stablePrefixBytes,
+          telemetry:
+            optimizedPrompt.mode === 'off' ? 'core-accounting-only' : 'normalized-settlement',
+        },
       },
     });
     const models = createModels();
@@ -870,16 +920,13 @@ export class DesktopAgentSession {
           state: this.compactionState,
         }),
     });
-    const authStorage = AuthStorage.inMemory({ adrouter: { type: 'api_key', key: 'runtime' } });
-    const modelRegistry = ModelRegistry.inMemory(authStorage);
-    modelRegistry.registerProvider('adrouter', {
-      name: 'AdRouter',
-      baseUrl: provider.model.baseUrl,
-      apiKey: 'runtime',
-      api: provider.model.api,
-      streamSimple: provider.stream,
-      models: [provider.model],
+    const modelRuntime = await ModelRuntime.create({
+      credentials: inMemoryRuntimeCredentials(),
+      modelsPath: null,
+      allowModelNetwork: false,
+      refreshOnCreate: false,
     });
+    modelRuntime.registerNativeProvider(provider.provider);
     const settingsManager = SettingsManager.inMemory({
       steeringMode: 'one-at-a-time',
       followUpMode: 'one-at-a-time',
@@ -901,7 +948,7 @@ export class DesktopAgentSession {
       settingsManager,
       cwd: this.start.project.path,
       resourceLoader,
-      modelRegistry,
+      modelRuntime,
       baseToolsOverride: Object.fromEntries(tools.map((tool) => [tool.name, tool])),
       allowedToolNames: tools.map((tool) => tool.name),
     });

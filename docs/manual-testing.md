@@ -194,9 +194,19 @@ executable policy or authority.
 
 Enable delegation only for a disposable project. Confirm each child requires the high-risk parent
 approval, inherits the exact project/model/policy but no parent conversation, is visible and
-cancellable, cannot delegate again, and that no parent starts more than three children. The normal
-desktop runtime executes one task at a time; workspace/Git leases must still serialize writers if
-the internal scheduler is exercised directly in tests.
+cancellable, cannot delegate again, and that no parent starts more than three children. From the
+parent, inspect child status, queue a follow-up while one child is active/queued, resume an
+interrupted child, and cancel one; each action must require a fresh exact approval and must reject a
+child owned by another parent. The normal desktop runtime executes one task at a time; workspace/Git
+leases must still serialize writers if the internal scheduler is exercised directly in tests.
+
+Run one default task without setting `ADROUTER_CACHE_OPTIMIZER` and confirm cache read/write values
+come only from Router settlements. Repeat with `off` and confirm accounting remains present while no
+rewrite is applied. For an explicit disposable DeepSeek canary, launch with
+`ADROUTER_CACHE_OPTIMIZER=prompt-rewrite`, confirm the diagnostic reports DeepSeek eligibility, and
+compare captured request bodies to prove only line endings in the app-owned stable system prefix can
+change; project, repository, bundle, preset, skill-index, user, sponsor, and Router framing bytes
+must remain unchanged. A non-DeepSeek model must remain byte-neutral in the same mode.
 
 Pair the CLI with the running app and compare the GUI code. Confirm its private key remains in
 Electron `safeStorage`; the short `/tmp` Unix endpoint has a current-user-owned mode-0700 parent and

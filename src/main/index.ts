@@ -135,7 +135,7 @@ const initializeApplication = async (): Promise<void> => {
   const tasks = new TaskService(database, configuration, supervisor, (event) =>
     subscriptions?.publish(event)
   );
-  supervisor.setDelegationHandler((manifest) => tasks.startDelegated(manifest));
+  supervisor.setDelegationHandler((manifest) => tasks.executeDelegation(manifest));
   const sessions = new SessionService(database);
   const signedUpdates = new SignedUpdateService(app.getVersion());
   const gitWorkflows = new GitWorkflowService(

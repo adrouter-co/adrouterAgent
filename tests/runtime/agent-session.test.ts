@@ -79,6 +79,7 @@ describe('durable agent context', () => {
         model: { ...canonicalModel, configured: true },
         thinkingLevel: 'medium',
         runtimeMode: 'mock',
+        cacheOptimizationMode: 'stats-only',
         sponsoredCompute: true,
         router: {
           authMode: 'custom_bearer',
@@ -106,6 +107,20 @@ describe('durable agent context', () => {
       expect.objectContaining({
         type: 'message.complete',
         payload: expect.objectContaining({ text: 'finished' }),
+      })
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'diagnostic',
+        payload: expect.objectContaining({
+          cacheOptimization: {
+            mode: 'stats-only',
+            eligible: true,
+            rewriteApplied: false,
+            stablePrefixBytes: expect.any(Number),
+            telemetry: 'normalized-settlement',
+          },
+        }),
       })
     );
   }, 10_000);

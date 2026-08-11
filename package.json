@@ -55,9 +55,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.65",
-    "@earendil-works/pi-agent-core": "0.80.6",
-    "@earendil-works/pi-ai": "0.80.6",
-    "@earendil-works/pi-coding-agent": "0.80.6",
+    "@earendil-works/pi-agent-core": "0.84.1",
+    "@earendil-works/pi-ai": "0.84.1",
+    "@earendil-works/pi-coding-agent": "0.84.1",
     "@monaco-editor/react": "4.7.0",
     "lucide-react": "0.546.0",
     "monaco-editor": "0.55.1",
