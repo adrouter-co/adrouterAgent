@@ -377,6 +377,7 @@ The desktop exposes a fixed, intentionally small tool surface:
 | structured Git tools | Every call | Agent-side Git writes use exact bindings; GUI Git writes require their own second-click decision. |
 | `run_command` | Every general command | Exact argv, selected workspace as cwd, bounded timeout, and task-policy-selected read/write sandbox. |
 | `delegate_task` | Every call | At most three visible depth-one children; children inherit policy with delegation disabled. |
+| delegated child status/message/cancel | Every call | Direct ownership only; messages queue or resume through normal tasks, and cancellation uses normal stop. |
 
 The task snapshot's workspace ceiling can be `workspace-write` or `read-only`. Newly opened projects
 default to writable for future tasks, but a preset can reduce it. In read-only mode all file,
@@ -426,6 +427,12 @@ settlement and usage data after the stream.
 The desktop may display sponsor content, tier, subsidy, cost, amount paid, and
 token/cache usage in the timeline and Settings. These events are stored for
 economics and completion reporting, but they are not agent context.
+
+Cache statistics use only the Router-normalized settlement counters. The native cache optimizer
+defaults to request-byte-neutral `stats-only`; `ADROUTER_CACHE_OPTIMIZER=off` is the local kill
+switch, while `prompt-rewrite` is an explicit DeepSeek-only opt-in that touches only the app-owned
+stable instruction prefix. It does not add hosted request fields, provider configuration, or
+executable extensions. See [Pi and external-feature updates](upstream-updates.md).
 
 Before model inference and tool execution, sponsor/economics fields are
 removed and checked. Sponsor content is never placed in:

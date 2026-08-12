@@ -72,7 +72,72 @@ for (const name of [
   '@earendil-works/pi-ai',
   '@earendil-works/pi-coding-agent',
 ]) {
-  assert.equal(packageJson.dependencies[name], '0.80.6', `${name} must remain pinned`);
+  assert.equal(packageJson.dependencies[name], '0.84.1', `${name} must remain pinned`);
+  assert.equal(
+    lock.packages[`node_modules/${name}`].version,
+    '0.84.1',
+    `${name} root lock resolution must remain exact`
+  );
+  const physical = JSON.parse(readFileSync(resolve('node_modules', name, 'package.json'), 'utf8'));
+  assert.equal(physical.version, '0.84.1', `${name} physical resolution must remain exact`);
+}
+
+for (const name of ['@earendil-works/pi-client', '@earendil-works/pi-protocol']) {
+  assert.equal(
+    packageJson.dependencies[name],
+    undefined,
+    `${name} must remain transitive-only and cannot gain direct product authority`
+  );
+  const nestedKey = `node_modules/@earendil-works/pi-coding-agent/node_modules/${name}`;
+  assert.equal(
+    lock.packages[nestedKey].version,
+    '0.84.1',
+    `${name} transitive lock resolution must match the frozen Pi release`
+  );
+  const physical = JSON.parse(
+    readFileSync(
+      resolve(
+        'node_modules',
+        '@earendil-works',
+        'pi-coding-agent',
+        'node_modules',
+        name,
+        'package.json'
+      ),
+      'utf8'
+    )
+  );
+  assert.equal(physical.version, '0.84.1', `${name} transitive physical resolution must be exact`);
+}
+
+const agentSessionSource = readFileSync(resolve('src', 'runtime', 'agent-session.ts'), 'utf8');
+for (const boundary of [
+  'noExtensions: true',
+  'noSkills: true',
+  'noPromptTemplates: true',
+  'baseToolsOverride:',
+  'allowedToolNames:',
+]) {
+  assert.ok(agentSessionSource.includes(boundary), `Pi resource boundary is missing ${boundary}`);
+}
+for (const optionalPackage of ['@earendil-works/pi-client', '@earendil-works/pi-protocol']) {
+  assert.ok(
+    !agentSessionSource.includes(optionalPackage),
+    `${optionalPackage} must not be imported by the desktop runtime`
+  );
+}
+const cacheOptimizerSource = readFileSync(resolve('src', 'runtime', 'cache-optimizer.ts'), 'utf8');
+for (const forbidden of [
+  'models.json',
+  'registerProvider(',
+  'promptCacheKey',
+  'fetch(',
+  'writeFile',
+]) {
+  assert.ok(
+    !cacheOptimizerSource.includes(forbidden),
+    `desktop cache optimization gained forbidden authority: ${forbidden}`
+  );
 }
 
 const crossZipPackage = JSON.parse(

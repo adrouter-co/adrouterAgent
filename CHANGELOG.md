@@ -2,6 +2,20 @@
 
 All notable changes to AdRouter Agent are documented here.
 
+## [0.1.0-beta.19] - 2026-08-12
+
+### Added
+
+- Added desktop-native `off`, request-neutral `stats-only`, and opt-in DeepSeek stable-prefix cache
+  modes while retaining Router settlement counters as the only cache telemetry source.
+- Added exact approval-bound status, follow-up/resume, and cancellation for directly owned
+  depth-one delegated tasks through the normal task scheduler.
+
+### Changed
+
+- Updated the exact Pi agent dependencies from 0.80.6 to 0.84.1 and adapted to Pi's model-runtime
+  API without enabling executable extensions, provider files, or remote client/protocol authority.
+
 ## [0.1.0-beta.18] - 2026-08-11
 
 ### Security
@@ -315,6 +329,7 @@ All notable changes to AdRouter Agent are documented here.
 - Updates are downloaded and installed manually.
 - A reachable AdRouter server and valid bearer token are required.
 
+[0.1.0-beta.19]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.19
 [0.1.0-beta.18]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.18
 [0.1.0-beta.17]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.17
 [0.1.0-beta.16]: https://github.com/adrouter/adrouterAgent/releases/tag/v0.1.0-beta.16

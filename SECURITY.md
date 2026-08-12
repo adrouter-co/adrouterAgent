@@ -7,7 +7,8 @@ should manually install the relevant current channel before reporting a problem.
 
 | Version | Supported |
 | --- | --- |
-| 0.1.0-beta.18 (`candidate`) | Yes |
+| 0.1.0-beta.19 (`candidate`) | Yes |
+| 0.1.0-beta.18 | No |
 | 0.1.0-beta.17 | No |
 | 0.1.0-beta.16 (`beta`, `latest`) | Yes |
 | 0.1.0-beta.15 | No |
@@ -56,6 +57,13 @@ one-use approval. Project-owned Markdown is accepted only from bounded `.adroute
 `.adrouter/prompts` paths, rejects symlinks/binary/executable-shaped or malformed resources, and is
 inactive until its exact path and digest are trusted. Changed or revoked skills cannot fall back to
 their prior content. Prompt templates require an explicit insert action and never auto-submit.
+
+The desktop pins its Pi packages exactly but does not enable Pi executable extensions, provider
+profiles, themes, context discovery, remote client/protocol surfaces, or arbitrary skills. Its Pi
+model runtime uses app-owned in-memory credentials and a fixed desktop tool allowlist. Native cache
+optimization cannot write provider configuration or hosted cache fields. Delegation creates only
+directly owned visible tasks; status, follow-up/resume, and cancellation remain exact,
+approval-bound, depth-one operations through the normal scheduler.
 
 Local automation never listens on TCP. On macOS and Linux it uses a short deterministic socket
 under `/tmp`, inside a directory that must be a real mode-0700 directory owned by the current user;

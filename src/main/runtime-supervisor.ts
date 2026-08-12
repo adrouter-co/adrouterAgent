@@ -1,4 +1,5 @@
 import { type UtilityProcess, utilityProcess } from 'electron';
+import { resolveCacheOptimizationMode } from '../runtime/cache-optimizer';
 import {
   GUIDANCE_PROTOCOL_VERSION,
   INSTALLATION_AUTH_PROTOCOL_VERSION,
@@ -56,6 +57,7 @@ interface PendingRuntime {
   input: StartRuntimeInput;
   router: RuntimeRouterConfiguration;
   lease: RuntimeLease;
+  followUps: string[];
 }
 
 export interface StartRuntimeInput {
@@ -144,7 +146,7 @@ export class RuntimeSupervisor {
       project.path,
       effectiveTaskCapabilityPolicy(policy.capabilityPolicy).workspaceAccess
     );
-    const pending: PendingRuntime = { input, router, lease };
+    const pending: PendingRuntime = { input, router, lease, followUps: [] };
     this.pending.set(input.threadId, pending);
     try {
       this.scheduler.enqueue({
@@ -276,6 +278,7 @@ export class RuntimeSupervisor {
         model: input.model,
         thinkingLevel: input.thinkingLevel,
         runtimeMode: input.runtimeMode,
+        cacheOptimizationMode: resolveCacheOptimizationMode().mode,
         sponsoredCompute: router.sponsoredCompute,
         router:
           router.authMode === 'installation'
@@ -290,6 +293,12 @@ export class RuntimeSupervisor {
         allowedCommands: [],
       },
     } satisfies RuntimePortMessage);
+    for (const followUp of pending.followUps) {
+      child.postMessage({
+        kind: 'request',
+        request: { type: 'queue-follow-up', input: followUp },
+      } satisfies RuntimePortMessage);
+    }
   }
 
   public steer(threadId: string, input: string): void {
@@ -297,6 +306,13 @@ export class RuntimeSupervisor {
   }
 
   public queueFollowUp(threadId: string, input: string): void {
+    const pending = this.pending.get(threadId);
+    if (pending) {
+      if (pending.followUps.length >= 16)
+        throw new Error('The queued follow-up limit was reached.');
+      pending.followUps.push(input);
+      return;
+    }
     this.send(this.getActive(threadId), {
       type: 'queue-follow-up',
       input,
@@ -304,7 +320,18 @@ export class RuntimeSupervisor {
   }
 
   public clearQueue(threadId: string): void {
+    const pending = this.pending.get(threadId);
+    if (pending) {
+      pending.followUps.length = 0;
+      return;
+    }
     this.send(this.getActive(threadId), { type: 'clear-queue' });
+  }
+
+  public threadRuntimeState(threadId: string): 'active' | 'queued' | 'stopped' {
+    if (this.active.has(threadId)) return 'active';
+    if (this.pending.has(threadId)) return 'queued';
+    return 'stopped';
   }
 
   public stop(threadId: string): void {
@@ -503,14 +530,13 @@ export class RuntimeSupervisor {
     const controller = new AbortController();
     active.operationControllers.set(request.requestId, controller);
     try {
-      const result =
-        request.manifest.capability === 'delegation.start'
-          ? await this.executeDelegation(request.manifest, controller.signal)
-          : await this.operationBroker.execute(request.manifest, controller.signal, {
-              workspaceWriteAllowed:
-                effectiveTaskCapabilityPolicy(policy.capabilityPolicy).workspaceAccess ===
-                'workspace-write',
-            });
+      const result = request.manifest.capability.startsWith('delegation.')
+        ? await this.executeDelegation(request.manifest, controller.signal)
+        : await this.operationBroker.execute(request.manifest, controller.signal, {
+            workspaceWriteAllowed:
+              effectiveTaskCapabilityPolicy(policy.capabilityPolicy).workspaceAccess ===
+              'workspace-write',
+          });
       if (this.isCurrent(active) && !active.closing && !controller.signal.aborted) {
         active.child.postMessage({
           kind: 'operation-response',

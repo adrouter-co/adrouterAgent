@@ -6,7 +6,14 @@ import type { ConfigurationStore } from '@/main/configuration-store';
 import { AppDatabase } from '@/main/database';
 import type { RuntimeSupervisor } from '@/main/runtime-supervisor';
 import { TaskService } from '@/main/task-service';
-import { createDelegationManifest, delegationArguments } from '@/runtime/delegation';
+import {
+  createDelegationCancelManifest,
+  createDelegationManifest,
+  createDelegationMessageManifest,
+  createDelegationStatusManifest,
+  delegationArguments,
+  delegationMessageArguments,
+} from '@/runtime/delegation';
 import { bundledCatalogModels } from '@/shared/model-catalog';
 
 const directories: string[] = [];
@@ -52,6 +59,9 @@ const setup = async () => {
   const supervisor = {
     hasTasks: false,
     hasThread: vi.fn().mockReturnValue(false),
+    threadRuntimeState: vi.fn().mockReturnValue('stopped'),
+    queueFollowUp: vi.fn(),
+    stop: vi.fn(),
     start: vi.fn().mockResolvedValue(undefined),
   } as unknown as RuntimeSupervisor;
   const tasks = new TaskService(database, configuration, supervisor, () => undefined);
@@ -175,6 +185,109 @@ describe('bounded delegated child tasks', () => {
         argv: ['Changed title', boundPrompt],
       })
     ).toThrow(/binding was modified/);
+    database.close();
+  });
+
+  it('reports, follows up, resumes, and cancels only directly owned children', async () => {
+    const { database, parent, parentTurn, supervisor, tasks, manifest, workspace } = await setup();
+    const started = await tasks.startDelegated(manifest);
+    const childThreadId = String(started.childThreadId);
+
+    const statusManifest = await createDelegationStatusManifest({
+      threadId: parent.id,
+      turnId: parentTurn.id,
+      workspaceRoot: workspace,
+    });
+    await expect(tasks.executeDelegation(statusManifest)).resolves.toMatchObject({
+      children: [{ childThreadId, runtime: 'stopped' }],
+      ownership: { parentThreadId: parent.id, depth: 1, maximumChildren: 3 },
+    });
+
+    vi.mocked(supervisor.threadRuntimeState).mockReturnValue('active');
+    const messageManifest = await createDelegationMessageManifest({
+      threadId: parent.id,
+      turnId: parentTurn.id,
+      workspaceRoot: workspace,
+      childThreadId,
+      prompt: 'Report current progress.',
+    });
+    await expect(tasks.executeDelegation(messageManifest)).resolves.toMatchObject({
+      childThreadId,
+      delivery: 'follow-up',
+      runtime: 'active',
+    });
+    expect(supervisor.queueFollowUp).toHaveBeenCalledWith(
+      childThreadId,
+      'Report current progress.'
+    );
+
+    const cancelManifest = await createDelegationCancelManifest({
+      threadId: parent.id,
+      turnId: parentTurn.id,
+      workspaceRoot: workspace,
+      childThreadId,
+    });
+    await expect(tasks.executeDelegation(cancelManifest)).resolves.toMatchObject({
+      childThreadId,
+      status: 'cancelling',
+      alreadyStopped: false,
+    });
+    expect(supervisor.stop).toHaveBeenCalledWith(childThreadId);
+
+    const boundPrompt = messageManifest.argv?.[1];
+    if (!boundPrompt) throw new Error('Expected bound follow-up.');
+    expect(() =>
+      delegationMessageArguments({
+        ...messageManifest,
+        argv: ['44444444-4444-4444-8444-444444444444', boundPrompt],
+      })
+    ).toThrow(/binding was modified/);
+    database.close();
+  });
+
+  it('resumes an interrupted child through the normal scheduler and rejects foreign children', async () => {
+    const { database, project, parent, parentTurn, model, supervisor, tasks, manifest, workspace } =
+      await setup();
+    const started = await tasks.startDelegated(manifest);
+    const childThreadId = String(started.childThreadId);
+    database.updateThreadStatus(childThreadId, 'interrupted');
+    vi.mocked(supervisor.threadRuntimeState).mockReturnValue('stopped');
+
+    const resumeManifest = await createDelegationMessageManifest({
+      threadId: parent.id,
+      turnId: parentTurn.id,
+      workspaceRoot: workspace,
+      childThreadId,
+      prompt: 'Resume and finish the report.',
+    });
+    await expect(tasks.executeDelegation(resumeManifest)).resolves.toMatchObject({
+      childThreadId,
+      childTurnId: expect.any(String),
+      delivery: 'resumed',
+    });
+    expect(supervisor.start).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        threadId: childThreadId,
+        input: 'Resume and finish the report.',
+      }),
+      expect.anything()
+    );
+
+    const foreignParent = database.createThread({
+      projectId: project.id,
+      title: 'Foreign parent',
+      model: model.id,
+      thinkingLevel: model.defaultThinkingLevel,
+    });
+    const foreignTurn = database.createTurn(foreignParent.id, 'Coordinate other work');
+    const foreignManifest = await createDelegationMessageManifest({
+      threadId: foreignParent.id,
+      turnId: foreignTurn.id,
+      workspaceRoot: workspace,
+      childThreadId,
+      prompt: 'Attempt cross-parent control.',
+    });
+    await expect(tasks.executeDelegation(foreignManifest)).rejects.toThrow(/not directly owned/);
     database.close();
   });
 

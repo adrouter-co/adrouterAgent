@@ -4,10 +4,9 @@
 
 Close the remaining safe, desktop-appropriate gaps between AdRouter Agent and AdRouterCLI while
 preserving the Agent's stronger sandbox, approval, identity, sponsor-privacy, and GUI boundaries.
-The original parity and UI work now ships through accepted beta.16. Steps H and I retain beta.16
-and beta.17 release history. Exact-artifact beta.17 acceptance exposed a revoke-purpose DPoP nonce
-defect, so Step J fixes forward as beta.18; public `beta`/`latest` remain on beta.16 until beta.18
-passes primary macOS and physical Windows acceptance and receives separate finalization approval.
+The original parity and UI work ships through accepted beta.16. Step I prepares beta.17 security;
+the newly authorized rollout finalizes that exact security release before publishing the Pi/cache/
+delegation implementation as the next immutable desktop candidate.
 
 ## Context
 
@@ -50,8 +49,8 @@ passes primary macOS and physical Windows acceptance and receives separate final
   stays, but the default and public claims must match those constraints.
 - GitHub protected environments can hold candidate publication until their review rules pass, and
   npm trusted publishing binds publication to the reviewed workflow through OIDC.
-- Public beta.16 and published candidate beta.17 are immutable. Beta.17 failed exact-artifact
-  acceptance, so the security fix-forward uses the unused next identity `0.1.0-beta.18`.
+- Public beta.16 and tag `v0.1.0-beta.16` are immutable, so the security candidate uses the unused
+  next identity `0.1.0-beta.17`.
 
 ## Constraints
 
@@ -69,8 +68,9 @@ passes primary macOS and physical Windows acceptance and receives separate final
 - Preserve Node.js 25.9.0 for the app and Node.js 22.19+ with zero runtime dependencies for the npm
   launcher. Add no dependencies unless unavoidable; none are planned.
 - Preserve public APIs and persisted data with additive versioned migrations/readers.
-- Publish only the explicitly authorized unsigned/ad-hoc beta.18 GitHub prerelease and npm
-  `candidate`; do not move `beta`/`latest`, sign/notarize, mutate hosted data, or finalize.
+- The user explicitly authorized exact-artifact beta.17 finalization followed by publication of the
+  next Pi/cache/delegation beta under `candidate`. Do not finalize the follow-on candidate,
+  sign/notarize, mutate hosted data, or widen any other release channel.
 
 ## Out of Scope
 
@@ -81,8 +81,8 @@ passes primary macOS and physical Windows acceptance and receives separate final
 - Gist/public sharing, remote automation, raw tool invocation over RPC, project creation through
   untrusted paths, or approval bypasses.
 - Linux ARM64 and Windows ARM64 as supported public release targets in this pass.
-- Stable publication, npm `beta`/`latest` movement, signed-update enablement, hosted rollout, or
-  finalization before primary macOS and physical Windows 11 x64 exact-artifact acceptance.
+- Stable publication, follow-on-candidate finalization, signed-update enablement, hosted rollout, or
+  any finalization without primary macOS and physical Windows 11 x64 exact-artifact acceptance.
 
 ## Reversibility
 
@@ -648,7 +648,7 @@ git diff --check
 
 ### Status
 
-`superseded`
+`in_progress`
 
 ### Objective
 
@@ -667,11 +667,11 @@ candidate artifacts while preserving unrelated local work and leaving the canoni
 - [x] Run the complete pinned source, release-readiness, packaged-Electron, macOS distribution, and
       native broker verification gates.
 - [x] Require protected Windows broker compilation in GitHub Actions.
-- [x] Push a release PR, merge only after required checks, tag the exact protected-main commit, and
+- [ ] Push a release PR, merge only after required checks, tag the exact protected-main commit, and
       verify the immutable draft inventory.
-- [x] Dispatch `publish-candidate`, approve the protected environment when requested, verify the
+- [ ] Dispatch `publish-candidate`, approve the protected environment when requested, verify the
       GitHub prerelease and npm `candidate`, and confirm `beta`/`latest` remain beta.16.
-- [x] Record exact SHA/tag/public integrity and leave the release checkout clean.
+- [ ] Record exact SHA/tag/workflow/public integrity and leave the checkout clean.
 
 ### Relevant Files
 
@@ -714,9 +714,9 @@ git status --short --branch
 - [x] Unrelated local work is recoverable from the documented preservation branch.
 - [x] All local gates pass under Node.js 25.9.0.
 - [x] Protected Windows builds verify the broker.
-- [x] `v0.1.0-beta.17`, GitHub prerelease, and npm `candidate` identify one exact artifact set.
-- [x] npm `beta` and `latest` remain `0.1.0-beta.16`.
-- [x] The canonical working directory is clean at handoff.
+- [ ] `v0.1.0-beta.17`, GitHub prerelease, and npm `candidate` identify one exact artifact set.
+- [ ] npm `beta` and `latest` remain `0.1.0-beta.16`.
+- [ ] The canonical working directory is clean at handoff.
 
 ### Validation Results
 
@@ -727,8 +727,7 @@ git status --short --branch
   policy checks.
 - Protected CI/native build: Windows 11 x64 portability passed in run `31444587426`, including all
   155 tests, launcher checks, Windows packaging, and distribution verification.
-- Candidate publication and four-platform anonymous verification passed; npm `candidate` resolved
-  to beta.17 while `beta`/`latest` remained beta.16.
+- Candidate publication and anonymous verification: not run.
 
 ### Findings / Notes
 
@@ -753,15 +752,11 @@ git status --short --branch
   `running` before the supervisor registered its pending lease. `TaskService` now counts starts
   from IPC entry through registration, and sign-out consults that complete state. CI must clear the
   corrected packaged check before merge.
-- Primary macOS exact-artifact acceptance passed enrollment, OS-encrypted storage, fresh profile,
-  live turn/streaming, refresh rotation, replay/tamper/key-binding rejection, and upgrade policy.
-  Hosted self-revocation could not confirm because beta.17 did not retry the Router's separate
-  revoke-purpose nonce challenge. Local encrypted cleanup still succeeded. Beta.17 is immutable,
-  remains unfinalized, and is superseded by the beta.18 security fix-forward below.
+- Physical Windows 11 downloaded-artifact acceptance and channel finalization remain out of scope.
 
 ---
 
-## Step J: Revoke-nonce security fix-forward beta.18
+## Step J: Publish the Pi follow-on candidate
 
 ### Status
 
@@ -769,48 +764,101 @@ git status --short --branch
 
 ### Objective
 
-Publish immutable beta.18 with the smallest exact fix for beta.17 hosted self-revocation, accept it
-on primary macOS and physical Windows 11 x64, and finalize security channels before any Pi/cache/
-delegation candidate is published.
+Apply the validated Pi 0.84.1, cache, and bounded delegation work to the exact beta.18 security
+source and publish it as immutable beta.19 under npm `candidate`, without moving public channels.
 
 ### Tasks
 
-- [x] Reproduce beta.17 against staging and prove that local encrypted cleanup succeeds while the
-      first `/v1/installation/revoke` request receives the required revoke-purpose nonce.
-- [x] Retry that exact signed revoke request once with a validated bounded nonce while preserving
-      body, access-token, installation-key, client-version, redirect, and cleanup bindings.
-- [x] Add focused regression coverage for the one-retry boundary and nonce-bearing second proof.
-- [x] Synchronize unused beta.18/`10018` release identity, documentation, and source provenance;
-      run all pinned Node.js 25.9.0 source, packaged Electron, and native macOS gates.
-- [ ] Merge through protected macOS, Ubuntu, and Windows CI; tag the exact protected-main SHA and
-      publish only GitHub/npm `candidate` through the protected workflow.
-- [ ] Repeat exact-artifact primary macOS and physical Windows acceptance, attach sanitized schema-1
-      evidence, finalize beta.18, remove `candidate`, and revoke temporary dist-tag access.
-- [ ] Rebase the preserved Pi/cache/delegation feature commit onto accepted main as beta.19 and stop
-      that follow-on release at `candidate`.
+- [x] Preserve the follow-on implementation as an independent commit.
+- [x] Reapply it to exact protected beta.18 source and synchronize unused beta.19 identity across
+      app, launcher, Forge, manifest, About metadata, docs, and provenance.
+- [x] Pass local Node.js 25.9.0 source/release gates and packaged Electron E2E.
+- [ ] Pass protected macOS/Linux/Windows CI and build the three exact native artifacts.
+- [ ] Publish GitHub and npm `candidate`, require all four anonymous public smokes, run focused Mac
+      and physical-Windows canaries, and stop before finalization.
+
+### Relevant Files
+
+- `package.json`, `packages/agent-launcher/`, Forge/release metadata, and provenance
+- `.github/workflows/`, release documentation, changelog, and this plan
+
+### Expected Changes
+
+- modify: next-beta identity, release documentation, provenance, and this plan
+- create: immutable tag, GitHub prerelease, native artifacts, and npm candidate through workflows
+- delete: no prior tag, asset, public channel, signing input, or user data
 
 ### Do Not Modify
 
-- Pi/cache/delegation implementation bytes, Router contracts or hosted state, beta.17 assets/tag,
-  public beta.16 channels before acceptance, signing policy, or unrelated local work
+- Router wire/auth/model/sponsor contracts or hosted state
+- npm `beta`/`latest`, which remain on beta.16
+- safeStorage, renderer isolation, approval, sandbox, or one-task defaults
+
+### Commands
+
+```bash
+npm ci
+npm audit --omit=dev --audit-level=moderate
+npm run audit:build
+npm run check
+npm run verify:release-readiness
+npm run test:e2e
+npm run make:mac
+npm run verify:dist
+```
 
 ### Acceptance Criteria
 
-- [ ] Exact beta.18 sign-out confirms hosted revocation after at most one bounded nonce retry and
-      always clears encrypted local state.
-- [ ] Beta.18 passes protected native inventory, four anonymous public smokes, and both physical
-      operator cohorts before `beta`/`latest` move.
-- [ ] The later Pi/cache/delegation beta.19 remains candidate-only and does not widen desktop
-      approvals, safeStorage, sandbox, sponsor, or one-task boundaries.
+- [x] Beta.18 remains the immutable security candidate baseline used by beta.19 source.
+- [ ] The next candidate has exactly three native ZIPs, launcher/SBOM/checksum provenance, and four
+      passing anonymous platform smokes.
+- [ ] Public `beta`/`latest` remain beta.16 while beta.19 is only `candidate`.
+- [ ] Pi startup, cache modes, delegated lifecycle, safeStorage, sandbox, approvals, and sponsor
+      isolation pass exact-artifact Mac and physical-Windows canaries.
+
+### Validation Results
+
+- local Node.js 25.9.0 `npm run check`: passed (163 unit tests, 13 integration tests, 47 launcher
+  and release-policy tests)
+- local Node.js 25.9.0 `npm run verify:release-readiness`: passed
+- local packaged Electron E2E: passed (2 tests)
+- protected tag, native builds, and candidate publication: pending GitHub authentication
+- anonymous and physical candidate canaries: not run
 
 ### Findings / Notes
 
-- The Router deliberately separates `access` and `revoke` nonce contexts. Beta.17 correctly handled
-  access-purpose challenges through `AdRouterClient` but its direct sign-out request omitted the
-  equivalent single retry for the revoke purpose.
-- Node.js 25.9.0 gates passed: lint, typecheck, 157 unit tests, 13 integration tests, 47 launcher
-  and release-policy tests, public-boundary/source-parity checks, release readiness, two packaged
-  Electron E2E tests, universal macOS packaging, and distribution verification.
+- npm `candidate` currently points to beta.18; public `beta`/`latest` remain beta.16.
+- The credential-free schema-3 candidate continues to require protected native builds and anonymous
+  registry smokes before the workflow completes.
+
+---
+
+## Step K: Final verification and cleanup
+
+### Status
+
+`todo`
+
+### Objective
+
+Record exact local, candidate, public, and hosted identities and leave the release checkout clean.
+
+### Tasks
+
+- [ ] Re-query npm, GitHub, staging health, and the public model catalog.
+- [ ] Record source SHAs, tags, workflow runs, integrity, acceptance limits, and rollback points.
+- [ ] Review final diffs/status and leave the release checkout clean at the immutable candidate.
+
+### Acceptance Criteria
+
+- [ ] No unrecorded channel, hosted service, database, traffic, signing, or release mutation occurred.
+- [ ] Any post-tag defect is assigned a higher immutable beta rather than replacing an artifact.
+
+### Validation Results
+
+- final remote parity verification: not run
+- `git diff --check`: not run
+- `git status --short --branch`: not run
 
 ---
 
@@ -841,4 +889,5 @@ delegation candidate is published.
 | 2026-08-07 | Support only exact-digest project Markdown skills/prompts. | CLI's global/package/script-capable skill surface is outside the Agent's trust and sandbox boundaries. | Skills use metadata-first on-demand loading; prompts require an explicit insert and neither can add executable behavior. |
 | 2026-08-10 | Fix forward the desktop UI work as beta.16 candidate only. | Beta.15 is accepted and immutable; UI changes require a new artifact while public channels must remain stable during candidate testing. | Publish a new GitHub prerelease and npm `candidate`; defer `beta`/`latest` movement and physical acceptance. |
 | 2026-08-11 | Extract a security-only beta.17 candidate from current remote main and preserve mixed local work separately. | Publishing the aggregate dirty tree would bundle unrelated work and would not be reproducible. | The candidate remains narrow while all prior local bytes stay recoverable and the checkout can finish clean. |
-| 2026-08-11 | Fix forward beta.17 as beta.18 after exact-artifact revocation failed. | Tags, npm versions, and release assets are immutable; the revoke-purpose nonce retry is security acceptance work and cannot be folded into the Pi candidate. | Beta.18 becomes the next security candidate and the preserved Pi/cache/delegation release moves to beta.19. |
+| 2026-08-11 | Finalize beta.17 before publishing the Pi/cache/delegation candidate. | Security must reach accepted public channels before the broader runtime candidate can replace the temporary candidate alias. | Beta.17 becomes public first; beta.18 or the next unused version stops at `candidate`. |
+| 2026-08-12 | Publish the Pi follow-on only to `candidate`. | Public `beta`/`latest` require a separately verified live Windows run and explicit authorization. | Beta.19 may replace the temporary candidate alias while beta.16 remains public. |

@@ -174,6 +174,6 @@ export const operationCapabilityAllowed = (
   if (capability.startsWith('dependency.')) return policy.dependencyChanges;
   if (capability.startsWith('git.')) return policy.gitWrites;
   if (capability === 'network.fetch') return policy.networkFetch;
-  if (capability === 'delegation.start') return policy.delegation;
+  if (capability.startsWith('delegation.')) return policy.delegation;
   return false;
 };
