@@ -517,7 +517,7 @@ describe('InstallationAuthManager', () => {
         headers: { 'content-type': 'application/json' },
       });
     });
-    const manager = new InstallationAuthManager(store, '0.1.0-beta.18', { fetchFn });
+    const manager = new InstallationAuthManager(store, '0.1.0-beta.19', { fetchFn });
 
     await expect(manager.signOut()).resolves.toMatchObject({
       remoteRevocationConfirmed: true,

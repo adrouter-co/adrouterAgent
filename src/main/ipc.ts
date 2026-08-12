@@ -29,7 +29,7 @@ import type { RuntimeSupervisor } from './runtime-supervisor';
 import type { SessionService } from './session-service';
 import type { TaskService } from './task-service';
 
-const PUBLIC_RELEASE_VERSION = '0.1.0-beta.18';
+const PUBLIC_RELEASE_VERSION = '0.1.0-beta.19';
 
 interface Subscription {
   id: string;

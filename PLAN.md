@@ -756,28 +756,26 @@ git status --short --branch
 
 ---
 
-## Step J: Finalize beta.17 and publish the Pi follow-on candidate
+## Step J: Publish the Pi follow-on candidate
 
 ### Status
 
-`todo`
+`in_progress`
 
 ### Objective
 
-Finalize the exact security-only beta.17 release, then publish the already validated Pi 0.84.1,
-cache, and bounded delegation work as beta.18 or the next unused immutable candidate.
+Apply the validated Pi 0.84.1, cache, and bounded delegation work to the exact beta.18 security
+source and publish it as immutable beta.19 under npm `candidate`, without moving public channels.
 
 ### Tasks
 
-- [ ] Commit the current follow-on work on a dedicated feature branch without changing PR #24.
-- [ ] Merge, tag, publish, accept on primary macOS and physical Windows, and finalize beta.17 through
-      the protected release workflows with no acceptance override.
-- [ ] Rebase the follow-on feature commit onto accepted protected `main` and synchronize the next
-      beta identity across app, launcher, Forge, manifest, About metadata, docs, and provenance.
-- [ ] Pass clean Node.js 25.9.0 audits, source/release gates, packaged Electron E2E, native macOS
-      verification, and protected macOS/Linux/Windows CI.
+- [x] Preserve the follow-on implementation as an independent commit.
+- [x] Reapply it to exact protected beta.18 source and synchronize unused beta.19 identity across
+      app, launcher, Forge, manifest, About metadata, docs, and provenance.
+- [x] Pass local Node.js 25.9.0 source/release gates and packaged Electron E2E.
+- [ ] Pass protected macOS/Linux/Windows CI and build the three exact native artifacts.
 - [ ] Publish GitHub and npm `candidate`, require all four anonymous public smokes, run focused Mac
-      and physical-Windows canaries, and stop before follow-on finalization.
+      and physical-Windows canaries, and stop before finalization.
 
 ### Relevant Files
 
@@ -793,7 +791,7 @@ cache, and bounded delegation work as beta.18 or the next unused immutable candi
 ### Do Not Modify
 
 - Router wire/auth/model/sponsor contracts or hosted state
-- npm `beta`/`latest` after beta.17 security finalization
+- npm `beta`/`latest`, which remain on beta.16
 - safeStorage, renderer isolation, approval, sandbox, or one-task defaults
 
 ### Commands
@@ -811,23 +809,27 @@ npm run verify:dist
 
 ### Acceptance Criteria
 
-- [ ] Beta.17 is the exact accepted `beta`/`latest` security release and has no candidate alias.
+- [x] Beta.18 remains the immutable security candidate baseline used by beta.19 source.
 - [ ] The next candidate has exactly three native ZIPs, launcher/SBOM/checksum provenance, and four
       passing anonymous platform smokes.
-- [ ] Public `beta`/`latest` remain beta.17 while the follow-on version is only `candidate`.
+- [ ] Public `beta`/`latest` remain beta.16 while beta.19 is only `candidate`.
 - [ ] Pi startup, cache modes, delegated lifecycle, safeStorage, sandbox, approvals, and sponsor
       isolation pass exact-artifact Mac and physical-Windows canaries.
 
 ### Validation Results
 
-- protected security release and acceptance: not run
-- next-candidate source/native gates: not run
+- local Node.js 25.9.0 `npm run check`: passed (163 unit tests, 13 integration tests, 47 launcher
+  and release-policy tests)
+- local Node.js 25.9.0 `npm run verify:release-readiness`: passed
+- local packaged Electron E2E: passed (2 tests)
+- protected tag, native builds, and candidate publication: pending GitHub authentication
 - anonymous and physical candidate canaries: not run
 
 ### Findings / Notes
 
-- PR #24 was ready with protected checks green at authorization time; remote state must be re-queried.
-- The credential-free schema-3 release continues to use schema-1 acceptance for beta.17.
+- npm `candidate` currently points to beta.18; public `beta`/`latest` remain beta.16.
+- The credential-free schema-3 candidate continues to require protected native builds and anonymous
+  registry smokes before the workflow completes.
 
 ---
 
@@ -888,3 +890,4 @@ Record exact local, candidate, public, and hosted identities and leave the relea
 | 2026-08-10 | Fix forward the desktop UI work as beta.16 candidate only. | Beta.15 is accepted and immutable; UI changes require a new artifact while public channels must remain stable during candidate testing. | Publish a new GitHub prerelease and npm `candidate`; defer `beta`/`latest` movement and physical acceptance. |
 | 2026-08-11 | Extract a security-only beta.17 candidate from current remote main and preserve mixed local work separately. | Publishing the aggregate dirty tree would bundle unrelated work and would not be reproducible. | The candidate remains narrow while all prior local bytes stay recoverable and the checkout can finish clean. |
 | 2026-08-11 | Finalize beta.17 before publishing the Pi/cache/delegation candidate. | Security must reach accepted public channels before the broader runtime candidate can replace the temporary candidate alias. | Beta.17 becomes public first; beta.18 or the next unused version stops at `candidate`. |
+| 2026-08-12 | Publish the Pi follow-on only to `candidate`. | Public `beta`/`latest` require a separately verified live Windows run and explicit authorization. | Beta.19 may replace the temporary candidate alias while beta.16 remains public. |

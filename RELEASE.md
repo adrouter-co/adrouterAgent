@@ -1,6 +1,6 @@
 # Credential-free beta release procedure
 
-This runbook owns the unsigned/ad-hoc beta candidate path used by `0.1.0-beta.18`. It does not
+This runbook owns the unsigned/ad-hoc beta candidate path used by `0.1.0-beta.19`. It does not
 authorize a stable release or movement of npm `beta`/`latest`. Candidate publication must use the
 immutable tag, GitHub-built artifacts, GitHub-before-npm ordering, and npm trusted publishing.
 
