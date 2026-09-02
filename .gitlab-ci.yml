@@ -37,7 +37,12 @@ linux_x64:
     - npm run make:linux
     - npm run verify:dist:linux
     - chown --recursive node:node "$CI_PROJECT_DIR"
-    - runuser --user node -- env NODE_OPTIONS=--max-old-space-size=4096 xvfb-run --auto-servernum npm run test:e2e
+    - install --directory --owner=node --group=node "/tmp/adrouter-agent-e2e-$CI_JOB_ID"
+    - >-
+      runuser --user node -- env
+      NODE_OPTIONS=--max-old-space-size=4096
+      TMPDIR="/tmp/adrouter-agent-e2e-$CI_JOB_ID"
+      xvfb-run --auto-servernum npm run test:e2e
     - git diff --check
 
 macos_arm64:
