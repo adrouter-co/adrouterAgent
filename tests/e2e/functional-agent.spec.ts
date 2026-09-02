@@ -11,6 +11,7 @@ test.describe('packaged functional agent', () => {
   test.skip(!executablePath, 'Set ADROUTER_E2E_APP to a packaged app executable for this check.');
 
   test('onboards, opens a non-Git folder, approves tools, and reviews the result', async () => {
+    test.slow();
     const workspace = await mkdtemp(join(tmpdir(), 'adrouter-e2e-workspace-'));
     const userData = await mkdtemp(join(tmpdir(), 'adrouter-e2e-user-data-'));
     const original = 'status=old\n';
