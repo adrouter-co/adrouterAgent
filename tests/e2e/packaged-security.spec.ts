@@ -35,7 +35,7 @@ test.describe('packaged Electron security', () => {
       ).resolves.toBe(false);
       await expect(page.evaluate(() => window.adrouter.app.getInfo())).resolves.toMatchObject({
         name: 'AdRouter Agent',
-        platform: 'darwin',
+        platform: process.platform,
       });
       await expect(
         page.evaluate(
