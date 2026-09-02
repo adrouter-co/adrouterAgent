@@ -41,12 +41,35 @@ function fixture() {
   };
 }
 
-test('allows only the reviewed dev-only Forge advisory chain', () => {
+test('allows only reviewed dev-only build advisory chains', () => {
   const { report, lock } = fixture();
   assert.deepEqual(evaluateBuildAudit(report, lock).checked.sort(), [
     'brace-expansion',
     'minimatch',
   ]);
+});
+
+test('allows the unpatched extract-zip advisory only on the dev-only packager path', () => {
+  const { report, lock } = fixture();
+  report.vulnerabilities['extract-zip'] = {
+    name: 'extract-zip',
+    severity: 'high',
+    via: [
+      {
+        source: 1139346,
+        name: 'extract-zip',
+        dependency: 'extract-zip',
+        url: 'https://github.com/advisories/GHSA-jmr9-qjv8-65gv',
+        severity: 'high',
+      },
+    ],
+    nodes: ['node_modules/extract-zip'],
+  };
+  lock.packages['node_modules/extract-zip'] = { version: '2.0.1', dev: true };
+
+  assert.ok(evaluateBuildAudit(report, lock).checked.includes('extract-zip'));
+  lock.packages['node_modules/extract-zip'].dev = false;
+  assert.throws(() => evaluateBuildAudit(report, lock), /not exclusively a development dependency/);
 });
 
 test('rejects an unapproved high advisory', () => {

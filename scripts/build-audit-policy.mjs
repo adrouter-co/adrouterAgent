@@ -1,6 +1,9 @@
 const ALLOWED_ADVISORY_URLS = new Set([
   'https://github.com/advisories/GHSA-mh99-v99m-4gvg',
   'https://github.com/advisories/GHSA-rgw5-rvv9-x895',
+  // extract-zip has no patched release. Electron Forge reaches it only through the
+  // dev-only packager path, which consumes the pinned upstream Electron archive.
+  'https://github.com/advisories/GHSA-jmr9-qjv8-65gv',
 ]);
 const PRODUCTION_BRACE_PATH = 'node_modules/brace-expansion';
 const PRODUCTION_UNDICI_PATH = 'node_modules/@earendil-works/pi-coding-agent/node_modules/undici';
