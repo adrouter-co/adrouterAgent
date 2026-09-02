@@ -1,0 +1,85 @@
+stages:
+  - history_scan
+  - validate
+  - release_hold
+
+default:
+  interruptible: true
+
+history_secret_scan:
+  image: alpine:3.22
+  stage: history_scan
+  variables:
+    GIT_DEPTH: "0"
+  before_script:
+    - apk add --no-cache curl git tar
+  script:
+    - curl --fail --location --silent --show-error --output /tmp/gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+    - echo '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz' | sha256sum --check --strict
+    - tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+    - /tmp/gitleaks git --no-banner --redact --log-opts="--all" .
+
+linux_x64:
+  image: node:25.9.0-bookworm
+  stage: validate
+  script:
+    - npm ci --no-audit --no-fund
+    - npm run lint
+    - npm run typecheck
+    - npm test
+    - npm run test:launcher
+    - npm run make:linux
+    - npm run verify:dist:linux
+    - git diff --check
+
+macos_arm64:
+  stage: validate
+  tags:
+    - saas-macos-large-m2pro
+  image: macos-15-xcode-16
+  variables:
+    NODE_ARCHIVE: "node-v25.9.0-darwin-arm64.tar.gz"
+    NODE_SHA256: "e479f3c469d3d9303a44f00a8ea37a3788395d171bb8059c48a4bbbd2e371b59"
+  before_script:
+    - curl --fail --show-error --silent --location --proto '=https' --tlsv1.2 "https://nodejs.org/dist/v25.9.0/$NODE_ARCHIVE" --output "$CI_PROJECT_DIR/$NODE_ARCHIVE"
+    - printf '%s  %s\n' "$NODE_SHA256" "$CI_PROJECT_DIR/$NODE_ARCHIVE" | shasum -a 256 --check
+    - mkdir -p "$CI_PROJECT_DIR/.node"
+    - tar -xzf "$CI_PROJECT_DIR/$NODE_ARCHIVE" -C "$CI_PROJECT_DIR/.node" --strip-components=1
+    - export PATH="$CI_PROJECT_DIR/.node/bin:$PATH"
+  script:
+    - export PATH="$CI_PROJECT_DIR/.node/bin:$PATH"
+    - test "$(node --version)" = "v25.9.0"
+    - npm ci --no-audit --no-fund
+    - npm run audit:build
+    - npm run check
+    - npm run check:launcher-package
+    - npm run test:e2e
+    - git diff --check
+
+windows_x64:
+  stage: validate
+  tags:
+    - saas-windows-medium-amd64
+  before_script:
+    - choco install nodejs --version=25.9.0 --yes --no-progress
+    - $env:Path = "C:\Program Files\nodejs;$env:Path"
+  script:
+    - $env:Path = "C:\Program Files\nodejs;$env:Path"
+    - if ((node --version) -ne "v25.9.0") { throw "Node 25.9.0 is required" }
+    - npm ci --no-audit --no-fund
+    - npm run lint
+    - npm run typecheck
+    - npm test
+    - npm run test:launcher
+    - npm run make:windows
+    - npm run verify:dist:windows
+    - git diff --check
+
+publishing_disabled:
+  image: alpine:3.22
+  stage: release_hold
+  rules:
+    - if: '$CI_COMMIT_TAG'
+  script:
+    - echo "Desktop publishing is held until native assets and signed update metadata move to releases.adrouter.co."
+    - exit 1
