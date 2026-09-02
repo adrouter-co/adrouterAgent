@@ -209,7 +209,8 @@ test.describe('packaged functional agent', () => {
       await expect(page.getByRole('heading', { name: 'Edit file' })).toBeVisible();
       await page.getByRole('button', { name: 'Allow once' }).click();
       await expect.poll(() => readFile(join(workspace, 'status.txt'), 'utf8')).toBe('status=new\n');
-      await page.getByRole('button', { name: 'Allow once' }).click();
+      await expect(approvalCard.getByRole('heading', { name: 'Run command' })).toBeVisible();
+      await approvalCard.getByRole('button', { name: 'Allow once' }).click();
       await expect(
         page.getByText('The approved edit and verification command completed.')
       ).toBeVisible();
