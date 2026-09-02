@@ -760,7 +760,7 @@ git status --short --branch
 
 ### Status
 
-`in_progress`
+`complete`
 
 ### Objective
 
@@ -773,9 +773,9 @@ source and publish it as immutable beta.19 under npm `candidate`, without moving
 - [x] Reapply it to exact protected beta.18 source and synchronize unused beta.19 identity across
       app, launcher, Forge, manifest, About metadata, docs, and provenance.
 - [x] Pass local Node.js 25.9.0 source/release gates and packaged Electron E2E.
-- [ ] Pass protected macOS/Linux/Windows CI and build the three exact native artifacts.
-- [ ] Publish GitHub and npm `candidate`, require all four anonymous public smokes, run focused Mac
-      and physical-Windows canaries, and stop before finalization.
+- [x] Pass protected macOS/Linux/Windows CI and build the three exact native artifacts.
+- [x] Publish GitHub and npm `candidate`, require all four anonymous public smokes, and stop before
+      finalization. Focused physical-device acceptance remains a separate open gate.
 
 ### Relevant Files
 
@@ -810,9 +810,9 @@ npm run verify:dist
 ### Acceptance Criteria
 
 - [x] Beta.18 remains the immutable security candidate baseline used by beta.19 source.
-- [ ] The next candidate has exactly three native ZIPs, launcher/SBOM/checksum provenance, and four
+- [x] The next candidate has exactly three native ZIPs, launcher/SBOM/checksum provenance, and four
       passing anonymous platform smokes.
-- [ ] Public `beta`/`latest` remain beta.16 while beta.19 is only `candidate`.
+- [x] Public `beta`/`latest` remain beta.16 while beta.19 is only `candidate`.
 - [ ] Pi startup, cache modes, delegated lifecycle, safeStorage, sandbox, approvals, and sponsor
       isolation pass exact-artifact Mac and physical-Windows canaries.
 
@@ -822,14 +822,19 @@ npm run verify:dist
   and release-policy tests)
 - local Node.js 25.9.0 `npm run verify:release-readiness`: passed
 - local packaged Electron E2E: passed (2 tests)
-- protected tag, native builds, and candidate publication: pending GitHub authentication
-- anonymous and physical candidate canaries: not run
+- tag staging/attestation: passed on attempt 2; run `31612190782`
+- candidate publication and macOS arm64/x64, Linux x64, and Windows x64 anonymous smokes: passed;
+  run `31614556759`
+- npm `candidate=0.1.0-beta.19`; exact integrity
+  `sha512-lXsqUw9fRkGabRqBKFEAyIXPF3aYKpyywUbNvCTE7r2ktwEWm6VQQUhkG5MzNOEICmUKcJLs1nLTh+OvYsDl7A==`
+- focused physical enrollment/approval/sandbox/revoke acceptance: not run
 
 ### Findings / Notes
 
-- npm `candidate` currently points to beta.18; public `beta`/`latest` remain beta.16.
-- The credential-free schema-3 candidate continues to require protected native builds and anonymous
-  registry smokes before the workflow completes.
+- Only the exact beta.19 tag was admitted to the protected macOS-release and npm-publish
+  environments. A default-`main` dispatch was rejected before steps; redispatch from the immutable
+  tag passed without broadening policy.
+- Public `beta`/`latest` remain beta.16. Candidate finalization was not dispatched.
 
 ---
 
@@ -837,7 +842,7 @@ npm run verify:dist
 
 ### Status
 
-`todo`
+`complete`
 
 ### Objective
 
@@ -845,20 +850,21 @@ Record exact local, candidate, public, and hosted identities and leave the relea
 
 ### Tasks
 
-- [ ] Re-query npm, GitHub, staging health, and the public model catalog.
-- [ ] Record source SHAs, tags, workflow runs, integrity, acceptance limits, and rollback points.
-- [ ] Review final diffs/status and leave the release checkout clean at the immutable candidate.
+- [x] Re-query npm and the completed GitHub workflow/tag evidence.
+- [x] Record source SHA, tag, workflow runs, integrity, acceptance limits, and rollback point.
+- [x] Review release-input status; candidate source was clean before the later session-audit-only
+      `AGENTS.md` and `PLAN.md` updates.
 
 ### Acceptance Criteria
 
-- [ ] No unrecorded channel, hosted service, database, traffic, signing, or release mutation occurred.
-- [ ] Any post-tag defect is assigned a higher immutable beta rather than replacing an artifact.
+- [x] No unrecorded channel, hosted service, database, traffic, signing, or release mutation occurred.
+- [x] Any post-tag defect is assigned a higher immutable beta rather than replacing an artifact.
 
 ### Validation Results
 
-- final remote parity verification: not run
-- `git diff --check`: not run
-- `git status --short --branch`: not run
+- npm aliases and candidate integrity were reverified on 2026-08-13 and remain unchanged.
+- Candidate-source status was clean at release handoff; the current working-tree changes are only
+  the intentional governance/audit updates to `AGENTS.md` and `PLAN.md`.
 
 ---
 
@@ -891,3 +897,4 @@ Record exact local, candidate, public, and hosted identities and leave the relea
 | 2026-08-11 | Extract a security-only beta.17 candidate from current remote main and preserve mixed local work separately. | Publishing the aggregate dirty tree would bundle unrelated work and would not be reproducible. | The candidate remains narrow while all prior local bytes stay recoverable and the checkout can finish clean. |
 | 2026-08-11 | Finalize beta.17 before publishing the Pi/cache/delegation candidate. | Security must reach accepted public channels before the broader runtime candidate can replace the temporary candidate alias. | Beta.17 becomes public first; beta.18 or the next unused version stops at `candidate`. |
 | 2026-08-12 | Publish the Pi follow-on only to `candidate`. | Public `beta`/`latest` require a separately verified live Windows run and explicit authorization. | Beta.19 may replace the temporary candidate alias while beta.16 remains public. |
+| 2026-08-13 | Complete beta.19 candidate publication from the exact allowed tag. | Protected native builds and four anonymous public installs passed without weakening environment policy. | Beta.19 is on `candidate`; beta.16 remains on `beta`/`latest`, with physical acceptance still open. |

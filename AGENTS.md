@@ -72,19 +72,18 @@ The checked-in `packages/agent-launcher/release-manifest.json` uses `UNBUILT` so
 until protected native workflows fill hashes. Do not hand-edit them or use them to judge already
 published GitHub assets.
 
-## Current candidate and release policy
+## Release-state source and policy
 
-Remote state was verified on 2026-08-01:
+Do not keep volatile versions or channel aliases in this governance file. Read
+`../../docs/state.md` and the newest workspace parity report, then re-query npm and GitHub before
+making a current claim. Keep the local checkout, protected source commit, immutable tag, native
+assets, npm `candidate`, public `beta`/`latest`, and installed application distinct. A protected
+matrix or anonymous launcher smoke does not replace physical enrollment, approval, sandbox,
+revocation, or cleanup acceptance.
 
-- source/tag and npm `candidate`: `0.1.0-beta.12` at commit
-  `443998f63a4a56b6647185b41ae102934b7fcc59`;
-- GitHub beta.12: published prerelease;
-- public npm `beta` and `latest`: still `0.1.0-beta.7`.
-
-Re-query before repeating this state. Beta.12 remains a candidate until the documented primary Mac
-and physical Windows 11 exact-artifact acceptance is complete and public channels are deliberately
-promoted. The release targets macOS 12+ universal, Ubuntu Desktop 24.04 x64, and Windows 11 x64;
-the beta is unsigned/not notarized and has no stable or auto-update channel.
+The release targets macOS 12+ universal, Ubuntu Desktop 24.04 x64, and Windows 11 x64. Treat
+signing/notarization and stable/auto-update channel state as volatile; verify current release
+evidence before making either claim.
 
 - Keep immutable version, `v<version>` GitHub tag, npm `candidate`, final `beta`/`latest`, native
   assets, and source commit distinct.
@@ -94,6 +93,13 @@ the beta is unsigned/not notarized and has no stable or auto-update channel.
   moved to stable.
 - Build, tag, publish, and promote only from a clean committed tree. Tags and package versions are
   immutable; fix forward with a higher beta.
+- Pass the same exact immutable tag as both the protected workflow input and dispatch ref.
+  Exact-tag environment allowlists may reject a default-branch dispatch before any step runs;
+  redispatch from the tag and do not broaden the policy.
+- Treat candidate publication and finalization as separate authorization boundaries. Registry and
+  anonymous-install success does not authorize moving `beta`/`latest` or removing `candidate`.
+- Resume after npm propagation only when the already-published launcher has the exact expected
+  integrity and `candidate` identifies that version; stop on any mismatch.
 - Publishing, tagging, dist-tag movement, release edits, protected approvals, signing/notarization,
   and remote-secret changes require explicit user authorization. Authentication belongs in
   interactive CLI/browser or protected environments, never chat or command output.
