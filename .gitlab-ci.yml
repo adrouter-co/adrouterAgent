@@ -43,14 +43,15 @@ macos_arm64:
   variables:
     NODE_ARCHIVE: "node-v25.9.0-darwin-arm64.tar.gz"
     NODE_SHA256: "e479f3c469d3d9303a44f00a8ea37a3788395d171bb8059c48a4bbbd2e371b59"
+    NODE_ROOT: "/tmp/adrouter-node-$CI_JOB_ID"
   before_script:
-    - curl --fail --show-error --silent --location --proto '=https' --tlsv1.2 "https://nodejs.org/dist/v25.9.0/$NODE_ARCHIVE" --output "$CI_PROJECT_DIR/$NODE_ARCHIVE"
-    - printf '%s  %s\n' "$NODE_SHA256" "$CI_PROJECT_DIR/$NODE_ARCHIVE" | shasum -a 256 --check
-    - mkdir -p "$CI_PROJECT_DIR/.node"
-    - tar -xzf "$CI_PROJECT_DIR/$NODE_ARCHIVE" -C "$CI_PROJECT_DIR/.node" --strip-components=1
-    - export PATH="$CI_PROJECT_DIR/.node/bin:$PATH"
+    - curl --fail --show-error --silent --location --proto '=https' --tlsv1.2 "https://nodejs.org/dist/v25.9.0/$NODE_ARCHIVE" --output "/tmp/$NODE_ARCHIVE"
+    - printf '%s  %s\n' "$NODE_SHA256" "/tmp/$NODE_ARCHIVE" | shasum -a 256 --check
+    - mkdir -p "$NODE_ROOT"
+    - tar -xzf "/tmp/$NODE_ARCHIVE" -C "$NODE_ROOT" --strip-components=1
+    - export PATH="$NODE_ROOT/bin:$PATH"
   script:
-    - export PATH="$CI_PROJECT_DIR/.node/bin:$PATH"
+    - export PATH="$NODE_ROOT/bin:$PATH"
     - test "$(node --version)" = "v25.9.0"
     - npm ci --no-audit --no-fund
     - npm run audit:build
