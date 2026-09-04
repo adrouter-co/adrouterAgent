@@ -16,3 +16,9 @@ must remain disabled in the exported application.
 
 `STAGING_VERIFIED — live acceptance pending owner testing` requires all required CI jobs and
 artifact/source/checksum verification. It does not assert deployment or live acceptance.
+
+The migration validation found GHSA-jmr9-qjv8-65gv in Forge's transitive `extract-zip`.
+Packager now resolves Electron's maintained `@electron-internal/extract-zip@1.0.5` through a
+scoped npm override; Electron's existing internal extractor is pinned to the same version.
+The regression test exercises Packager's real CommonJS import, valid extraction, and rejection
+of an escaping ZIP symlink. The audit policy and public app/launcher versions are unchanged.
