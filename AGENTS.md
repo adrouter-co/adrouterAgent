@@ -3,7 +3,7 @@
 ## Scope and repository boundary
 
 This independent repository is the canonical Electron desktop Agent and public npm launcher. Its
-GitHub repository is `adrouter/adrouterAgent`; do not combine its changes, lockfile, commits, or
+GitHub repository is `adrouter-co/adrouterAgent`; do not combine its changes, lockfile, commits, or
 release operations with sibling release projects.
 
 Before changing product or release behavior, read `README.md`, `PLAN.md`, `SECURITY.md`,

@@ -28,13 +28,13 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/adrouter/adrouterAgent.git",
+    "url": "git+https://github.com/adrouter-co/adrouterAgent.git",
     "directory": "packages/agent-launcher"
   },
   "bugs": {
-    "url": "https://github.com/adrouter/adrouterAgent/issues"
+    "url": "https://github.com/adrouter-co/adrouterAgent/issues"
   },
-  "homepage": "https://github.com/adrouter/adrouterAgent#readme",
+  "homepage": "https://github.com/adrouter-co/adrouterAgent#readme",
   "publishConfig": {
     "access": "public",
     "provenance": true

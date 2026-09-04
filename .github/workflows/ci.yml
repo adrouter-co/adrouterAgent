@@ -1,6 +1,7 @@
 name: ci
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [main]
@@ -33,6 +34,21 @@ jobs:
       - run: npm run test:e2e
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+      - name: Build normal credential-free universal application
+        run: npm run make:mac
+        env:
+          ADROUTER_E2E_BUILD: '0'
+          ADROUTER_CREDENTIAL_FREE_BETA: '1'
+          NODE_OPTIONS: --max-old-space-size=4096
+      - run: npm run verify:dist
+      - name: Record tested artifact checksums
+        run: node scripts/staging-manifest.mjs out/make/zip/darwin/universal
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: staging-${{ github.sha }}-darwin-universal
+          path: out/make/zip/darwin/universal/
+          if-no-files-found: error
+          retention-days: 7
       - run: git diff --check
 
   cross-platform:
@@ -69,3 +85,12 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=4096
       - run: npm run ${{ matrix.verify }}
       - run: git diff --check
+
+      - name: Record tested artifact checksums
+        run: node scripts/staging-manifest.mjs out/make/zip
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: staging-${{ github.sha }}-${{ runner.os }}-x64
+          path: out/make/zip/
+          if-no-files-found: error
+          retention-days: 7

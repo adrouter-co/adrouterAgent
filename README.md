@@ -105,6 +105,8 @@ Repeat the install command for the channel you follow:
 
 ```sh
 # Accepted prereleases
+
+Source migration destination: [adrouter-co/adrouterAgent](https://github.com/adrouter-co/adrouterAgent). GitLab remains canonical until the reviewed Operations cutover. Release and deployment recovery are separate from this source migration.
 npm install --global @adrouter/agent@beta
 
 # Current recommended release
