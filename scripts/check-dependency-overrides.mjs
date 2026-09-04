@@ -17,7 +17,7 @@ const expected = new Map([
 const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
 const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
 const securityPins = new Map([
-  ['fast-uri', '3.1.5'],
+  ['fast-uri', '3.1.6'],
   ['tar', '7.5.22'],
   ['tmp', '0.2.7'],
 ]);

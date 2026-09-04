@@ -22,3 +22,7 @@ Packager now resolves Electron's maintained `@electron-internal/extract-zip@1.0.
 scoped npm override; Electron's existing internal extractor is pinned to the same version.
 The regression test exercises Packager's real CommonJS import, valid extraction, and rejection
 of an escaping ZIP symlink. The audit policy and public app/launcher versions are unchanged.
+
+The same gate identified four high-severity `fast-uri` advisories fixed by 3.1.6. The exact
+security override and physical-install assertion now require 3.1.6. No audit exceptions or
+severity thresholds were added or relaxed.
